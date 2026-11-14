@@ -106,9 +106,11 @@ for Jira, Confluence and Bitbucket Cloud, with three intentional differences:
 
 ## Contributing
 
-Contributions are welcome. `cargo test` and `cargo clippy` should pass. Each
-product lives in its own module (`src/jira.rs`, `src/confluence.rs`,
-`src/bitbucket.rs`); the twg-shaped command tree is in `src/main.rs`.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+module layout, the "adding a command" checklist and conventions, and
+[AGENTS.md](AGENTS.md) for a condensed version aimed at coding agents. Each
+product's API calls live in `src/<product>.rs`; its twg-shaped commands live in
+`src/cli/<product>.rs`.
 
 ### Testing
 

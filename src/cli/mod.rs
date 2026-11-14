@@ -1,0 +1,292 @@
+//! The `atlx` command line: clap definitions and dispatch.
+//!
+//! Each product keeps its clap enums and dispatch in its own module
+//! (`jira`, `confluence`, `bitbucket`); the API calls they make live in the
+//! crate-level product modules (`crate::jira`, ...).
+
+mod api;
+mod auth;
+mod bitbucket;
+mod confluence;
+mod doctor;
+mod jira;
+mod search;
+mod user;
+mod util;
+
+use crate::config::{self, Config};
+use crate::output::{self, Format};
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use serde_json::Value;
+use std::io::IsTerminal;
+
+/// Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud.
+///
+/// Commands and flags follow Atlassian's `twg` CLI, so `twg jira workitem get
+/// PROJ-1 --comments` becomes `atlx jira workitem get PROJ-1 --comments`.
+#[derive(Parser)]
+#[command(name = "atlx", version)]
+pub struct Cli {
+    /// Output format [default: text on a terminal, json when piped]
+    #[arg(short, long, global = true, value_enum, env = "ATLX_OUTPUT")]
+    output: Option<Format>,
+    /// Atlassian site prefix or hostname (e.g. acme or acme.atlassian.net)
+    #[arg(short, long, global = true)]
+    site: Option<String>,
+    /// Atlassian account email for basic auth
+    #[arg(short, long, global = true)]
+    user: Option<String>,
+    /// Per-request HTTP timeout in milliseconds
+    #[arg(long, global = true)]
+    timeout_ms: Option<u64>,
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once per run
+enum Cmd {
+    /// Save credentials (site, email, API token)
+    Login(auth::LoginArgs),
+    /// Delete saved credentials
+    Logout,
+    /// Show the authenticated user
+    Whoami,
+    /// Check config, permissions, and service connectivity (atlx extra)
+    Doctor {
+        /// Fail on warnings or unconfigured checks
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Optional setup: Bitbucket token, default site
+    Setup {
+        #[command(subcommand)]
+        cmd: auth::SetupCmd,
+    },
+    /// Jira work items, metadata, boards and sprints
+    Jira {
+        #[command(subcommand)]
+        cmd: jira::JiraCmd,
+    },
+    /// Atlassian users
+    User {
+        #[command(subcommand)]
+        cmd: user::UserCmd,
+    },
+    /// Confluence search, content and spaces
+    Confluence {
+        #[command(subcommand)]
+        cmd: confluence::ConfCmd,
+    },
+    /// Bitbucket repositories, pull requests and pipelines
+    #[command(visible_alias = "bb")]
+    Bitbucket {
+        #[command(subcommand)]
+        cmd: bitbucket::BbCmd,
+    },
+    /// Search Jira, Confluence and Bitbucket at once (atlx extra)
+    Search(search::SearchArgs),
+    /// Call any REST endpoint directly (atlx extra)
+    ///
+    /// Paths are relative to https://SITE (jira), https://SITE/wiki (confluence)
+    /// or https://api.bitbucket.org/2.0 (bitbucket, where `{workspace}` is replaced
+    /// with your default workspace).
+    Api(api::ApiArgs),
+}
+
+// --- runtime ---------------------------------------------------------------------
+
+pub(crate) enum Out {
+    Data(Value),
+    /// Printed verbatim regardless of format (`--body-only`).
+    Raw(String),
+    /// Print structured output, then exit with a non-zero status code.
+    Exit(Value, i32),
+}
+
+/// Parse the command line, run the command, print the result and exit.
+pub fn main() {
+    let cli = Cli::parse();
+    let fmt = cli.output.unwrap_or(if std::io::stdout().is_terminal() {
+        Format::Text
+    } else {
+        Format::Json
+    });
+    let globals = Globals {
+        site: cli.site,
+        user: cli.user,
+        timeout_ms: cli.timeout_ms,
+    };
+    match run(&globals, cli.cmd) {
+        Ok(Out::Data(v)) => output::print(&v, fmt),
+        Ok(Out::Raw(s)) => println!("{s}"),
+        Ok(Out::Exit(v, code)) => {
+            output::print(&v, fmt);
+            std::process::exit(code);
+        }
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            std::process::exit(1);
+        }
+    }
+}
+
+pub(crate) struct Globals {
+    pub(crate) site: Option<String>,
+    pub(crate) user: Option<String>,
+    pub(crate) timeout_ms: Option<u64>,
+}
+
+impl Globals {
+    fn apply(&self, mut cfg: Config) -> Config {
+        if let Some(s) = &self.site {
+            cfg.site = Some(config::normalize_site(s));
+        }
+        if let Some(u) = &self.user {
+            cfg.email = Some(u.clone());
+        }
+        cfg.timeout_ms = self.timeout_ms;
+        cfg
+    }
+
+    pub(crate) fn config(&self) -> Result<Config> {
+        Ok(self.apply(Config::load()?))
+    }
+}
+
+fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
+    let data = match cmd {
+        Cmd::Login(a) => auth::login(g, a)?,
+        Cmd::Logout => auth::logout()?,
+        Cmd::Whoami => auth::whoami(g)?,
+        Cmd::Doctor { strict } => return Ok(doctor::doctor(g, strict)),
+        Cmd::Setup { cmd } => auth::setup(g, cmd)?,
+        Cmd::Jira { cmd } => jira::jira_cmd(&g.config()?.jira()?, cmd)?,
+        Cmd::User { cmd } => user::user_cmd(&g.config()?.jira()?, cmd)?,
+        Cmd::Confluence { cmd } => {
+            return confluence::confluence_cmd(&g.config()?.confluence()?, cmd);
+        }
+        Cmd::Bitbucket { cmd } => return bitbucket::bb_cmd(&g.config()?, cmd),
+        Cmd::Search(a) => search::run(g, a)?,
+        Cmd::Api(a) => api::run(&g.config()?, a)?,
+    };
+    Ok(Out::Data(data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_is_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_twg_style_invocations() {
+        for args in [
+            "atlx jira workitem get PROJ-1 PROJ-2 --comments -o json --site acme",
+            "atlx jira workitem query --jql 'project = X' --limit 5",
+            "atlx jira workitem create --space PROJ --type Bug --summary S --description-format markdown",
+            "atlx jira workitem update --id PROJ-1 --add-labels a,b --status Done --comment hi --comment-format plain",
+            "atlx jira workitem comment create --issue-id PROJ-1 --body hi --body-format plain",
+            "atlx jira workitem transition --id PROJ-1 --transition-id 31",
+            "atlx jira workitem transitions query --id PROJ-1",
+            "atlx jira workitem create-meta --space PROJ --type Task",
+            "atlx jira workitem create-meta --space PROJ",
+            "atlx jira workitem link types",
+            "atlx jira workitem link create --inward PROJ-1 --outward PROJ-2 --type Blocks --comment 'blocked by'",
+            "atlx jira workitem link remote --id PROJ-1 --url https://example.com/spec --title Spec --relationship 'Wiki Page'",
+            "atlx jira field list --query story --custom-only",
+            "atlx jira project list --query PROJ --limit 10",
+            "atlx jira project get PROJ",
+            "atlx jira board list --project PROJ --type scrum --limit 10",
+            "atlx jira sprint list --board 12 --state active,future --limit 5",
+            "atlx jira sprint issues --sprint 99 --jql 'status != Done' --limit 20",
+            "atlx user search alice --limit 10 -o json",
+            "atlx user search 'alice smith' -o jsonl --site acme --user me@acme.com --timeout-ms 5000",
+            "atlx confluence search query --cql type=page --excerpt",
+            "atlx confluence search text launch plan --since 7d",
+            "atlx confluence content get 12345 --detail full --format md",
+            "atlx confluence content get 'Runbook' --reference-space ENG",
+            "atlx confluence content create --space-id ENG --content-type page --title T --body-file f --format html --ack-body-formats -y",
+            "atlx confluence content update 12345 --snapshot-token 3 --body x --format markdown --dry-run",
+            "atlx confluence content list --space ENG --status archived",
+            "atlx confluence content comments list 12345 --inline --format html --limit 10 --cursor c1",
+            "atlx confluence content comments create 12345 --body 'Looks good' --format markdown",
+            "atlx confluence content children 12345 --limit 10 --cursor c1",
+            "atlx confluence content labels 12345 --limit 20",
+            "atlx confluence content delete 12345 --yes --purge",
+            "atlx confluence tree 12345 --depth 3",
+            "atlx confluence space get ENG",
+            "atlx confluence space me",
+            "atlx bb repo query --workspace acme",
+            "atlx bitbucket repo get --workspace acme --repo api",
+            "atlx bb repo file src/main.rs --repo acme/api --ref main",
+            "atlx bitbucket repo file src --repo api",
+            "atlx bb repo branches --repo acme/api --query feat --limit 10",
+            "atlx bitbucket repo branches --repo api",
+            "atlx bb pull-requests query --workspace acme --repo api --state MERGED",
+            "atlx bb prs get 930 931 --statuses --comments --repo acme/api",
+            "atlx bb pull-requests create --title t --source feat --dest main --repo api",
+            "atlx bb pull-requests comment create --pull-request 930 --text LGTM --repo api",
+            "atlx bb pull-requests diff 930 --repo acme/api",
+            "atlx bitbucket pull-requests diff https://bitbucket.org/acme/api/pull-requests/930 --repo acme/api",
+            "atlx bb pull-requests activity 930 --repo api --type comment --limit 10",
+            "atlx bitbucket pull-requests tasks 930 --repo api",
+            "atlx bb pull-requests approve 930 --repo api",
+            "atlx bitbucket pull-requests unapprove 930 --repo api",
+            "atlx bb pull-requests request-changes 930 --repo api",
+            "atlx bb pull-requests merge 930 --repo api --strategy squash --close-source-branch --message 'Ship it' --yes",
+            "atlx bitbucket pull-requests merge 930 --repo api --strategy fast_forward -y",
+            "atlx bb pull-requests decline 930 --repo api --yes",
+            "atlx bitbucket pull-requests decline 930 --repo api -y",
+            "atlx bb pipeline query --repo api --status FAILED",
+            "atlx bb pipeline get --pipeline 1234 --logs --failed-steps --repo api",
+            "atlx bb search code 'AuthService' --workspace acme --repo api --limit 10",
+            "atlx bitbucket search code AuthService --repo api",
+            "atlx whoami -o text",
+            "atlx doctor",
+            "atlx doctor --strict -o json",
+            "atlx setup bitbucket --workspace acme",
+        ] {
+            let argv: Vec<String> = shell_words(args);
+            if let Err(e) = Cli::try_parse_from(&argv) {
+                panic!("{args}: {e}");
+            }
+        }
+    }
+
+    /// Minimal splitter for the test strings (single quotes only).
+    pub(crate) fn shell_words(s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut quoted = false;
+        for ch in s.chars() {
+            match ch {
+                '\'' => quoted = !quoted,
+                ' ' if !quoted => {
+                    if !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                    }
+                }
+                _ => cur.push(ch),
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out
+    }
+
+    #[test]
+    fn parses_doctor_command() {
+        let normal = Cli::try_parse_from(["atlx", "doctor"]).unwrap();
+        assert!(matches!(normal.cmd, Cmd::Doctor { strict: false }));
+
+        let strict = Cli::try_parse_from(["atlx", "doctor", "--strict"]).unwrap();
+        assert!(matches!(strict.cmd, Cmd::Doctor { strict: true }));
+    }
+}
