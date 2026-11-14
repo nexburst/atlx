@@ -40,6 +40,7 @@ fn confluence_get_falls_back_from_page_404_to_blogpost() {
             format: ReadFormat::Md,
             draft: false,
             reference_space: None,
+            sections: &[],
         },
     )
     .unwrap();
@@ -104,6 +105,7 @@ fn confluence_update_snapshot_token_validation_and_dry_run() {
             snapshot_token: Some("3"),
             dry_run: false,
             draft: false,
+            edits: None,
         },
     )
     .unwrap_err()
@@ -121,6 +123,7 @@ fn confluence_update_snapshot_token_validation_and_dry_run() {
             snapshot_token: Some("4"),
             dry_run: true,
             draft: false,
+            edits: None,
         },
     )
     .unwrap();
@@ -141,6 +144,7 @@ fn confluence_update_snapshot_token_validation_and_dry_run() {
             snapshot_token: Some("4"),
             dry_run: false,
             draft: false,
+            edits: None,
         },
     )
     .unwrap();
