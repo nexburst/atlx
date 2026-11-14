@@ -1,7 +1,8 @@
 //! `atlx bitbucket` (alias `bb`): clap definitions and dispatch.
 
 use super::Out;
-use super::util::{batch, body_arg, require_yes, text_arg};
+use super::util::{DEFAULT_CONCURRENCY, batch, body_arg, concurrency_arg, deprecated, text_arg};
+use crate::client::ApiError;
 use crate::config::Config;
 use crate::{bitbucket, jira};
 use anyhow::Result;
@@ -10,10 +11,10 @@ use clap::{Args, Subcommand};
 #[derive(Args)]
 pub(crate) struct RepoArgs {
     /// Bitbucket workspace slug
-    #[arg(long)]
+    #[arg(long, short = 'w')]
     workspace: Option<String>,
     /// Repository slug, workspace/repo, or Bitbucket URL
-    #[arg(long)]
+    #[arg(long, short = 'r')]
     repo: Option<String>,
 }
 
@@ -29,6 +30,11 @@ pub(crate) enum BbCmd {
     PullRequests {
         #[command(subcommand)]
         cmd: PrCmd,
+    },
+    /// Branches
+    Branch {
+        #[command(subcommand)]
+        cmd: BranchCmd,
     },
     /// Pipelines
     Pipeline {
@@ -59,16 +65,38 @@ pub(crate) enum BbSearchCmd {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum BranchCmd {
+    /// List or search the branches of a repository
+    Query {
+        /// Branch name substring
+        #[arg(long, short = 'q')]
+        query: Option<String>,
+        /// Head commit author: display name or account ID
+        #[arg(long)]
+        author: Option<String>,
+        /// Sort field: name, -name, target.date or -target.date
+        #[arg(long, default_value = "-target.date")]
+        sort: String,
+        #[arg(long, short = 'n', default_value_t = 25)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum RepoCmd {
     /// List repositories in a workspace
+    ///
+    /// `--repo workspace/slug` (or a URL) also selects the workspace.
     Query {
         /// Search by name
-        #[arg(long)]
+        #[arg(long, short = 'q')]
         query: Option<String>,
-        #[arg(long, default_value_t = 25)]
+        #[arg(long, short = 'n', default_value_t = 25)]
         limit: usize,
-        #[arg(long)]
-        workspace: Option<String>,
+        #[command(flatten)]
+        repo: RepoArgs,
         #[arg(long)]
         project: Option<String>,
         #[arg(long)]
@@ -95,7 +123,8 @@ pub(crate) enum RepoCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
-    /// List branches in a repository
+    /// Old name of `bb branch query`
+    #[command(hide = true)]
     Branches {
         /// Filter branch names
         #[arg(long)]
@@ -153,6 +182,9 @@ pub(crate) enum PrCmd {
         full: bool,
         #[arg(long)]
         strict: bool,
+        /// How many pull requests to fetch at once (1 to 20)
+        #[arg(long, value_name = "N", default_value_t = DEFAULT_CONCURRENCY, value_parser = concurrency_arg)]
+        batch_concurrency: usize,
         #[command(flatten)]
         repo: RepoArgs,
     },
@@ -194,19 +226,33 @@ pub(crate) enum PrCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
-    /// Activity feed for a pull request
+    /// Activity feed for one or more pull requests
     Activity {
-        /// Pull request number or URL
-        id: String,
+        /// Pull request numbers or URLs
+        #[arg(required = true)]
+        ids: Vec<String>,
         /// Filter by event type (e.g. comment, approval, update)
         #[arg(long = "type")]
         event_type: Option<String>,
-        #[arg(long, default_value_t = 25)]
+        /// Maximum activities per pull request
+        #[arg(long, short = 'n', default_value_t = 25)]
         limit: usize,
+        /// Fail the batch if any pull request fails
+        #[arg(long)]
+        strict: bool,
+        /// How many pull requests to fetch at once (1 to 20)
+        #[arg(long, value_name = "N", default_value_t = DEFAULT_CONCURRENCY, value_parser = concurrency_arg)]
+        batch_concurrency: usize,
         #[command(flatten)]
         repo: RepoArgs,
     },
-    /// Tasks on a pull request
+    /// Pull request tasks
+    Task {
+        #[command(subcommand)]
+        cmd: PrTaskCmd,
+    },
+    /// Old name of `bb pull-requests task query`
+    #[command(hide = true)]
     Tasks {
         /// Pull request number or URL
         id: String,
@@ -234,29 +280,59 @@ pub(crate) enum PrCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
-    /// Merge a pull request (requires --yes)
+    /// Merge a pull request
     Merge {
         /// Pull request number or URL
-        id: String,
-        #[arg(long, value_enum)]
-        strategy: Option<bitbucket::MergeStrategy>,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "id")]
+        pull_request: Option<String>,
+        /// Old form of --pull-request
+        #[arg(hide = true)]
+        id: Option<String>,
+        /// Defaults to the repository's merge strategy
+        #[arg(long, value_enum, conflicts_with = "strategy")]
+        merge_strategy: Option<bitbucket::MergeStrategy>,
+        /// Commit message for the merge
+        #[arg(long, conflicts_with = "message")]
+        merge_message: Option<String>,
+        /// Delete the source branch after this merge
+        #[arg(long, conflicts_with = "keep_source_branch")]
         close_source_branch: bool,
+        /// Keep the source branch even if the pull request was set to close it
         #[arg(long)]
+        keep_source_branch: bool,
+        /// Old form of --merge-strategy
+        #[arg(long, value_enum, hide = true)]
+        strategy: Option<bitbucket::MergeStrategy>,
+        /// Old form of --merge-message
+        #[arg(long, hide = true)]
         message: Option<String>,
-        /// Confirm merge
-        #[arg(long, short)]
+        /// Accepted for compatibility; no confirmation is asked
+        #[arg(long, short, hide = true)]
         yes: bool,
         #[command(flatten)]
         repo: RepoArgs,
     },
-    /// Decline a pull request (requires --yes)
+    /// Decline a pull request
     Decline {
         /// Pull request number or URL
         id: String,
-        /// Confirm decline
-        #[arg(long, short)]
+        /// Accepted for compatibility; no confirmation is asked
+        #[arg(long, short, hide = true)]
         yes: bool,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum PrTaskCmd {
+    /// List the tasks on a pull request
+    Query {
+        /// Pull request number or URL
+        #[arg(value_name = "pullRequest")]
+        pull_request: String,
+        #[arg(long, short = 'n', default_value_t = 50)]
+        limit: usize,
         #[command(flatten)]
         repo: RepoArgs,
     },
@@ -338,7 +414,7 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 RepoCmd::Query {
                     query,
                     limit,
-                    workspace,
+                    repo,
                     project,
                     language,
                     sort,
@@ -353,7 +429,11 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 role: role.as_deref(),
                 limit,
             };
-            bitbucket::repo_query(&c, bitbucket::workspace_or(workspace.as_deref(), dws)?, &q)?
+            let ws = match repo.repo.as_deref() {
+                Some(r) => bitbucket::workspace_of(r, repo.workspace.as_deref(), dws)?,
+                None => bitbucket::workspace_or(repo.workspace.as_deref(), dws)?.to_string(),
+            };
+            bitbucket::repo_query(&c, &ws, &q)?
         }
         BbCmd::Repo {
             cmd: RepoCmd::Get { slug, repo },
@@ -374,9 +454,39 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 },
             );
         }
+        BbCmd::Branch {
+            cmd:
+                BranchCmd::Query {
+                    query,
+                    author,
+                    sort,
+                    limit,
+                    repo,
+                },
+        } => bitbucket::branch_query(
+            &c,
+            &path(&repo, None)?,
+            &bitbucket::BranchQuery {
+                query: query.as_deref(),
+                author: author.as_deref(),
+                sort: Some(&sort),
+                limit,
+            },
+        )?,
         BbCmd::Repo {
             cmd: RepoCmd::Branches { query, limit, repo },
-        } => bitbucket::repo_branches(&c, &path(&repo, None)?, query.as_deref(), limit)?,
+        } => {
+            deprecated("bb repo branches", "bb branch query");
+            bitbucket::branch_query(
+                &c,
+                &path(&repo, None)?,
+                &bitbucket::BranchQuery {
+                    query: query.as_deref(),
+                    limit,
+                    ..Default::default()
+                },
+            )?
+        }
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
                 text,
@@ -414,6 +524,7 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 statuses,
                 full,
                 strict,
+                batch_concurrency,
                 repo,
             } => {
                 let p = path(&repo, None)?;
@@ -422,7 +533,7 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     diff: diff || full,
                     statuses: statuses || full,
                 };
-                batch(ids, strict, |id| {
+                batch(ids, strict, batch_concurrency, |id| {
                     bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
                 })?
             }
@@ -489,19 +600,40 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 )?));
             }
             PrCmd::Activity {
-                id,
+                ids,
                 event_type,
                 limit,
+                strict,
+                batch_concurrency,
                 repo,
-            } => bitbucket::pr_activity(
+            } => {
+                let p = path(&repo, None)?;
+                batch(ids, strict, batch_concurrency, |id| {
+                    bitbucket::pr_activity(
+                        &c,
+                        &p,
+                        bitbucket::pr_number(id)?,
+                        event_type.as_deref(),
+                        limit,
+                    )
+                })?
+            }
+            PrCmd::Task {
+                cmd:
+                    PrTaskCmd::Query {
+                        pull_request,
+                        limit,
+                        repo,
+                    },
+            } => bitbucket::pr_tasks(
                 &c,
                 &path(&repo, None)?,
-                bitbucket::pr_number(&id)?,
-                event_type.as_deref(),
+                bitbucket::pr_number(&pull_request)?,
                 limit,
             )?,
             PrCmd::Tasks { id, repo } => {
-                bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
+                deprecated("bb pull-requests tasks", "bb pull-requests task query");
+                bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?, 500)?
             }
             PrCmd::Approve { id, repo } => {
                 bitbucket::pr_approve(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
@@ -513,25 +645,44 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 bitbucket::pr_request_changes(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
             }
             PrCmd::Merge {
+                pull_request,
                 id,
-                strategy,
+                merge_strategy,
+                merge_message,
                 close_source_branch,
+                keep_source_branch,
+                strategy,
                 message,
-                yes,
+                yes: _,
                 repo,
             } => {
-                let pr_id = bitbucket::pr_number(&id)?;
-                require_yes(yes, &format!("merging pull request #{pr_id}"))?;
+                if id.is_some() {
+                    deprecated(
+                        "bb pull-requests merge <id>",
+                        "bb pull-requests merge --pull-request <id>",
+                    );
+                }
+                if strategy.is_some() {
+                    deprecated("--strategy", "--merge-strategy");
+                }
+                if message.is_some() {
+                    deprecated("--message", "--merge-message");
+                }
+                let Some(pr) = pull_request.or(id) else {
+                    return Err(ApiError::usage("pass --pull-request <id>").into());
+                };
+                let pr_id = bitbucket::pr_number(&pr)?;
+                let message = merge_message.or(message);
                 let o = bitbucket::PrMerge {
-                    strategy,
+                    strategy: merge_strategy.or(strategy),
                     close_source_branch,
+                    keep_source_branch,
                     message: message.as_deref(),
                 };
                 bitbucket::pr_merge(&c, &path(&repo, None)?, pr_id, &o)?
             }
-            PrCmd::Decline { id, yes, repo } => {
+            PrCmd::Decline { id, yes: _, repo } => {
                 let pr_id = bitbucket::pr_number(&id)?;
-                require_yes(yes, &format!("declining pull request #{pr_id}"))?;
                 bitbucket::pr_decline(&c, &path(&repo, None)?, pr_id)?
             }
         },
@@ -592,7 +743,6 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::cli::Cli;
     use crate::cli::tests::shell_words;
     use clap::Parser;
@@ -612,37 +762,39 @@ mod tests {
     }
 
     #[test]
-    fn bb_confirmation_and_args() {
-        assert!(require_yes(false, "merging pull request #1").is_err());
-        assert!(require_yes(true, "merging pull request #1").is_ok());
-        assert!(
-            Cli::try_parse_from([
-                "atlx",
-                "bb",
-                "pull-requests",
-                "merge",
-                "1",
-                "--repo",
-                "acme/api",
-                "--strategy",
-                "merge_commit",
-                "--yes"
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "atlx",
-                "bb",
-                "pull-requests",
-                "merge",
-                "1",
-                "--repo",
-                "acme/api",
-                "--strategy",
-                "invalid"
-            ])
-            .is_err()
-        );
+    fn bb_twg_names_and_old_forms() {
+        for ok in [
+            "atlx bb pull-requests merge --pull-request 1 -r acme/api --merge-strategy squash --merge-message m --keep-source-branch",
+            "atlx bb pull-requests merge 1 --repo acme/api --strategy merge_commit --message m --yes",
+            "atlx bb pull-requests merge --pull-request 1 --repo api",
+            "atlx bb pull-requests decline 1 --repo api",
+            "atlx bb pull-requests decline 1 --repo api --yes",
+            "atlx bb pull-requests activity 1 2 3 --repo api --strict --batch-concurrency 2 -n 5",
+            "atlx bb pull-requests task query 7 -w acme -r api -n 10",
+            "atlx bb pull-requests tasks 7 --repo api",
+            "atlx bb branch query -r acme/api -q feat --author alice --sort name -n 5",
+            "atlx bb repo branches --repo api",
+            "atlx bb repo query -q api -n 5 --repo acme/api",
+            "atlx bb repo get -w acme -r api",
+            "atlx bb pull-requests get 1 2 --repo api --batch-concurrency 20",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx bb pull-requests merge --pull-request 1 2 --repo api",
+            "atlx bb pull-requests merge --pull-request 1 --repo api --merge-strategy invalid",
+            "atlx bb pull-requests merge 1 --merge-strategy squash --strategy squash",
+            "atlx bb pull-requests merge 1 --close-source-branch --keep-source-branch",
+            "atlx bb pull-requests get 1 2 --batch-concurrency 0",
+            "atlx bb pull-requests get 1 2 --batch-concurrency 21",
+            "atlx bb pull-requests activity --repo api",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
     }
 }

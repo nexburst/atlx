@@ -227,3 +227,26 @@ fn confluence_search_query_and_list_extract_next_cursor() {
     assert_eq!(reqs[2].path, "/api/v2/spaces/999/pages");
     assert_eq!(reqs[2].query_param("cursor").as_deref(), Some("c0"));
 }
+
+#[test]
+fn confluence_space_labels_are_added_per_space() {
+    let srv = MockServer::with_responses([
+        MockResponse::json(
+            200,
+            json!({"results": [{"id": "101", "key": "ENG"}, {"id": "102", "key": "OPS"}], "_links": {}}),
+        ),
+        MockResponse::json(
+            200,
+            json!({"results": [{"id": "1", "name": "team", "prefix": "global"}]}),
+        ),
+        MockResponse::json(200, json!({"results": []})),
+    ]);
+    let client = srv.client();
+    let mut v = confluence::spaces(&client, None, None, None, 25, None).unwrap();
+    confluence::add_space_labels(&client, &mut v).unwrap();
+    assert_eq!(v["results"][0]["labels"][0]["name"], "team");
+    assert_eq!(v["results"][1]["labels"], json!([]));
+    let reqs = srv.requests();
+    assert_eq!(reqs[1].path, "/api/v2/spaces/101/labels");
+    assert_eq!(reqs[2].path, "/api/v2/spaces/102/labels");
+}

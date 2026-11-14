@@ -40,8 +40,34 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   run lazily with a 10 s timeout. `whoami` and `doctor` report the active
   profile and token source (#20).
 
+- twg 1.4.4 command names and flags for commands that had drifted (#18):
+  `jira space query|list|get`, `jira board query`, `jira board sprints query`,
+  `jira sprint workitems query`, `jira workitem field create-metadata` (also
+  `custom-fields`), `jira workitem link-types query`, `jira workitem link
+  workitem` (repeatable `--target-id`) and `link weblink` (with `--global-id`,
+  `--application-name/-type`, `--summary`, `--icon-url`, `--resolved`),
+  `confluence content labels list --id`, `comments list|create --id` with
+  `--comment-type` and `--body-format` (create also takes `--body-file`),
+  `confluence tree --target`, `confluence space get|list --labels`,
+  `bb branch query` (`--author`, `--sort`), `bb pull-requests task query`,
+  `merge --pull-request --merge-strategy --merge-message
+  --keep-source-branch`, batched `bb pull-requests activity <id...>` with
+  `--strict`, `bb repo query --repo`, the `-w`/`-r` short flags, and `user
+  search --name --query --email --account-id -n`.
+- `--batch-concurrency <1-20>` (default 5) on `jira workitem get`, `bb
+  pull-requests get` and `bb pull-requests activity`: batch reads now run in
+  parallel on scoped threads and keep the input order (#18).
+
 ### Changed
 
+- Merge, decline and `confluence content delete` no longer require `--yes`,
+  matching twg; `--yes` is still accepted and ignored (#18).
+- The 0.1 names (`jira project`, `jira board list`, `jira sprint list|issues`,
+  `jira workitem create-meta`, `jira workitem link types|create|remote`, `bb
+  repo branches`, `bb pull-requests tasks`, positional `labels`/`comments`/
+  `merge` forms, and `--inline`, `--format`, `--strategy`, `--message`) still
+  work but are hidden from help. In text mode on a terminal they print a
+  one-line note naming the new form; they will be removed in 0.3 (#18).
 - `atlx logout` removes only the selected profile (the whole file only when
   nothing else is left), as twg does (#20).
 - `login` and `setup bitbucket` accept `-f` for `--force`, and `setup bb` is an

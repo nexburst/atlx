@@ -29,7 +29,7 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `src/cli/mod.rs` | `Cli` with the global flags, the top-level `Cmd`, `Globals`, `Out`, dispatch and `main()` |
 | `src/cli/<product>.rs` (`jira`, `confluence`, `bitbucket`) | That product's clap enums and its dispatch function, plus parse tests |
 | `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs`, `completion.rs` | The non-product commands (`completion.rs` also holds the hidden `man` generator) |
-| `src/cli/util.rs` | Helpers shared by commands: `batch`, `text_arg`, `body_arg`, `require_yes` |
+| `src/cli/util.rs` | Helpers shared by commands: `batch` (parallel, `--batch-concurrency`), `text_arg`, `body_arg`, `require_yes`, `deprecated` |
 | `tests/common/mod.rs` | Offline mock HTTP server (`MockServer`, `MockResponse`, `RecordedRequest`) |
 | `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
 | `tests/cli_tree.rs` + `tests/snapshots/cli-tree.txt` | Snapshot of the full command tree |
@@ -74,8 +74,14 @@ the mock server and keeps product PRs out of each other's files.
   `ApiError::config(..)` for missing setup; the client produces HTTP and network
   errors itself). `main` prints them as described in the README's "Errors and
   exit codes" section. Commands never print errors themselves.
-- **Destructive operations** (delete, merge, decline, ...) require `--yes`.
-  Add `--dry-run` where it is feasible to show the request without sending it.
+- **Confirmation** matches twg: a command requires `--yes` only when twg's
+  does. Otherwise `--yes` is accepted as a hidden no-op and nothing prompts
+  (merge, decline and content delete work this way). Add `--dry-run` where it
+  is feasible to show the request without sending it.
+- **Renames.** When an atlx name drifts from twg's, the twg name becomes the
+  visible one and the old spelling stays as a hidden command or flag that calls
+  `util::deprecated(old, new)`. The note prints only in text mode on a
+  terminal, never in JSON or piped output.
 - **Dependencies.** Don't add a crate without a justification in the PR. HTTP
   is sync `ureq` 2; there is no async runtime.
 - **Tests stay offline.** Anything that needs a real site is `#[ignore]`.

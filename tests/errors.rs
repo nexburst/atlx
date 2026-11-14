@@ -250,6 +250,21 @@ fn batch_partial_failure_exits_3_and_strict_exits_1() {
 }
 
 #[test]
+fn old_names_work_without_notes_when_piped() {
+    let srv = jira_handler();
+    for fmt in ["text", "json"] {
+        let o = atlx(
+            Some(&srv.base_url()),
+            Some(TOKEN),
+            &["jira", "workitem", "link", "types", "-o", fmt],
+        );
+        assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+        // stdout is a pipe here, so no deprecation note may appear.
+        assert!(!stderr(&o).contains("0.3"), "{}", stderr(&o));
+    }
+}
+
+#[test]
 fn usage_errors_exit_1() {
     let o = atlx(
         Some("acme"),
@@ -258,7 +273,6 @@ fn usage_errors_exit_1() {
             "bb",
             "pull-requests",
             "merge",
-            "1",
             "--repo",
             "acme/api",
             "-o",
@@ -269,7 +283,12 @@ fn usage_errors_exit_1() {
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
     assert_eq!(v["error"]["category"], "usage");
     assert_eq!(v["error"]["statusCode"], 400);
-    assert!(v["error"]["message"].as_str().unwrap().contains("--yes"));
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--pull-request")
+    );
     assert_no_secret(&o);
 
     // clap argument errors: stderr only, exit 1 like twg.

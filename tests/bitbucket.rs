@@ -312,3 +312,66 @@ fn bitbucket_pipeline_query_filters_client_side() {
         Some("main")
     );
 }
+
+#[test]
+fn bitbucket_branch_query_sorts_and_filters_by_author() {
+    let branch = |name: &str, who: &str| json!({"name": name, "target": {"hash": "abc", "author": {"raw": format!("{who} <x@example.com>"), "user": {"display_name": who}}}});
+    let srv = MockServer::with_responses([MockResponse::json(
+        200,
+        json!({"values": [branch("a", "Alice Example"), branch("b", "Bob"), branch("c", "Alice Example")]}),
+    )]);
+    let out = bitbucket::branch_query(
+        &srv.client(),
+        "/repositories/acme/api",
+        &bitbucket::BranchQuery {
+            query: Some("feat"),
+            author: Some("alice"),
+            sort: Some("-target.date"),
+            limit: 1,
+        },
+    )
+    .unwrap();
+    let names: Vec<_> = out.as_array().unwrap().iter().map(|b| &b["name"]).collect();
+    assert_eq!(names, [&json!("a")]);
+    let reqs = srv.requests();
+    assert_eq!(reqs[0].path, "/repositories/acme/api/refs/branches");
+    assert_eq!(reqs[0].query_param("sort").as_deref(), Some("-target.date"));
+    assert_eq!(reqs[0].query_param("q").as_deref(), Some("name ~ \"feat\""));
+    // With an author filter more than `limit` branches are scanned.
+    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("50"));
+}
+
+#[test]
+fn bitbucket_task_limit_and_workspace_from_repo() {
+    let srv = MockServer::with_responses([MockResponse::json(
+        200,
+        json!({"values": [{"id": 1, "state": "UNRESOLVED"}, {"id": 2, "state": "RESOLVED"}]}),
+    )]);
+    let tasks = bitbucket::pr_tasks(&srv.client(), "/repositories/acme/api", 42, 1).unwrap();
+    assert_eq!(tasks.as_array().unwrap().len(), 1);
+    assert_eq!(
+        srv.requests()[0].path,
+        "/repositories/acme/api/pullrequests/42/tasks"
+    );
+    assert_eq!(
+        srv.requests()[0].query_param("pagelen").as_deref(),
+        Some("1")
+    );
+
+    assert_eq!(
+        bitbucket::workspace_of("acme/api", None, None).unwrap(),
+        "acme"
+    );
+    assert_eq!(
+        bitbucket::workspace_of("https://bitbucket.org/team/web", Some("other"), None).unwrap(),
+        "team"
+    );
+    assert_eq!(
+        bitbucket::workspace_of("api", Some("acme"), Some("dflt")).unwrap(),
+        "acme"
+    );
+    assert_eq!(
+        bitbucket::workspace_of("api", None, Some("dflt")).unwrap(),
+        "dflt"
+    );
+}

@@ -74,19 +74,25 @@ fn is_builtin(a: &clap::Arg) -> bool {
 
 fn walk(cmd: &clap::Command, path: &str, leaves: &mut Vec<String>, aliases: &mut Vec<String>) {
     let subs: Vec<_> = cmd.get_subcommands().collect();
-    if subs.is_empty() {
+    let own: Vec<_> = cmd
+        .get_arguments()
+        .filter(|a| !a.is_global_set() && !is_builtin(a))
+        .collect();
+    // A command with subcommands is also listed when it takes arguments of
+    // its own (e.g. `confluence content labels <ref>`), since it then runs
+    // by itself too.
+    if subs.is_empty() || !own.is_empty() {
         let mut line = path.to_string();
         if cmd.is_hide_set() {
             line.push_str(" (hidden)");
         }
-        for a in cmd.get_arguments() {
-            if a.is_global_set() || is_builtin(a) {
-                continue;
-            }
+        for a in own {
             line.push(' ');
             line.push_str(&render_arg(a));
         }
         leaves.push(line);
+    }
+    if subs.is_empty() {
         return;
     }
     for s in subs {

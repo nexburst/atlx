@@ -44,7 +44,7 @@ ok jira workitem get --key PROJ-1 --remote-links
 ok jira workitem get PROJ-1 --full
 ok jira workitem get PROJ-1 --fields summary,status,assignee
 ok jira workitem get PROJ-1 --field customfield_10010 --field customfield_10020
-gap #18 jira workitem get PROJ-1 PROJ-2 --batch-concurrency 4
+ok jira workitem get PROJ-1 PROJ-2 --batch-concurrency 4
 ok jira workitem search 'login timeout'
 ok jira workitem search crash on startup --limit 20
 ok jira workitem search 'slow page' --first 10 --after cursor1 --fields summary
@@ -52,7 +52,7 @@ ok jira workitem query 'project = PROJ ORDER BY updated DESC'
 ok jira workitem query --jql 'assignee = currentUser() AND resolution = Unresolved' --limit 50
 ok jira workitem query --jql 'project = PROJ' --first 10 --after cursor1
 ok jira workitem query --jql 'project = PROJ' --fields summary,status
-gap #18 jira workitem query --jql 'project = PROJ' --last 10 --before cursor9
+ok jira workitem query --jql 'project = PROJ' --last 10 --before cursor9
 ok jira workitem create --space PROJ --type Task --summary 'Write docs'
 ok jira workitem create --space PROJ --type Bug --summary 'Crash on save' --description '<p>Steps</p>' --priority High --labels backend,cli --assignee me
 ok jira workitem create --space PROJ --type Story --summary 'New flow' --description '# Goal' --description-format markdown --parent PROJ-10
@@ -91,18 +91,24 @@ gap #24 jira workitem watcher add --id PROJ-1 --watcher-id 5b10ac8d82e05b22cc7d4
 gap #24 jira workitem vote add --issue-id PROJ-1
 
 # --- jira renames (#18) ---
-gap #18 jira space query --query PROJ --limit 10
-gap #18 jira space list
-gap #18 jira space get PROJ
-gap #18 jira board query --project PROJ --type scrum
-gap #18 jira board sprints query --board-id 12 --state active
-gap #18 jira board sprints query --id 12 --current
-gap #18 jira sprint workitems query --sprint-id 99 --jql 'status != Done'
-gap #18 jira workitem link-types query
-gap #18 jira workitem link workitem --id PROJ-1 --target-id PROJ-2 --link-type-id Blocks
-gap #18 jira workitem link weblink --id PROJ-1 --url https://example.com/spec --title Spec
-gap #18 jira workitem field create-metadata --space PROJ --type Task
-gap #18 jira workitem custom-fields create-metadata --space PROJ
+ok jira space query --query PROJ --limit 10
+ok jira space list
+ok jira space get PROJ
+ok jira board query --project PROJ --type scrum
+ok jira board sprints query --board-id 12 --state active
+ok jira board sprints query --id 12 --current
+ok jira sprint workitems query --sprint-id 99 --jql 'status != Done'
+ok jira workitem link-types query
+ok jira workitem link workitem --id PROJ-1 --target-id PROJ-2 --link-type-id Blocks
+ok jira workitem link weblink --id PROJ-1 --url https://example.com/spec --title Spec
+ok jira workitem field create-metadata --space PROJ --type Task
+ok jira workitem custom-fields create-metadata --space PROJ
+ok jira space query --key PROJ --key OPS --type-key software
+ok jira board query --issue PROJ-1 --max-results 10
+ok jira board sprints query --project PROJ --state closed --max-results 5 --start-at 5
+ok jira sprint workitems query --id 99 --fields labels --max-results 20
+ok jira workitem link workitem --id PROJ-1 --target-id PROJ-2 --target-id PROJ-3 --link-type-id Relates
+ok jira workitem link weblink --id PROJ-1 --url https://example.com/run --title Runbook --global-id run-1 --resolved
 
 # --- jira agile and project admin ---
 gap #25 jira sprint get 99
@@ -139,12 +145,14 @@ ok confluence space list
 ok confluence space list --type global --limit 50
 ok confluence space me
 ok confluence tree 12345 --depth 3
-gap #18 confluence tree --target 12345
-gap #18 confluence space get ENG --labels
-gap #18 confluence space list --labels
-gap #18 confluence content labels list --id 12345
-gap #18 confluence content comments list --id 12345 --comment-type inline
-gap #18 confluence content comments create --id 12345 --body 'Nice' --body-format markdown
+ok confluence tree --target 12345
+ok confluence space get ENG --labels
+ok confluence space list --labels
+ok confluence content labels list --id 12345
+ok confluence content comments list --id 12345 --comment-type inline
+ok confluence content comments create --id 12345 --body 'Nice' --body-format markdown
+ok confluence content comments create --id 12345 --body-file note.md
+ok confluence content comments list --id 12345 --body-format html
 gap #28 confluence content labels add --id 12345 --label runbook
 gap #28 confluence content versions list --id 12345
 gap #28 confluence content attachments list --id 12345
@@ -181,13 +189,17 @@ ok bb pipeline query --repo acme/api
 ok bb pipeline query --repo acme/api --branch main --status FAILED
 ok bb pipeline get --pipeline 101 --repo acme/api
 ok bb pipeline get --pipeline 101 --repo acme/api --logs --failed-steps --lines 200
-gap #18 bb repo get -r acme/api
-gap #18 bb repo query --repo api --workspace acme
-gap #18 bb branch query --repo acme/api --query feature
-gap #18 bb pull-requests task query 42 --repo acme/api
-gap #18 bb pull-requests merge --pull-request 42 --repo acme/api --merge-strategy squash
-gap #18 bb pull-requests activity 42 43 --repo acme/api
-gap #18 bb pull-requests get 42 43 --repo acme/api --batch-concurrency 2
+ok bb repo get -r acme/api
+ok bb repo query --repo api --workspace acme
+ok bb branch query --repo acme/api --query feature
+ok bb pull-requests task query 42 --repo acme/api
+ok bb pull-requests merge --pull-request 42 --repo acme/api --merge-strategy squash
+ok bb pull-requests activity 42 43 --repo acme/api
+ok bb pull-requests get 42 43 --repo acme/api --batch-concurrency 2
+ok bb pull-requests merge --pull-request 42 --repo acme/api --merge-message 'Ship it' --keep-source-branch
+ok bb pull-requests activity 42 43 --repo acme/api --strict --batch-concurrency 2
+ok bb branch query -r acme/api --author 'Alice Example' --sort name -n 5
+ok bb pull-requests task query 42 -r acme/api -n 10
 gap #31 bb pull-requests diffstat 42 --repo acme/api
 gap #31 bb pull-requests commits 42 --repo acme/api
 gap #31 bb pull-requests patch 42 --repo acme/api
@@ -205,8 +217,10 @@ gap #34 bb pipeline tail --pipeline 101 --repo acme/api
 # --- users ---
 ok user search alice
 ok user search 'Alice Example' --limit 5
-gap #18 user search --email alice@example.com
-gap #18 user search --name 'Alice Example'
+ok user search --email alice@example.com
+ok user search --name 'Alice Example'
+ok user search --account-id 5b10ac8d82e05b22cc7d4ef5
+ok user search alice -n 5
 
 # --- jira service management ---
 gap #37 jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop request'
