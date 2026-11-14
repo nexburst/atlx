@@ -15,6 +15,7 @@ mod to_storage;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
+pub(crate) use html::decode as decode_entities;
 pub use html::html_to_adf;
 pub use markdown::markdown_to_adf;
 pub use to_markdown::adf_to_markdown;
