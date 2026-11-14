@@ -1,0 +1,155 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "heading",
+      "content": [
+        {
+          "type": "text",
+          "text": "Runbook"
+        }
+      ],
+      "attrs": {
+        "level": 1
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Owner: "
+        },
+        {
+          "type": "mention",
+          "attrs": {
+            "id": "557058:abc"
+          }
+        },
+        {
+          "type": "text",
+          "text": " — see On-call guide."
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Read this "
+            },
+            {
+              "type": "text",
+              "text": "first",
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "codeBlock",
+      "content": [
+        {
+          "type": "text",
+          "text": "kubectl get pods\necho \"a < b\""
+        }
+      ],
+      "attrs": {
+        "language": "bash"
+      }
+    },
+    {
+      "type": "taskList",
+      "content": [
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "task-2",
+            "state": "DONE"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Page the owner"
+            }
+          ]
+        },
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "task-3",
+            "state": "TODO"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Write the "
+            },
+            {
+              "type": "text",
+              "text": "postmortem",
+              "marks": [
+                {
+                  "type": "em"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "attrs": {
+        "localId": "task-1"
+      }
+    },
+    {
+      "type": "mediaSingle",
+      "attrs": {
+        "layout": "center"
+      },
+      "content": [
+        {
+          "type": "media",
+          "attrs": {
+            "type": "external",
+            "url": "https://example.com/graph.png",
+            "alt": "graph"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Status: "
+        },
+        {
+          "type": "status",
+          "attrs": {
+            "text": "Green",
+            "color": "green"
+          }
+        },
+        {
+          "type": "text",
+          "text": " tracked in OPS-12"
+        }
+      ]
+    }
+  ]
+}

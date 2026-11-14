@@ -1,0 +1,88 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "mediaSingle",
+      "attrs": {
+        "layout": "center"
+      },
+      "content": [
+        {
+          "type": "media",
+          "attrs": {
+            "type": "external",
+            "url": "https://example.com/arch.png",
+            "alt": "Architecture"
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Text with an inline image "
+        },
+        {
+          "type": "text",
+          "text": "diagram",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": {
+                "href": "https://example.com/d.png"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": " and an autolink "
+        },
+        {
+          "type": "text",
+          "text": "https://example.com",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": {
+                "href": "https://example.com"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Mail "
+        },
+        {
+          "type": "text",
+          "text": "ops@example.com",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": {
+                "href": "mailto:ops@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": " for help."
+        }
+      ]
+    }
+  ]
+}
