@@ -87,6 +87,24 @@ Contributions are welcome. `cargo test` and `cargo clippy` should pass. Each
 product lives in its own module (`src/jira.rs`, `src/confluence.rs`,
 `src/bitbucket.rs`); the twg-shaped command tree is in `src/main.rs`.
 
+### Testing
+
+Run the offline unit and mock-HTTP integration test suite with:
+
+```sh
+cargo test
+```
+
+Opt-in read-only live smoke tests against real Atlassian Cloud / Bitbucket APIs
+are marked `#[ignore]` in `tests/live_smoke.rs`. Run them with:
+
+```sh
+ATLX_SITE=acme ATLX_EMAIL=you@acme.com ATLX_TOKEN=... cargo test -- --ignored
+```
+
+Optional environment variables for deeper checks: `ATLX_TEST_ISSUE`,
+`ATLX_TEST_PAGE`, `ATLX_BB_WORKSPACE`, and `ATLX_BB_REPO`.
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

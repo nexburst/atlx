@@ -1,27 +1,11 @@
-mod bitbucket;
-mod client;
-mod config;
-mod confluence;
-mod jira;
-mod markup;
-mod output;
-mod search;
-mod time;
-
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use atlx::{Product, bitbucket, client, config, confluence, jira, markup, output, search};
+use clap::{Args, Parser, Subcommand};
 use config::Config;
 use markup::TextFormat;
 use output::Format;
 use serde_json::{Value, json};
 use std::io::{IsTerminal, Read, Write};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum Product {
-    Jira,
-    Confluence,
-    Bitbucket,
-}
 
 /// Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud.
 ///
