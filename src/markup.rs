@@ -36,7 +36,9 @@ pub fn to_storage(s: &str, f: TextFormat) -> String {
 }
 
 fn paragraphs(s: &str) -> impl Iterator<Item = &str> {
-    s.split("\n\n").map(|p| p.trim_matches('\n')).filter(|p| !p.trim().is_empty())
+    s.split("\n\n")
+        .map(|p| p.trim_matches('\n'))
+        .filter(|p| !p.trim().is_empty())
 }
 
 /// Plain text -> ADF document. Blank lines separate paragraphs; single
@@ -137,7 +139,11 @@ fn parse_md(s: &str) -> Vec<Block> {
         } else if t.starts_with('>') {
             flush(&mut para, &mut out);
             let mut q = vec![t.trim_start_matches('>').trim()];
-            while let Some(l) = lines.get(i + 1).map(|l| l.trim()).filter(|l| l.starts_with('>')) {
+            while let Some(l) = lines
+                .get(i + 1)
+                .map(|l| l.trim())
+                .filter(|l| l.starts_with('>'))
+            {
                 q.push(l.trim_start_matches('>').trim());
                 i += 1;
             }
@@ -165,13 +171,20 @@ fn parse_inline(s: &str) -> Vec<Inline> {
     let mut rest = s;
     while !rest.is_empty() {
         let parsed = if let Some(r) = rest.strip_prefix("**") {
-            r.find("**").map(|e| (Inline::Bold(r[..e].to_string()), &r[e + 2..]))
+            r.find("**")
+                .map(|e| (Inline::Bold(r[..e].to_string()), &r[e + 2..]))
         } else if let Some(r) = rest.strip_prefix('`') {
-            r.find('`').map(|e| (Inline::Code(r[..e].to_string()), &r[e + 1..]))
+            r.find('`')
+                .map(|e| (Inline::Code(r[..e].to_string()), &r[e + 1..]))
         } else if let Some(r) = rest.strip_prefix('[') {
             r.find("](").and_then(|m| {
                 let after = &r[m + 2..];
-                after.find(')').map(|e| (Inline::Link(r[..m].to_string(), after[..e].to_string()), &after[e + 1..]))
+                after.find(')').map(|e| {
+                    (
+                        Inline::Link(r[..m].to_string(), after[..e].to_string()),
+                        &after[e + 1..],
+                    )
+                })
             })
         } else {
             None
@@ -205,7 +218,9 @@ fn inline_adf(s: &str) -> Vec<Value> {
                 Inline::Text(t) => (t, None),
                 Inline::Bold(t) => (t, Some(json!({"type": "strong"}))),
                 Inline::Code(t) => (t, Some(json!({"type": "code"}))),
-                Inline::Link(t, href) => (t, Some(json!({"type": "link", "attrs": {"href": href}}))),
+                Inline::Link(t, href) => {
+                    (t, Some(json!({"type": "link", "attrs": {"href": href}})))
+                }
             };
             if text.is_empty() {
                 return None;
@@ -254,7 +269,9 @@ fn inline_html(s: &str) -> String {
             Inline::Text(t) => escape_html(&t),
             Inline::Bold(t) => format!("<strong>{}</strong>", escape_html(&t)),
             Inline::Code(t) => format!("<code>{}</code>", escape_html(&t)),
-            Inline::Link(t, h) => format!("<a href=\"{}\">{}</a>", escape_html(&h), escape_html(&t)),
+            Inline::Link(t, h) => {
+                format!("<a href=\"{}\">{}</a>", escape_html(&h), escape_html(&t))
+            }
         })
         .collect()
 }
@@ -315,7 +332,10 @@ fn render(v: &Value, out: &mut String, depth: usize) {
         "text" => {
             let text = v["text"].as_str().unwrap_or("");
             let marks = v["marks"].as_array().cloned().unwrap_or_default();
-            let href = marks.iter().find(|m| m["type"] == "link").and_then(|m| m["attrs"]["href"].as_str());
+            let href = marks
+                .iter()
+                .find(|m| m["type"] == "link")
+                .and_then(|m| m["attrs"]["href"].as_str());
             let has = |t: &str| marks.iter().any(|m| m["type"] == t);
             match href {
                 Some(h) if h != text => out.push_str(&format!("[{text}]({h})")),
@@ -427,14 +447,22 @@ fn tidy(s: &str) -> String {
 }
 
 fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// Plain text -> Confluence storage format.
 pub fn text_to_storage(s: &str) -> String {
     let s = s.replace("\r\n", "\n");
     paragraphs(&s)
-        .map(|p| format!("<p>{}</p>", p.lines().map(escape_html).collect::<Vec<_>>().join("<br/>")))
+        .map(|p| {
+            format!(
+                "<p>{}</p>",
+                p.lines().map(escape_html).collect::<Vec<_>>().join("<br/>")
+            )
+        })
         .collect()
 }
 
@@ -454,7 +482,11 @@ pub fn storage_to_text(html: &str) -> String {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
         if rest.starts_with('&') {
-            let end = rest.char_indices().take(12).find(|&(_, c)| c == ';').map(|(i, _)| i);
+            let end = rest
+                .char_indices()
+                .take(12)
+                .find(|&(_, c)| c == ';')
+                .map(|(i, _)| i);
             match end.and_then(|e| decode_entity(&rest[1..e]).map(|c| (e, c))) {
                 Some((e, c)) => {
                     out.push(c);
@@ -522,9 +554,11 @@ pub fn storage_to_text(html: &str) -> String {
                 }
             }
             ("td" | "th", true) => out.push_str(" | "),
-            ("p" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "table" | "blockquote", _) => {
-                out.push_str("\n\n")
-            }
+            (
+                "p" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "table"
+                | "blockquote",
+                _,
+            ) => out.push_str("\n\n"),
             ("tr", true) => out.push('\n'),
             _ => {}
         }
@@ -599,7 +633,10 @@ mod tests {
     fn markdown_roundtrips_through_adf() {
         let md = "## Plan\n\nShip **today** with `cargo`, see [docs](https://x.y).\n\n- one\n- two\n\n1. a\n2. b\n\n```sh\nmake\n```\n\n> quoted";
         let adf = md_to_adf(md);
-        assert_eq!(adf["content"][1]["content"][1]["marks"][0]["type"], "strong");
+        assert_eq!(
+            adf["content"][1]["content"][1]["marks"][0]["type"],
+            "strong"
+        );
         assert_eq!(adf["content"][2]["type"], "bulletList");
         assert_eq!(adf["content"][3]["type"], "orderedList");
         assert_eq!(adf_to_text(&adf), md);
@@ -616,16 +653,28 @@ mod tests {
 
     #[test]
     fn html_input_to_adf() {
-        let adf = to_adf("<h2>Hi</h2><p>See <a href=\"https://x.y\">this</a> <strong>now</strong></p><ul><li>a</li></ul>", TextFormat::Html);
-        assert_eq!(adf_to_text(&adf), "## Hi\n\nSee [this](https://x.y) **now**\n\n- a");
+        let adf = to_adf(
+            "<h2>Hi</h2><p>See <a href=\"https://x.y\">this</a> <strong>now</strong></p><ul><li>a</li></ul>",
+            TextFormat::Html,
+        );
+        assert_eq!(
+            adf_to_text(&adf),
+            "## Hi\n\nSee [this](https://x.y) **now**\n\n- a"
+        );
     }
 
     #[test]
     fn storage_conversions() {
-        assert_eq!(text_to_storage("a < b\nc\n\nd"), "<p>a &lt; b<br/>c</p><p>d</p>");
+        assert_eq!(
+            text_to_storage("a < b\nc\n\nd"),
+            "<p>a &lt; b<br/>c</p><p>d</p>"
+        );
         let html = "<h1>Intro</h1><p>Fish &amp; chips&#33;</p><ul><li>one</li><li>two</li></ul>\
                     <ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[x < 1]]></ac:plain-text-body></ac:structured-macro>";
-        assert_eq!(storage_to_text(html), "# Intro\n\nFish & chips!\n\n- one\n- two\n\n```\nx < 1\n```");
+        assert_eq!(
+            storage_to_text(html),
+            "# Intro\n\nFish & chips!\n\n- one\n- two\n\n```\nx < 1\n```"
+        );
     }
 
     #[test]

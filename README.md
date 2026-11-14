@@ -73,12 +73,10 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 | `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `--strategy merge_commit\|squash\|fast_forward`, `--close-source-branch`, `--yes` |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
 
-atlx extras: `atlx search "<text>"` (Jira + Confluence + Bitbucket in parallel)
-and `atlx api <jira|confluence|bitbucket> <path>` for any REST endpoint not
-wrapped yet.
-
-Not covered: twg's Teamwork Graph/Rovo commands (`rovo`, `work`, `context`,
-`docs`, `org-tree`, ...). They need Atlassian's private graph APIs.
+atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
+Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +
+Confluence + Bitbucket in parallel) and `atlx api <jira|confluence|bitbucket>
+<path>` for any REST endpoint not wrapped yet.
 
 ### Body formats
 
@@ -89,6 +87,22 @@ simplified.
 
 Errors go to stderr with a non-zero exit code. In `search`, a failing product is
 reported inline (`{"error": ...}`) so the other results still come through.
+
+## Compatibility with twg
+
+`atlx` mirrors `twg`'s command tree, flags and `-o text|json|jsonl` output modes
+for Jira, Confluence and Bitbucket Cloud, with three intentional differences:
+
+- **Direct JSON payloads**: `atlx` emits unwrapped JSON objects/arrays (and
+  `{"items": [...]}` for multi-ID batches) rather than `twg`'s
+  `{"data": ...}` response envelope.
+- **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
+  with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
+  environment variables) instead of `twg`'s OAuth flow.
+- **No Teamwork Graph / Rovo commands**: `twg` commands backed by Atlassian's
+  private graph/Rovo APIs (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
+  are intentionally excluded; `atlx` uses only the public REST APIs (with
+  `atlx search` as a cross-product alternative).
 
 ## Contributing
 

@@ -52,7 +52,10 @@ pub fn content_id(r: &str) -> Result<String> {
         return Ok(r.to_string());
     }
     if let Some(i) = r.find("pageId=") {
-        let id: String = r[i + 7..].chars().take_while(char::is_ascii_digit).collect();
+        let id: String = r[i + 7..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
         if !id.is_empty() {
             return Ok(id);
         }
@@ -60,9 +63,12 @@ pub fn content_id(r: &str) -> Result<String> {
     // .../pages/123/Title, .../blog/2026/01/02/123/Title, .../pages/edit-v2/123
     let segments: Vec<&str> = r.split(['/', '?', '#']).collect();
     if let Some(i) = segments.iter().position(|s| *s == "pages" || *s == "blog")
-        && let Some(id) = segments[i + 1..].iter().find(|s| s.len() >= 5 && s.bytes().all(|b| b.is_ascii_digit())) {
-            return Ok(id.to_string());
-        }
+        && let Some(id) = segments[i + 1..]
+            .iter()
+            .find(|s| s.len() >= 5 && s.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Ok(id.to_string());
+    }
     bail!("'{r}' is not a Confluence content ID or URL (title lookup isn't supported yet)")
 }
 
@@ -70,14 +76,24 @@ fn next_cursor(v: &Value) -> Value {
     v["_links"]["next"]
         .as_str()
         .and_then(|n| n.split(['?', '&']).find_map(|p| p.strip_prefix("cursor=")))
-        .map(|c| urlencoding::decode(c).map(|c| c.into_owned()).unwrap_or_else(|_| c.to_string()))
+        .map(|c| {
+            urlencoding::decode(c)
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| c.to_string())
+        })
         .map_or(Value::Null, Value::from)
 }
 
 // --- search ------------------------------------------------------------------
 
 /// `confluence search query --cql`
-pub fn search_query(c: &Client, cql: &str, limit: usize, excerpt: bool, cursor: Option<&str>) -> Result<Value> {
+pub fn search_query(
+    c: &Client,
+    cql: &str,
+    limit: usize,
+    excerpt: bool,
+    cursor: Option<&str>,
+) -> Result<Value> {
     let limit = limit.clamp(1, 100).to_string();
     let mut q = vec![("cql", cql), ("limit", limit.as_str())];
     if let Some(cur) = cursor {
@@ -98,7 +114,9 @@ pub fn search_query(c: &Client, cql: &str, limit: usize, excerpt: bool, cursor: 
                 "url": format!("{}{}", c.base(), r["url"].as_str().unwrap_or_default()),
             });
             if excerpt {
-                o["excerpt"] = strip_highlight(r["excerpt"].as_str().unwrap_or_default()).trim().into();
+                o["excerpt"] = strip_highlight(r["excerpt"].as_str().unwrap_or_default())
+                    .trim()
+                    .into();
             }
             o
         })
@@ -107,7 +125,11 @@ pub fn search_query(c: &Client, cql: &str, limit: usize, excerpt: bool, cursor: 
 }
 
 /// The CQL that `confluence search text` runs: recent pages and blog posts.
-pub fn text_cql(text: &str, updated_since: Option<&str>, created_since: Option<&str>) -> Result<String> {
+pub fn text_cql(
+    text: &str,
+    updated_since: Option<&str>,
+    created_since: Option<&str>,
+) -> Result<String> {
     let mut cql = format!("siteSearch ~ {} AND type in (page, blogpost)", quote(text));
     if let Some(s) = updated_since {
         cql.push_str(&format!(" AND lastmodified >= \"{}\"", time::to_date(s)?));
@@ -125,7 +147,9 @@ pub fn text_cql(text: &str, updated_since: Option<&str>, created_since: Option<&
 fn try_content<T>(mut f: impl FnMut(ContentType) -> Result<T>) -> Result<(ContentType, T)> {
     match f(ContentType::Page) {
         Ok(v) => Ok((ContentType::Page, v)),
-        Err(e) if e.to_string().contains("HTTP 404") => Ok((ContentType::Blogpost, f(ContentType::Blogpost)?)),
+        Err(e) if e.to_string().contains("HTTP 404") => {
+            Ok((ContentType::Blogpost, f(ContentType::Blogpost)?))
+        }
         Err(e) => Err(e),
     }
 }
@@ -141,12 +165,19 @@ fn fetch(c: &Client, id: &str, draft: bool) -> Result<(ContentType, Value)> {
 
 fn content_url(c: &Client, v: &Value) -> String {
     let base = v["_links"]["base"].as_str().unwrap_or(c.base());
-    format!("{base}{}", v["_links"]["webui"].as_str().unwrap_or_default())
+    format!(
+        "{base}{}",
+        v["_links"]["webui"].as_str().unwrap_or_default()
+    )
 }
 
 fn optional_content_url(c: &Client, v: &Value) -> Value {
     match v["_links"]["webui"].as_str().filter(|s| !s.is_empty()) {
-        Some(webui) => format!("{}{webui}", v["_links"]["base"].as_str().unwrap_or(c.base())).into(),
+        Some(webui) => format!(
+            "{}{webui}",
+            v["_links"]["base"].as_str().unwrap_or(c.base())
+        )
+        .into(),
         None => Value::Null,
     }
 }
@@ -160,7 +191,9 @@ fn format_body(storage: &str, format: ReadFormat) -> Value {
 
 /// The version number doubles as atlx's snapshot token for optimistic updates.
 fn snapshot(v: &Value) -> Value {
-    v["version"]["number"].as_u64().map_or(Value::Null, |n| n.to_string().into())
+    v["version"]["number"]
+        .as_u64()
+        .map_or(Value::Null, |n| n.to_string().into())
 }
 
 pub struct GetOpts<'a> {
@@ -175,10 +208,16 @@ fn resolve_and_fetch(c: &Client, reference: &str, o: &GetOpts) -> Result<(Conten
         return fetch(c, &id, o.draft);
     }
     let Some(ref_space) = o.reference_space else {
-        bail!("'{reference}' is not a Confluence content ID or URL (pass --reference-space to look up by title)");
+        bail!(
+            "'{reference}' is not a Confluence content ID or URL (pass --reference-space to look up by title)"
+        );
     };
     let sid = space_id(c, ref_space)?;
-    let mut q = vec![("space-id", sid.as_str()), ("title", reference), ("body-format", "storage")];
+    let mut q = vec![
+        ("space-id", sid.as_str()),
+        ("title", reference),
+        ("body-format", "storage"),
+    ];
     if o.draft {
         q.push(("status", "draft"));
     }
@@ -211,7 +250,12 @@ pub fn get(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
         Detail::Summary => {
             let text = storage_to_text(storage);
             let excerpt: String = text.chars().take(400).collect();
-            out["excerpt"] = if excerpt.len() < text.len() { format!("{excerpt}…") } else { excerpt }.into();
+            out["excerpt"] = if excerpt.len() < text.len() {
+                format!("{excerpt}…")
+            } else {
+                excerpt
+            }
+            .into();
         }
         Detail::Full => {
             out["format"] = format!("{:?}", o.format).to_lowercase().into();
@@ -231,7 +275,13 @@ fn space_id(c: &Client, space: &str) -> Result<String> {
     results
         .clone()
         .find(|s| s["key"].as_str() == Some(space))
-        .or_else(|| results.clone().find(|s| s["key"].as_str().is_some_and(|k| k.eq_ignore_ascii_case(space))))
+        .or_else(|| {
+            results.clone().find(|s| {
+                s["key"]
+                    .as_str()
+                    .is_some_and(|k| k.eq_ignore_ascii_case(space))
+            })
+        })
         .and_then(|s| s["id"].as_str())
         .map(String::from)
         .ok_or_else(|| anyhow!("no Confluence space with key '{space}'"))
@@ -262,8 +312,10 @@ pub fn create(c: &Client, n: NewContent) -> Result<Value> {
         req["parentId"] = content_id(p)?.into();
     }
     let v = c.post(&format!("/api/v2/{}", n.content_type.collection()), &req)?;
-    Ok(json!({"id": v["id"], "title": v["title"], "status": v["status"], "version": v["version"]["number"],
-              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}))
+    Ok(
+        json!({"id": v["id"], "title": v["title"], "status": v["status"], "version": v["version"]["number"],
+              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}),
+    )
 }
 
 pub struct Edit<'a> {
@@ -284,14 +336,22 @@ pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
     }
     let id = content_id(reference)?;
     let (kind, cur) = fetch(c, &id, e.draft)?;
-    let version = cur["version"]["number"].as_u64().ok_or_else(|| anyhow!("content {id} has no version"))?;
+    let version = cur["version"]["number"]
+        .as_u64()
+        .ok_or_else(|| anyhow!("content {id} has no version"))?;
     if let Some(tok) = e.snapshot_token
-        && tok != version.to_string() {
-            bail!("content {id} changed since your snapshot (token {tok}, current {version}); re-read it and retry");
-        }
+        && tok != version.to_string()
+    {
+        bail!(
+            "content {id} changed since your snapshot (token {tok}, current {version}); re-read it and retry"
+        );
+    }
     let body = match e.body {
         Some((b, f)) => to_storage(b, f),
-        None => cur["body"]["storage"]["value"].as_str().unwrap_or_default().to_string(),
+        None => cur["body"]["storage"]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
     };
     let req = json!({
         "id": id,
@@ -304,8 +364,10 @@ pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
         return Ok(json!({"dry_run": true, "id": id, "from_version": version, "request": req}));
     }
     let v = c.put(&format!("/api/v2/{}/{}", kind.collection(), enc(&id)), &req)?;
-    Ok(json!({"id": v["id"], "title": v["title"], "version": v["version"]["number"],
-              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}))
+    Ok(
+        json!({"id": v["id"], "title": v["title"], "version": v["version"]["number"],
+              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}),
+    )
 }
 
 /// `confluence content list --space`
@@ -318,11 +380,22 @@ pub fn list(
     cursor: Option<&str>,
 ) -> Result<Value> {
     let limit = limit.clamp(1, 250).to_string();
-    let mut q = vec![("status", status), ("limit", limit.as_str()), ("sort", "-modified-date")];
+    let mut q = vec![
+        ("status", status),
+        ("limit", limit.as_str()),
+        ("sort", "-modified-date"),
+    ];
     if let Some(cur) = cursor {
         q.push(("cursor", cur));
     }
-    let v = c.get(&format!("/api/v2/spaces/{}/{}", enc(&space_id(c, space)?), kind.collection()), &q)?;
+    let v = c.get(
+        &format!(
+            "/api/v2/spaces/{}/{}",
+            enc(&space_id(c, space)?),
+            kind.collection()
+        ),
+        &q,
+    )?;
     let results: Vec<Value> = v["results"]
         .as_array()
         .into_iter()
@@ -359,22 +432,41 @@ pub fn comments_list(
     cursor: Option<&str>,
 ) -> Result<Value> {
     let id = content_id(reference)?;
-    let endpoint = if inline { "inline-comments" } else { "footer-comments" };
+    let endpoint = if inline {
+        "inline-comments"
+    } else {
+        "footer-comments"
+    };
     let limit = limit.clamp(1, 250).to_string();
     let mut q = vec![("body-format", "storage"), ("limit", limit.as_str())];
     if let Some(cur) = cursor {
         q.push(("cursor", cur));
     }
-    let (_, v) = try_content(|kind| c.get(&format!("/api/v2/{}/{}/{}", kind.collection(), enc(&id), endpoint), &q))?;
-    let results: Vec<Value> =
-        v["results"].as_array().into_iter().flatten().map(|cm| format_comment(c, cm, inline, format)).collect();
+    let (_, v) = try_content(|kind| {
+        c.get(
+            &format!("/api/v2/{}/{}/{}", kind.collection(), enc(&id), endpoint),
+            &q,
+        )
+    })?;
+    let results: Vec<Value> = v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|cm| format_comment(c, cm, inline, format))
+        .collect();
     Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
 }
 
 /// `confluence content comments create`
-pub fn comment_create(c: &Client, reference: &str, body: &str, format: TextFormat) -> Result<Value> {
+pub fn comment_create(
+    c: &Client,
+    reference: &str,
+    body: &str,
+    format: TextFormat,
+) -> Result<Value> {
     let id = content_id(reference)?;
-    let (kind, _) = try_content(|k| c.get(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &[]))?;
+    let (kind, _) =
+        try_content(|k| c.get(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &[]))?;
     let id_field = match kind {
         ContentType::Page => "pageId",
         ContentType::Blogpost => "blogPostId",
@@ -414,7 +506,12 @@ pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>)
         q.push(("cursor", cur));
     }
     let v = c.get(&format!("/api/v2/pages/{}/children", enc(&id)), &q)?;
-    let results: Vec<Value> = v["results"].as_array().into_iter().flatten().map(|p| child_summary(c, p)).collect();
+    let results: Vec<Value> = v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| child_summary(c, p))
+        .collect();
     Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
 }
 
@@ -472,7 +569,10 @@ pub fn tree(c: &Client, reference: &str, depth: usize) -> Result<Value> {
     let id = content_id(reference)?;
     let depth = depth.min(MAX_TREE_DEPTH);
     let page = c.get(&format!("/api/v2/pages/{}", enc(&id)), &[])?;
-    let anc = c.get(&format!("/api/v2/pages/{}/ancestors", enc(&id)), &[("limit", "250")])?;
+    let anc = c.get(
+        &format!("/api/v2/pages/{}/ancestors", enc(&id)),
+        &[("limit", "250")],
+    )?;
     let ancestors: Vec<Value> = anc["results"]
         .as_array()
         .into_iter()
@@ -496,7 +596,12 @@ pub fn labels(c: &Client, reference: &str, limit: usize) -> Result<Value> {
     let id = content_id(reference)?;
     let limit = limit.clamp(1, 250).to_string();
     let q = [("limit", limit.as_str())];
-    let (_, v) = try_content(|kind| c.get(&format!("/api/v2/{}/{}/labels", kind.collection(), enc(&id)), &q))?;
+    let (_, v) = try_content(|kind| {
+        c.get(
+            &format!("/api/v2/{}/{}/labels", kind.collection(), enc(&id)),
+            &q,
+        )
+    })?;
     Ok(v["results"]
         .as_array()
         .into_iter()
@@ -508,8 +613,13 @@ pub fn labels(c: &Client, reference: &str, limit: usize) -> Result<Value> {
 /// `confluence content delete`
 pub fn delete(c: &Client, reference: &str, purge: bool) -> Result<Value> {
     let id = content_id(reference)?;
-    let q: Vec<(&str, &str)> = if purge { vec![("purge", "true")] } else { Vec::new() };
-    let (kind, _) = try_content(|k| c.delete(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &q))?;
+    let q: Vec<(&str, &str)> = if purge {
+        vec![("purge", "true")]
+    } else {
+        Vec::new()
+    };
+    let (kind, _) =
+        try_content(|k| c.delete(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &q))?;
     Ok(json!({
         "id": id,
         "type": format!("{kind:?}").to_lowercase(),
@@ -543,19 +653,32 @@ pub fn spaces(
 ) -> Result<Value> {
     let limit = limit.clamp(1, 250).to_string();
     let mut q = vec![("limit", limit.as_str())];
-    for (k, v) in [("type", kind), ("status", status), ("keys", keys), ("cursor", cursor)] {
+    for (k, v) in [
+        ("type", kind),
+        ("status", status),
+        ("keys", keys),
+        ("cursor", cursor),
+    ] {
         if let Some(v) = v {
             q.push((k, v));
         }
     }
     let v = c.get("/api/v2/spaces", &q)?;
-    let results: Vec<Value> = v["results"].as_array().into_iter().flatten().map(|s| space_summary(c, s)).collect();
+    let results: Vec<Value> = v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| space_summary(c, s))
+        .collect();
     Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
 }
 
 /// `confluence space get <key-or-id>`
 pub fn space(c: &Client, identifier: &str) -> Result<Value> {
-    let v = c.get(&format!("/api/v2/spaces/{}", enc(&space_id(c, identifier)?)), &[("description-format", "plain")])?;
+    let v = c.get(
+        &format!("/api/v2/spaces/{}", enc(&space_id(c, identifier)?)),
+        &[("description-format", "plain")],
+    )?;
     let mut o = space_summary(c, &v);
     o["description"] = v["description"]["plain"]["value"].clone();
     o["created"] = v["createdAt"].clone();
@@ -566,15 +689,17 @@ fn match_personal_space<'a>(user: &Value, spaces: &'a [Value]) -> Option<&'a Val
     let account_id = user["accountId"].as_str();
     let personal_key = user["personalSpace"]["key"].as_str();
     if let Some(aid) = account_id {
-        if let Some(s) =
-            spaces.iter().find(|s| s["authorId"].as_str() == Some(aid) || s["ownerId"].as_str() == Some(aid))
+        if let Some(s) = spaces
+            .iter()
+            .find(|s| s["authorId"].as_str() == Some(aid) || s["ownerId"].as_str() == Some(aid))
         {
             return Some(s);
         }
         let tilde_aid = format!("~{aid}");
         let tilde_compact = format!("~{}", aid.replace(':', ""));
-        if let Some(s) =
-            spaces.iter().find(|s| matches!(s["key"].as_str(), Some(k) if k == tilde_aid || k == tilde_compact))
+        if let Some(s) = spaces
+            .iter()
+            .find(|s| matches!(s["key"].as_str(), Some(k) if k == tilde_aid || k == tilde_compact))
         {
             return Some(s);
         }
@@ -607,7 +732,10 @@ pub fn space_me(c: &Client) -> Result<Value> {
             _ => break,
         }
     }
-    let who = user["accountId"].as_str().or_else(|| user["displayName"].as_str()).unwrap_or("unknown");
+    let who = user["accountId"]
+        .as_str()
+        .or_else(|| user["displayName"].as_str())
+        .unwrap_or("unknown");
     bail!("no personal Confluence space found for current user '{who}'")
 }
 
@@ -621,7 +749,9 @@ mod tests {
     type MockReply = (u16, Value);
     type RecordedReq = (String, String, String);
 
-    fn mock_client(handler: impl Fn(&str, &str, &str) -> MockReply + Send + 'static) -> (Client, Arc<Mutex<Vec<RecordedReq>>>) {
+    fn mock_client(
+        handler: impl Fn(&str, &str, &str) -> MockReply + Send + 'static,
+    ) -> (Client, Arc<Mutex<Vec<RecordedReq>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -647,7 +777,9 @@ mod tests {
                             .lines()
                             .find_map(|l| {
                                 let (k, v) = l.split_once(':')?;
-                                k.eq_ignore_ascii_case("content-length").then(|| v.trim().parse().ok()).flatten()
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse().ok())
+                                    .flatten()
                             })
                             .unwrap_or(0);
                     }
@@ -662,10 +794,18 @@ mod tests {
                 let mut first = head.lines().next().unwrap_or_default().split_whitespace();
                 let method = first.next().unwrap_or_default().to_string();
                 let target = first.next().unwrap_or_default().to_string();
-                let body = String::from_utf8_lossy(&buf[end..buf.len().min(end + content_len)]).to_string();
-                log_bg.lock().unwrap().push((method.clone(), target.clone(), body.clone()));
+                let body = String::from_utf8_lossy(&buf[end..buf.len().min(end + content_len)])
+                    .to_string();
+                log_bg
+                    .lock()
+                    .unwrap()
+                    .push((method.clone(), target.clone(), body.clone()));
                 let (status, payload) = handler(&method, &target, &body);
-                let json = if payload.is_null() { String::new() } else { payload.to_string() };
+                let json = if payload.is_null() {
+                    String::new()
+                } else {
+                    payload.to_string()
+                };
                 let resp = format!(
                     "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
                     json.len()
@@ -673,16 +813,32 @@ mod tests {
                 let _ = stream.write_all(resp.as_bytes());
             }
         });
-        (Client::new(format!("http://{addr}"), "u@x.com", "tok", Some(2000)), log)
+        (
+            Client::new(format!("http://{addr}"), "u@x.com", "tok", Some(2000)),
+            log,
+        )
     }
 
     #[test]
     fn content_ids_from_urls() {
         assert_eq!(content_id("123456").unwrap(), "123456");
-        assert_eq!(content_id("https://a.atlassian.net/wiki/spaces/ENG/pages/98765/Runbook").unwrap(), "98765");
-        assert_eq!(content_id("https://a.atlassian.net/wiki/spaces/ENG/pages/edit-v2/98765").unwrap(), "98765");
-        assert_eq!(content_id("https://a.atlassian.net/wiki/spaces/ENG/blog/2026/01/02/55555/Post").unwrap(), "55555");
-        assert_eq!(content_id("https://a.atlassian.net/wiki/pages/viewpage.action?pageId=4242").unwrap(), "4242");
+        assert_eq!(
+            content_id("https://a.atlassian.net/wiki/spaces/ENG/pages/98765/Runbook").unwrap(),
+            "98765"
+        );
+        assert_eq!(
+            content_id("https://a.atlassian.net/wiki/spaces/ENG/pages/edit-v2/98765").unwrap(),
+            "98765"
+        );
+        assert_eq!(
+            content_id("https://a.atlassian.net/wiki/spaces/ENG/blog/2026/01/02/55555/Post")
+                .unwrap(),
+            "55555"
+        );
+        assert_eq!(
+            content_id("https://a.atlassian.net/wiki/pages/viewpage.action?pageId=4242").unwrap(),
+            "4242"
+        );
         assert!(content_id("Some title").is_err());
     }
 
@@ -732,10 +888,21 @@ mod tests {
         });
 
         let c = Client::new(format!("http://{addr}/wiki"), "a@b.c", "tok", None);
-        let out = spaces(&c, Some("global"), Some("current"), None, 10, Some("page1=")).unwrap();
+        let out = spaces(
+            &c,
+            Some("global"),
+            Some("current"),
+            None,
+            10,
+            Some("page1="),
+        )
+        .unwrap();
         let req = handle.join().unwrap();
         let request_line = req.lines().next().unwrap_or_default();
-        assert!(request_line.contains("/wiki/api/v2/spaces?"), "{request_line}");
+        assert!(
+            request_line.contains("/wiki/api/v2/spaces?"),
+            "{request_line}"
+        );
         assert!(request_line.contains("limit=10"), "{request_line}");
         assert!(request_line.contains("cursor=page1%3D"), "{request_line}");
         assert_eq!(out["results"][0]["key"], "ENG");
@@ -752,10 +919,16 @@ mod tests {
         assert_eq!(match_personal_space(&user, &spaces).unwrap()["id"], "2");
 
         let spaces_by_key = vec![json!({"id": "3", "key": "~557058abc-def"})];
-        assert_eq!(match_personal_space(&user, &spaces_by_key).unwrap()["id"], "3");
+        assert_eq!(
+            match_personal_space(&user, &spaces_by_key).unwrap()["id"],
+            "3"
+        );
 
         let spaces_legacy = vec![json!({"id": "4", "key": "~legacy"})];
-        assert_eq!(match_personal_space(&user, &spaces_legacy).unwrap()["id"], "4");
+        assert_eq!(
+            match_personal_space(&user, &spaces_legacy).unwrap()["id"],
+            "4"
+        );
 
         let unrelated = vec![json!({"id": "5", "key": "~someone-else", "authorId": "999"})];
         assert!(match_personal_space(&user, &unrelated).is_none());
@@ -776,7 +949,9 @@ mod tests {
                     "_links": {"next": "/wiki/api/v2/pages/101/footer-comments?cursor=c2"}
                 }),
             ),
-            ("GET", "/api/v2/pages/202/inline-comments?body-format=storage&limit=25") => (404, json!({"message": "not found"})),
+            ("GET", "/api/v2/pages/202/inline-comments?body-format=storage&limit=25") => {
+                (404, json!({"message": "not found"}))
+            }
             ("GET", "/api/v2/blogposts/202/inline-comments?body-format=storage&limit=25") => (
                 200,
                 json!({
@@ -799,7 +974,10 @@ mod tests {
                     "_links": {"webui": "/spaces/ENG/blog/202?focusedCommentId=fc9"}
                 }),
             ),
-            _ => (404, json!({"message": format!("unexpected {method} {target}")})),
+            _ => (
+                404,
+                json!({"message": format!("unexpected {method} {target}")}),
+            ),
         });
 
         let md = comments_list(&c, "101", false, ReadFormat::Md, 10, None).unwrap();
@@ -807,7 +985,10 @@ mod tests {
         assert_eq!(md["next_cursor"], "c2");
 
         let html = comments_list(&c, "101", false, ReadFormat::Html, 10, None).unwrap();
-        assert_eq!(html["results"][0]["body"], "<p>Hello <strong>world</strong></p>");
+        assert_eq!(
+            html["results"][0]["body"],
+            "<p>Hello <strong>world</strong></p>"
+        );
 
         let inline = comments_list(&c, "202", true, ReadFormat::Md, 25, None).unwrap();
         assert_eq!(inline["results"][0]["id"], "ic1");
@@ -818,7 +999,10 @@ mod tests {
         let reqs = log.lock().unwrap();
         let post_body: Value = serde_json::from_str(&reqs.last().unwrap().2).unwrap();
         assert_eq!(post_body["blogPostId"], "202");
-        assert_eq!(post_body["body"]["value"], "<p>Nice <strong>post</strong></p>");
+        assert_eq!(
+            post_body["body"]["value"],
+            "<p>Nice <strong>post</strong></p>"
+        );
     }
 
     #[test]
@@ -828,11 +1012,26 @@ mod tests {
                 200,
                 json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current", "spaceId": "1", "childPosition": 1}]}),
             ),
-            "/api/v2/pages/10" => (200, json!({"id": "10", "title": "Root", "status": "current", "spaceId": "1", "_links": {"webui": "/spaces/S/pages/10"}})),
-            "/api/v2/pages/10/ancestors?limit=250" => (200, json!({"results": [{"id": "1", "type": "page", "title": "Home"}]})),
-            "/api/v2/pages/10/children?limit=250" => (200, json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current"}]})),
-            "/api/v2/pages/11/children?limit=250" => (200, json!({"results": [{"id": "12", "type": "page", "title": "Grandchild", "status": "current"}]})),
-            "/api/v2/pages/12/children?limit=250" => (200, json!({"results": [{"id": "13", "type": "page", "title": "Too Deep", "status": "current"}]})),
+            "/api/v2/pages/10" => (
+                200,
+                json!({"id": "10", "title": "Root", "status": "current", "spaceId": "1", "_links": {"webui": "/spaces/S/pages/10"}}),
+            ),
+            "/api/v2/pages/10/ancestors?limit=250" => (
+                200,
+                json!({"results": [{"id": "1", "type": "page", "title": "Home"}]}),
+            ),
+            "/api/v2/pages/10/children?limit=250" => (
+                200,
+                json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current"}]}),
+            ),
+            "/api/v2/pages/11/children?limit=250" => (
+                200,
+                json!({"results": [{"id": "12", "type": "page", "title": "Grandchild", "status": "current"}]}),
+            ),
+            "/api/v2/pages/12/children?limit=250" => (
+                200,
+                json!({"results": [{"id": "13", "type": "page", "title": "Too Deep", "status": "current"}]}),
+            ),
             _ => (404, json!({"message": format!("unexpected {target}")})),
         });
 
@@ -854,7 +1053,9 @@ mod tests {
     #[test]
     fn space_me_title_lookup_labels_and_delete() {
         let (c, log) = mock_client(|method, target, _| match (method, target) {
-            ("GET", "/rest/api/user/current") => (200, json!({"accountId": "acc-42", "displayName": "Ada"})),
+            ("GET", "/rest/api/user/current") => {
+                (200, json!({"accountId": "acc-42", "displayName": "Ada"}))
+            }
             ("GET", "/api/v2/spaces?type=personal&limit=250") => (
                 200,
                 json!({"results": [{"id": "77", "key": "~acc-42", "name": "Ada", "type": "personal", "status": "current", "authorId": "acc-42"}]}),
@@ -863,33 +1064,64 @@ mod tests {
                 200,
                 json!({"id": "77", "key": "~acc-42", "name": "Ada", "type": "personal", "status": "current", "homepageId": "78", "_links": {"webui": "/spaces/~acc-42"}, "description": {"plain": {"value": "My space"}}, "createdAt": "2026-01-01T00:00:00Z"}),
             ),
-            ("GET", "/api/v2/spaces?keys=ENG") => (200, json!({"results": [{"id": "55", "key": "ENG"}]})),
-            ("GET", "/api/v2/pages?space-id=55&title=Runbook&body-format=storage") => (200, json!({"results": []})),
+            ("GET", "/api/v2/spaces?keys=ENG") => {
+                (200, json!({"results": [{"id": "55", "key": "ENG"}]}))
+            }
+            ("GET", "/api/v2/pages?space-id=55&title=Runbook&body-format=storage") => {
+                (200, json!({"results": []}))
+            }
             ("GET", "/api/v2/blogposts?space-id=55&title=Runbook&body-format=storage") => (
                 200,
                 json!({"results": [{"id": "901", "title": "Runbook", "status": "current", "spaceId": "55", "version": {"number": 2, "createdAt": "2026-01-01T00:00:00Z"}, "body": {"storage": {"value": "<p>Post</p>"}}, "_links": {"webui": "/spaces/ENG/blog/901"}}]}),
             ),
             ("GET", "/api/v2/pages/901/labels?limit=25") => (404, json!({})),
-            ("GET", "/api/v2/blogposts/901/labels?limit=25") => (200, json!({"results": [{"id": "l1", "name": "ops", "prefix": "global"}]})),
+            ("GET", "/api/v2/blogposts/901/labels?limit=25") => (
+                200,
+                json!({"results": [{"id": "l1", "name": "ops", "prefix": "global"}]}),
+            ),
             ("DELETE", "/api/v2/pages/901?purge=true") => (404, json!({})),
             ("DELETE", "/api/v2/blogposts/901?purge=true") => (204, Value::Null),
-            _ => (404, json!({"message": format!("unexpected {method} {target}")})),
+            _ => (
+                404,
+                json!({"message": format!("unexpected {method} {target}")}),
+            ),
         });
 
         let me = space_me(&c).unwrap();
         assert_eq!(me["id"], "77");
         assert_eq!(me["description"], "My space");
 
-        let got = get(&c, "Runbook", &GetOpts { detail: Detail::Full, format: ReadFormat::Md, draft: false, reference_space: Some("ENG") }).unwrap();
+        let got = get(
+            &c,
+            "Runbook",
+            &GetOpts {
+                detail: Detail::Full,
+                format: ReadFormat::Md,
+                draft: false,
+                reference_space: Some("ENG"),
+            },
+        )
+        .unwrap();
         assert_eq!(got["id"], "901");
         assert_eq!(got["type"], "blogpost");
         assert_eq!(got["body"], "Post");
 
         let lbls = labels(&c, "901", 25).unwrap();
-        assert_eq!(lbls, json!([{"id": "l1", "name": "ops", "prefix": "global"}]));
+        assert_eq!(
+            lbls,
+            json!([{"id": "l1", "name": "ops", "prefix": "global"}])
+        );
 
         let del = delete(&c, "901", true).unwrap();
-        assert_eq!(del, json!({"id": "901", "type": "blogpost", "deleted": true, "purged": true}));
-        assert!(log.lock().unwrap().iter().any(|(m, t, _)| m == "DELETE" && t == "/api/v2/blogposts/901?purge=true"));
+        assert_eq!(
+            del,
+            json!({"id": "901", "type": "blogpost", "deleted": true, "purged": true})
+        );
+        assert!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .any(|(m, t, _)| m == "DELETE" && t == "/api/v2/blogposts/901?purge=true")
+        );
     }
 }

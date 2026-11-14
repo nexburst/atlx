@@ -21,7 +21,11 @@ impl Client {
             .user_agent(concat!("atlx/", env!("CARGO_PKG_VERSION")))
             .build();
         let creds = base64::engine::general_purpose::STANDARD.encode(format!("{email}:{token}"));
-        Self { agent, base, auth: format!("Basic {creds}") }
+        Self {
+            agent,
+            base,
+            auth: format!("Basic {creds}"),
+        }
     }
 
     pub fn base(&self) -> &str {
@@ -46,11 +50,20 @@ impl Client {
 
     /// `path` is appended to the base URL unless it is already absolute
     /// (e.g. a Bitbucket `next` pagination link).
-    pub fn request(&self, method: &str, path: &str, query: &[(&str, &str)], body: Option<&Value>) -> Result<Value> {
+    pub fn request(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<Value> {
         let (url, attach_auth) = self.resolve_request(path)?;
         let mut attempt = 0;
         loop {
-            let mut req = self.agent.request(method, &url).set("Accept", "application/json");
+            let mut req = self
+                .agent
+                .request(method, &url)
+                .set("Accept", "application/json");
             if attach_auth {
                 req = req.set("Authorization", &self.auth);
             }
@@ -80,7 +93,11 @@ impl Client {
                 }
                 Err(ureq::Error::Status(code, r)) => {
                     let text = r.into_string().unwrap_or_default();
-                    bail!("{method} {url} failed: HTTP {code}: {}{}", error_message(&text), hint(code));
+                    bail!(
+                        "{method} {url} failed: HTTP {code}: {}{}",
+                        error_message(&text),
+                        hint(code)
+                    );
                 }
                 Err(e) => bail!("{method} {url} failed: {e}"),
             }
@@ -88,12 +105,23 @@ impl Client {
     }
 
     fn resolve_request(&self, path: &str) -> Result<(String, bool)> {
-        let is_abs = path.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("http://"))
-            || path.get(..8).is_some_and(|p| p.eq_ignore_ascii_case("https://"));
-        let url = if is_abs { path.to_string() } else { format!("{}{}", self.base, path) };
+        let is_abs = path
+            .get(..7)
+            .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+            || path
+                .get(..8)
+                .is_some_and(|p| p.eq_ignore_ascii_case("https://"));
+        let url = if is_abs {
+            path.to_string()
+        } else {
+            format!("{}{}", self.base, path)
+        };
         let target = parse_origin(&url).ok_or_else(|| anyhow!("invalid request URL '{url}'"))?;
         if target.scheme == "http" && !is_loopback_host(&target.host) {
-            bail!("refusing plaintext HTTP request to non-loopback host '{}'", target.host);
+            bail!(
+                "refusing plaintext HTTP request to non-loopback host '{}'",
+                target.host
+            );
         }
         let attach_auth = if !is_abs {
             true
@@ -152,7 +180,10 @@ fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    let bare = host.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(host);
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
     bare.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
@@ -179,12 +210,24 @@ pub fn error_message(body: &str) -> String {
         parts.extend(msgs.iter().filter_map(|m| m.as_str()).map(String::from));
     }
     if let Some(errs) = v["errors"].as_object() {
-        parts.extend(errs.iter().map(|(k, m)| format!("{k}: {}", m.as_str().unwrap_or(&m.to_string()))));
+        parts.extend(
+            errs.iter()
+                .map(|(k, m)| format!("{k}: {}", m.as_str().unwrap_or(&m.to_string()))),
+        );
     }
     if let Some(errs) = v["errors"].as_array() {
-        parts.extend(errs.iter().filter_map(|e| e["title"].as_str().or(e["message"].as_str())).map(String::from));
+        parts.extend(
+            errs.iter()
+                .filter_map(|e| e["title"].as_str().or(e["message"].as_str()))
+                .map(String::from),
+        );
     }
-    for m in [&v["errorMessage"], &v["message"], &v["error"]["message"], &v["error"]["detail"]] {
+    for m in [
+        &v["errorMessage"],
+        &v["message"],
+        &v["error"]["message"],
+        &v["error"]["detail"],
+    ] {
         if let Some(s) = m.as_str() {
             parts.push(s.to_string());
         }
@@ -192,11 +235,19 @@ pub fn error_message(body: &str) -> String {
     if let Some(s) = v["error"].as_str() {
         parts.push(s.to_string());
     }
-    if parts.is_empty() { truncate(body.trim(), 500) } else { parts.join("; ") }
+    if parts.is_empty() {
+        truncate(body.trim(), 500)
+    } else {
+        parts.join("; ")
+    }
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.to_string() } else { s.chars().take(n).collect::<String>() + "…" }
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        s.chars().take(n).collect::<String>() + "…"
+    }
 }
 
 #[cfg(test)]
@@ -211,25 +262,47 @@ mod tests {
 
     #[test]
     fn extracts_bitbucket_and_confluence_errors() {
-        assert_eq!(error_message(r#"{"type":"error","error":{"message":"Repository not found"}}"#), "Repository not found");
-        assert_eq!(error_message(r#"{"errors":[{"status":404,"title":"Not Found"}]}"#), "Not Found");
+        assert_eq!(
+            error_message(r#"{"type":"error","error":{"message":"Repository not found"}}"#),
+            "Repository not found"
+        );
+        assert_eq!(
+            error_message(r#"{"errors":[{"status":404,"title":"Not Found"}]}"#),
+            "Not Found"
+        );
         assert_eq!(error_message("plain text"), "plain text");
     }
 
     #[test]
     fn auth_origin_and_scheme_guard() {
-        let c = Client::new("https://api.bitbucket.org/2.0".into(), "a@b.c", "secret", None);
+        let c = Client::new(
+            "https://api.bitbucket.org/2.0".into(),
+            "a@b.c",
+            "secret",
+            None,
+        );
         assert_eq!(
             c.resolve_request("/repositories/acme").unwrap(),
-            ("https://api.bitbucket.org/2.0/repositories/acme".into(), true)
+            (
+                "https://api.bitbucket.org/2.0/repositories/acme".into(),
+                true
+            )
         );
         assert_eq!(
-            c.resolve_request("https://api.bitbucket.org/2.0/repositories/acme?page=2").unwrap(),
-            ("https://api.bitbucket.org/2.0/repositories/acme?page=2".into(), true)
+            c.resolve_request("https://api.bitbucket.org/2.0/repositories/acme?page=2")
+                .unwrap(),
+            (
+                "https://api.bitbucket.org/2.0/repositories/acme?page=2".into(),
+                true
+            )
         );
         assert_eq!(
-            c.resolve_request("HTTPS://API.BITBUCKET.ORG:443/2.0/repositories/acme").unwrap(),
-            ("HTTPS://API.BITBUCKET.ORG:443/2.0/repositories/acme".into(), true)
+            c.resolve_request("HTTPS://API.BITBUCKET.ORG:443/2.0/repositories/acme")
+                .unwrap(),
+            (
+                "HTTPS://API.BITBUCKET.ORG:443/2.0/repositories/acme".into(),
+                true
+            )
         );
         // Different host must not receive Authorization.
         assert_eq!(
@@ -237,20 +310,34 @@ mod tests {
             ("https://evil.example/steal".into(), false)
         );
         assert_eq!(
-            c.resolve_request("https://api.bitbucket.org.evil.example/steal").unwrap(),
+            c.resolve_request("https://api.bitbucket.org.evil.example/steal")
+                .unwrap(),
             ("https://api.bitbucket.org.evil.example/steal".into(), false)
         );
         // Plaintext HTTP on non-loopback hosts must be rejected.
-        assert!(c.resolve_request("http://api.bitbucket.org/2.0/repositories/acme").is_err());
+        assert!(
+            c.resolve_request("http://api.bitbucket.org/2.0/repositories/acme")
+                .is_err()
+        );
         assert!(c.resolve_request("http://evil.example/steal").is_err());
-        let bad_base = Client::new("http://api.bitbucket.org/2.0".into(), "a@b.c", "secret", None);
+        let bad_base = Client::new(
+            "http://api.bitbucket.org/2.0".into(),
+            "a@b.c",
+            "secret",
+            None,
+        );
         assert!(bad_base.resolve_request("/repositories/acme").is_err());
 
         // Loopback HTTP is allowed for local mock testing.
         let local = Client::new("http://127.0.0.1:8080".into(), "a@b.c", "secret", None);
-        assert_eq!(local.resolve_request("/next").unwrap(), ("http://127.0.0.1:8080/next".into(), true));
         assert_eq!(
-            local.resolve_request("http://127.0.0.1:8080/next?page=2").unwrap(),
+            local.resolve_request("/next").unwrap(),
+            ("http://127.0.0.1:8080/next".into(), true)
+        );
+        assert_eq!(
+            local
+                .resolve_request("http://127.0.0.1:8080/next?page=2")
+                .unwrap(),
             ("http://127.0.0.1:8080/next?page=2".into(), true)
         );
         assert_eq!(
@@ -259,7 +346,9 @@ mod tests {
         );
         let localhost = Client::new("http://localhost:8080".into(), "a@b.c", "secret", None);
         assert_eq!(
-            localhost.resolve_request("http://localhost:8080/next").unwrap(),
+            localhost
+                .resolve_request("http://localhost:8080/next")
+                .unwrap(),
             ("http://localhost:8080/next".into(), true)
         );
     }

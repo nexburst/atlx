@@ -17,7 +17,10 @@ pub fn print(v: &Value, f: Format) {
         Format::Json => println!("{}", serde_json::to_string_pretty(v).unwrap_or_default()),
         Format::Text => print!("{}", to_text(v)),
         Format::Jsonl => {
-            let rows = v.as_array().or_else(|| v["issues"].as_array()).or_else(|| v["results"].as_array());
+            let rows = v
+                .as_array()
+                .or_else(|| v["issues"].as_array())
+                .or_else(|| v["results"].as_array());
             match rows {
                 Some(rows) => rows.iter().for_each(|r| println!("{r}")),
                 None => println!("{v}"),
@@ -48,11 +51,16 @@ fn scalar(v: &Value) -> String {
 
 fn cell(v: &Value) -> String {
     let s = scalar(v).replace(['\n', '\r', '\t'], " ");
-    if s.chars().count() > MAX_CELL { s.chars().take(MAX_CELL - 1).collect::<String>() + "…" } else { s }
+    if s.chars().count() > MAX_CELL {
+        s.chars().take(MAX_CELL - 1).collect::<String>() + "…"
+    } else {
+        s
+    }
 }
 
 fn is_table(v: &Value) -> bool {
-    v.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_object))
+    v.as_array()
+        .is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_object))
 }
 
 fn render(v: &Value, out: &mut String, indent: usize) {
@@ -69,7 +77,9 @@ fn render(v: &Value, out: &mut String, indent: usize) {
             let width = m.keys().map(|k| k.len()).max().unwrap_or(0);
             for (k, val) in m {
                 match val {
-                    Value::Array(a) if a.is_empty() => out.push_str(&format!("{pad}{k:<width$}  (none)\n")),
+                    Value::Array(a) if a.is_empty() => {
+                        out.push_str(&format!("{pad}{k:<width$}  (none)\n"))
+                    }
                     Value::Object(_) => {
                         out.push_str(&format!("{pad}{k}:\n"));
                         render(val, out, indent + 1);
@@ -101,11 +111,21 @@ fn table(rows: &[Value], out: &mut String, pad: &str) {
             }
         }
     }
-    let cells: Vec<Vec<String>> = rows.iter().map(|r| cols.iter().map(|c| cell(&r[c.as_str()])).collect()).collect();
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| cols.iter().map(|c| cell(&r[c.as_str()])).collect())
+        .collect();
     let widths: Vec<usize> = cols
         .iter()
         .enumerate()
-        .map(|(i, c)| cells.iter().map(|r| r[i].chars().count()).max().unwrap_or(0).max(c.len()))
+        .map(|(i, c)| {
+            cells
+                .iter()
+                .map(|r| r[i].chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(c.len())
+        })
         .collect();
     let line = |vals: Vec<String>| -> String {
         let mut s = pad.to_string();
@@ -135,6 +155,9 @@ mod tests {
         let v = json!([{"key": "A-1", "summary": "First"}, {"key": "A-22", "summary": null}]);
         assert_eq!(to_text(&v), "KEY   SUMMARY\nA-1   First\nA-22\n");
         let o = json!({"key": "A-1", "description": "line1\nline2", "jira": []});
-        assert_eq!(to_text(&o), "key          A-1\ndescription:\n  line1\n  line2\njira         (none)\n");
+        assert_eq!(
+            to_text(&o),
+            "key          A-1\ndescription:\n  line1\n  line2\njira         (none)\n"
+        );
     }
 }
