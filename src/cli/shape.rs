@@ -125,7 +125,7 @@ impl Shaping {
                 f.dotted().join(", ")
             );
         }
-        let paths = f.for_payload(&v);
+        let paths = f.paths.clone();
         match select::select(v, &paths) {
             Selected::Matched(v) | Selected::Unchanged(v) => v,
             Selected::Unmatched(v) => {
@@ -230,7 +230,7 @@ impl Shaping {
             print!("{text}");
             return;
         }
-        let fields = &self.agent_fields.for_payload(payload);
+        let fields = &self.agent_fields.paths;
         let compact_path = compact_path(&path);
         let compact = if fields.is_empty() {
             None

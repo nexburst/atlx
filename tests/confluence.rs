@@ -46,12 +46,14 @@ fn confluence_get_falls_back_from_page_404_to_blogpost() {
 
     assert_eq!(out["id"], "55555");
     assert_eq!(out["type"], "blogpost");
-    assert_eq!(out["snapshot_token"], "3");
-    assert_eq!(out["format"], "md");
-    assert!(out["body"].as_str().unwrap().contains("## Release"));
-    assert!(out["body"].as_str().unwrap().contains("Shipped!"));
+    assert_eq!(out["snapshotToken"], "3");
+    assert_eq!(out["detail"], "full");
+    assert_eq!(out["body"]["format"], "md");
+    let body = out["body"]["value"].as_str().unwrap();
+    assert!(body.contains("## Release"));
+    assert!(body.contains("Shipped!"));
     assert_eq!(
-        out["url"],
+        out["externalUrl"],
         format!("{}/spaces/ENG/blog/55555", srv.base_url())
     );
 
@@ -122,8 +124,8 @@ fn confluence_update_snapshot_token_validation_and_dry_run() {
         },
     )
     .unwrap();
-    assert_eq!(dry["dry_run"], true);
-    assert_eq!(dry["from_version"], 4);
+    assert_eq!(dry["dryRun"], true);
+    assert_eq!(dry["fromVersion"], 4);
     assert_eq!(dry["request"]["version"]["number"], 5);
     assert_eq!(dry["request"]["version"]["minorEdit"], true);
     assert_eq!(dry["request"]["body"]["value"], "<h1>Heading</h1>");
@@ -142,8 +144,8 @@ fn confluence_update_snapshot_token_validation_and_dry_run() {
         },
     )
     .unwrap();
-    assert_eq!(real["version"], 5);
-    assert_eq!(real["snapshot_token"], "5");
+    assert_eq!(real["version"]["number"], 5);
+    assert_eq!(real["snapshotToken"], "5");
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 4);
@@ -194,13 +196,14 @@ fn confluence_search_query_and_list_extract_next_cursor() {
     let client = srv.client();
 
     let searched = confluence::search_query(&client, "type=page", 10, true, Some("prev")).unwrap();
-    assert_eq!(searched["next_cursor"], "cur/1==");
+    assert_eq!(searched["nextCursor"], "cur/1==");
+    assert!(searched.get("_links").is_none());
     assert_eq!(searched["results"][0]["title"], "Launch Plan");
     assert_eq!(searched["results"][0]["excerpt"], "Our launch checklist");
 
     let listed =
         confluence::list(&client, "ENG", ContentType::Page, "current", 5, Some("c0")).unwrap();
-    assert_eq!(listed["next_cursor"], "page=2");
+    assert_eq!(listed["nextCursor"], "page=2");
     assert_eq!(listed["results"][0]["id"], "10");
 
     let created = confluence::create(
@@ -217,7 +220,7 @@ fn confluence_search_query_and_list_extract_next_cursor() {
     )
     .unwrap();
     assert_eq!(created["id"], "77");
-    assert_eq!(created["snapshot_token"], "1");
+    assert_eq!(created["snapshotToken"], "1");
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 4);

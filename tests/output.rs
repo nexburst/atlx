@@ -83,7 +83,16 @@ fn select_projects_json_output() {
     );
     assert!(o.status.success(), "{}", stderr(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v, json!({"key": "OK-1", "status": "Done"}));
+    // As in twg: the envelope keys stay, `request` and `pageInfo` go.
+    assert_eq!(
+        v,
+        json!({
+            "apiVersion": "v2",
+            "command": "jira.workitem.get",
+            "meta": {"resourceClass": "entity", "sourceMode": "rest", "resourceType": "jira.workitem"},
+            "data": [{"key": "OK-1", "status": {"name": "Done"}}]
+        })
+    );
 
     // A preset.
     let o = atlx(
@@ -93,8 +102,9 @@ fn select_projects_json_output() {
         ],
     );
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["key"], "OK-1");
-    assert!(v.get("type").is_none(), "{v}");
+    assert_eq!(v["data"][0]["key"], "OK-1");
+    assert_eq!(v["data"][0]["status"], json!({"name": "Done"}));
+    assert!(v["data"][0].get("issuetype").is_none(), "{v}");
 
     // Nothing matched: full payload and a warning.
     let o = atlx(
@@ -104,7 +114,7 @@ fn select_projects_json_output() {
         ],
     );
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["type"], "Task");
+    assert_eq!(v["data"][0]["issuetype"]["name"], "Task");
     assert!(stderr(&o).contains("--select matched nothing"));
 
     // Text mode ignores it, with a warning.
@@ -157,8 +167,8 @@ fn output_file_redirects_stdout() {
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(stdout(&o), format!("stdout={f}\n"));
     let v = read_json(&file);
-    assert_eq!(v["key"], "OK-1");
-    assert_eq!(v["type"], "Task");
+    assert_eq!(v["data"][0]["key"], "OK-1");
+    assert_eq!(v["data"][0]["issuetype"]["name"], "Task");
 
     // Errors go to the file too, and keep their exit code.
     let o = atlx(
@@ -199,8 +209,12 @@ fn body_only_output_file_prints_metadata() {
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "<p>Hello</p>");
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["snapshot_token"], "7");
-    assert_eq!(v["body"], json!({"outputFile": f}));
+    assert_eq!(v["command"], "confluence.content.get");
+    assert_eq!(v["data"]["snapshotToken"], "7");
+    assert_eq!(
+        v["data"]["body"],
+        json!({"format": "html", "outputFile": f})
+    );
 
     let o = atlx(&srv, &[&args[..], &["-o", "text"]].concat());
     assert_eq!(stdout(&o), format!("stdout={f}\n"));
@@ -230,7 +244,7 @@ fn output_summary_writes_payload_and_prints_envelope() {
     let full = std::fs::read_to_string(&file).unwrap();
     assert!(
         out.starts_with(&format!(
-            "output_files:\n  stdout: \"{}\"\n  stdout_lines: {}\n  stdout_bytes: {}\ncommand: \"jira.workitem.get\"\nstdout_inline:\n  key: \"OK-1\"\n",
+            "output_files:\n  stdout: \"{}\"\n  stdout_lines: {}\n  stdout_bytes: {}\ncommand: \"jira.workitem.get\"\nresource_type: \"entity\"\nstdout_inline:\n  apiVersion: \"v2\"\n  command: \"jira.workitem.get\"\n",
             f.replace('\\', "\\\\"),
             full.split('\n').count(),
             full.len()
@@ -246,7 +260,7 @@ fn output_summary_writes_payload_and_prints_envelope() {
         "{out}"
     );
     assert!(
-        out.contains("stdout_shape:\n") && out.contains("\n  key: [S, 4, 1, [\"OK-1\"]]\n"),
+        out.contains("stdout_shape:\n") && out.contains("\n      key: [S, 4, 1, [\"OK-1\"]]\n"),
         "{out}"
     );
     assert!(!out.contains("stdout_inline"));
@@ -266,11 +280,16 @@ fn output_summary_writes_payload_and_prints_envelope() {
     let out = stdout(&o);
     assert!(out.contains("field_source: \"explicit\"\n"), "{out}");
     assert!(
-        out.contains("stdout_inline:\n  key: \"OK-1\"\n  summary: \"Fine\"\n---END---\n"),
+        out.contains(
+            "stdout_inline:\n  data:\n    -\n      key: \"OK-1\"\n      summary: \"Fine\"\n---END---\n"
+        ),
         "{out}"
     );
     let compact = read_json(&dir.join("out.compact.json"));
-    assert_eq!(compact, json!({"key": "OK-1", "summary": "Fine"}));
+    assert_eq!(
+        compact,
+        json!({"data": [{"key": "OK-1", "summary": "Fine"}]})
+    );
 
     // `none` prints the payload as usual (here: into the file).
     let o = atlx(&srv, &[&base[..], &["--output-summary", "none"]].concat());

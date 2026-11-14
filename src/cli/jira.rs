@@ -4,9 +4,10 @@ use super::util::{DEFAULT_CONCURRENCY, batch, concurrency_arg, deprecated, text_
 use crate::client::{self, ApiError};
 use crate::jira;
 use crate::markup::TextFormat;
+use crate::output::envelope::envelope;
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
@@ -658,6 +659,30 @@ fn fields_arg(fields: Option<&str>, field: &[String]) -> Vec<String> {
     all
 }
 
+/// `--fields` for query-style commands: `None` keeps twg's compact rows.
+fn fields_opt(fields: Option<&str>) -> Option<Vec<String>> {
+    fields.map(jira::csv).filter(|f| !f.is_empty())
+}
+
+/// twg's envelope around a work item query or search page.
+fn found(
+    c: &client::Client,
+    command: &str,
+    jql: &str,
+    limit: usize,
+    fields: Option<&[String]>,
+    f: jira::Found,
+) -> Value {
+    let mut request = json!({"jql": jql, "site": jira::site(c), "maxResults": limit});
+    if let Some(fields) = fields {
+        request["fields"] = json!(fields);
+    }
+    envelope(command, "jira.workitem")
+        .request(request)
+        .next_cursor(f.next)
+        .data(f.data)
+}
+
 fn list_edit(
     set: Option<String>,
     add: Option<String>,
@@ -678,18 +703,20 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
         JiraCmd::Workitem { cmd } => workitem(c, cmd),
         JiraCmd::Field {
             cmd: FieldCmd::List { query, custom_only },
-        } => jira::fields(c, query.as_deref(), custom_only),
+        } => Ok(envelope("jira.field.list", "jira.field")
+            .request(json!({"site": jira::site(c), "query": query, "customOnly": custom_only}))
+            .data(jira::fields(c, query.as_deref(), custom_only)?)),
         JiraCmd::Space {
             cmd: SpaceCmd::Query(a),
         } => space_query(c, a),
         JiraCmd::Space {
             cmd: SpaceCmd::Get { identifier },
-        } => jira::project(c, &identifier),
+        } => space_get(c, &identifier),
         JiraCmd::Project {
             cmd: ProjectCmd::List { query, limit },
         } => {
             deprecated("jira project list", "jira space query");
-            jira::space_query(
+            space_envelope(
                 c,
                 &jira::SpaceQuery {
                     query: query.as_deref(),
@@ -702,7 +729,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
             cmd: ProjectCmd::Get { identifier },
         } => {
             deprecated("jira project get", "jira space get");
-            jira::project(c, &identifier)
+            space_get(c, &identifier)
         }
         JiraCmd::Board {
             cmd:
@@ -722,7 +749,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
                 None => project.or(project_ari).map(|p| project_ref(&p)),
             };
             let filter_id = filter_id.as_deref().map(jira::filter_ref);
-            jira::board_query(
+            board_envelope(
                 c,
                 &jira::BoardQuery {
                     project: project.as_deref(),
@@ -766,7 +793,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
             } else {
                 state
             };
-            jira::sprints(c, board, state.as_deref(), start_at, max_results)
+            sprints_envelope(c, board, state.as_deref(), start_at, max_results)
         }
         JiraCmd::Board {
             cmd:
@@ -777,7 +804,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
                 },
         } => {
             deprecated("jira board list", "jira board query");
-            jira::board_query(
+            board_envelope(
                 c,
                 &jira::BoardQuery {
                     project: project.as_deref(),
@@ -806,7 +833,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
                 return Err(ApiError::usage("pass --id or --sprint-id").into());
             };
             let fields = fields_arg(fields.as_deref(), &[]);
-            jira::sprint_issues(
+            sprint_issues_envelope(
                 c,
                 jira::sprint_ref(&sprint)?,
                 &jira::SprintIssues {
@@ -827,13 +854,13 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
                 },
         } => {
             deprecated("jira sprint list", "jira board sprints query");
-            jira::sprints(c, board, state.as_deref(), 0, limit)
+            sprints_envelope(c, board, state.as_deref(), 0, limit)
         }
         JiraCmd::Sprint {
             cmd: SprintCmd::Issues { sprint, jql, limit },
         } => {
             deprecated("jira sprint issues", "jira sprint workitems query");
-            jira::sprint_issues(
+            sprint_issues_envelope(
                 c,
                 sprint,
                 &jira::SprintIssues {
@@ -855,6 +882,50 @@ fn project_ref(s: &str) -> String {
     s.to_string()
 }
 
+fn space_envelope(c: &client::Client, q: &jira::SpaceQuery) -> Result<Value> {
+    Ok(envelope("jira.space.query", "jira.space")
+        .request(json!({
+            "site": jira::site(c),
+            "maxResults": q.limit,
+            "orderBy": q.order_by.unwrap_or("key"),
+        }))
+        .data(jira::space_query(c, q)?))
+}
+
+fn space_get(c: &client::Client, identifier: &str) -> Result<Value> {
+    Ok(envelope("jira.space.get", "jira.space")
+        .request(json!({"site": jira::site(c), "projectIdOrKey": identifier}))
+        .data(jira::project(c, identifier)?))
+}
+
+fn board_envelope(c: &client::Client, q: &jira::BoardQuery) -> Result<Value> {
+    Ok(envelope("jira.board.query", "jira.board-search-result")
+        .request(json!({"site": jira::site(c)}))
+        .data(jira::board_query(c, q)?))
+}
+
+fn sprints_envelope(
+    c: &client::Client,
+    board: u64,
+    state: Option<&str>,
+    start: usize,
+    limit: usize,
+) -> Result<Value> {
+    Ok(envelope("jira.board.sprints.query", "jira.sprint")
+        .request(json!({"site": jira::site(c), "boardId": board, "state": state}))
+        .data(jira::sprints(c, board, state, start, limit)?))
+}
+
+fn sprint_issues_envelope(
+    c: &client::Client,
+    sprint: u64,
+    o: &jira::SprintIssues,
+) -> Result<Value> {
+    Ok(envelope("jira.sprint.workitems.query", "jira.workitem")
+        .request(json!({"site": jira::site(c), "sprintId": sprint, "jql": o.jql}))
+        .data(jira::sprint_issues(c, sprint, o)?))
+}
+
 fn space_query(c: &client::Client, a: SpaceQueryArgs) -> Result<Value> {
     let start = match (a.start_at, a.after.as_deref()) {
         (Some(n), _) => n,
@@ -865,7 +936,7 @@ fn space_query(c: &client::Client, a: SpaceQueryArgs) -> Result<Value> {
         })?,
         (None, None) => 0,
     };
-    jira::space_query(
+    space_envelope(
         c,
         &jira::SpaceQuery {
             query: a.query.as_deref(),
@@ -883,6 +954,28 @@ fn space_query(c: &client::Client, a: SpaceQueryArgs) -> Result<Value> {
             limit: a.limit.or(a.first).unwrap_or(25),
         },
     )
+}
+
+fn create_meta(c: &client::Client, space: &str, issue_type: Option<&str>) -> Result<Value> {
+    Ok(
+        envelope("jira.workitem.field.create-metadata", "jira.workitem.field")
+            .request(json!({"site": jira::site(c), "space": space, "type": issue_type}))
+            .data(jira::create_meta(c, space, issue_type)?),
+    )
+}
+
+fn link_types(c: &client::Client) -> Result<Value> {
+    Ok(
+        envelope("jira.workitem.link-types.query", "jira.issue-link-type")
+            .request(json!({"site": jira::site(c)}))
+            .data(jira::link_types(c)?),
+    )
+}
+
+fn weblink(c: &client::Client, key: &str, w: &jira::Weblink) -> Result<Value> {
+    Ok(envelope("jira.workitem.link.weblink", "jira.remote-link")
+        .request(json!({"site": jira::site(c), "id": key}))
+        .data(jira::link_remote(c, key, w)?))
 }
 
 fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
@@ -908,14 +1001,39 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 .map(|s| issue_ref(&s))
                 .collect();
             let opts = jira::GetOpts {
-                fields: fields_arg(fields.as_deref(), &field),
+                fields: fields_opt(fields.as_deref()),
+                extra: field,
                 comments,
                 remote_links,
                 full,
             };
-            batch(inputs, strict, batch_concurrency, |k| {
+            let mut request = json!({
+                "issueIdOrKey": if inputs.len() == 1 { json!(inputs[0]) } else { json!(inputs) },
+                "site": jira::site(c),
+            });
+            if full {
+                request["fields"] = json!(["*all"]);
+            } else if let Some(f) = &opts.fields {
+                request["fields"] = json!(f);
+            }
+            for (k, on) in [
+                ("comments", comments || full),
+                ("remoteLinks", remote_links || full),
+                ("full", full),
+            ] {
+                if on {
+                    request[k] = true.into();
+                }
+            }
+            let single = inputs.len() == 1;
+            let data = batch(inputs, strict, batch_concurrency, |k| {
                 jira::get(c, k, &opts)
-            })
+            })?;
+            // One work item prints as a one-element list, as in twg.
+            let data = if single { json!([data]) } else { data };
+            Ok(envelope("jira.workitem.get", "jira.workitem")
+                .request(request)
+                .data(data))
         }
         WorkitemCmd::Search {
             text,
@@ -924,14 +1042,19 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             after,
             fields,
         } => {
-            let fields = fields_arg(fields.as_deref(), &[]);
-            jira::search(
+            let fields = fields_opt(fields.as_deref());
+            let text = text.join(" ");
+            let limit = limit.or(first).unwrap_or(25);
+            let f = jira::search(c, &text, limit, fields.as_deref(), after.as_deref())?;
+            let jql = jira::search_jql(&text);
+            Ok(found(
                 c,
-                &text.join(" "),
-                limit.or(first).unwrap_or(25),
-                &fields,
-                after.as_deref(),
-            )
+                "jira.workitem.search",
+                &jql,
+                limit,
+                fields.as_deref(),
+                f,
+            ))
         }
         WorkitemCmd::Query {
             jql_arg,
@@ -953,14 +1076,17 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             let Some(jql) = jql.or(jql_arg) else {
                 bail!("pass --jql or a JQL argument")
             };
-            let fields = fields_arg(fields.as_deref(), &[]);
-            jira::query(
+            let fields = fields_opt(fields.as_deref());
+            let limit = limit.or(first).unwrap_or(25);
+            let f = jira::query(c, &jql, limit, fields.as_deref(), after.as_deref())?;
+            Ok(found(
                 c,
+                "jira.workitem.query",
                 &jql,
-                limit.or(first).unwrap_or(25),
-                &fields,
-                after.as_deref(),
-            )
+                limit,
+                fields.as_deref(),
+                f,
+            ))
         }
         WorkitemCmd::Create {
             space,
@@ -978,7 +1104,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             yes: _,
         } => {
             let description = description.map(text_arg).transpose()?;
-            jira::create(
+            let data = jira::create(
                 c,
                 jira::NewWorkitem {
                     space: &space,
@@ -992,13 +1118,16 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                     parent: parent.as_deref(),
                     extra: jira::extra_fields(fields_json.as_deref(), &field)?,
                 },
-            )
+            )?;
+            Ok(envelope("jira.workitem.create", "jira.workitem")
+                .request(json!({"site": jira::site(c), "space": space, "type": issue_type}))
+                .data(data))
         }
         WorkitemCmd::Update(u) => {
             let description = u.description.map(text_arg).transpose()?;
             let comment = u.comment.map(text_arg).transpose()?;
             let key = issue_ref(&u.id);
-            jira::update(
+            let data = jira::update(
                 c,
                 &key,
                 jira::Update {
@@ -1025,7 +1154,10 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                         .map(|t| (t, u.transition_comment_format)),
                     comment: comment.as_deref().map(|t| (t, u.comment_format)),
                 },
-            )
+            )?;
+            Ok(envelope("jira.workitem.update", "jira.workitem")
+                .request(json!({"site": jira::site(c), "idOrKey": key}))
+                .data(data))
         }
         WorkitemCmd::Comment {
             cmd:
@@ -1043,14 +1175,11 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 (None, Some(g)) => Some(("group", g.as_str())),
                 _ => None,
             };
-            jira::comment(
-                c,
-                &issue_ref(&issue_id),
-                &text_arg(body)?,
-                body_format,
-                visibility,
-                internal,
-            )
+            let key = issue_ref(&issue_id);
+            let data = jira::comment(c, &key, &text_arg(body)?, body_format, visibility, internal)?;
+            Ok(envelope("jira.workitem.comment.create", "jira.comment")
+                .request(json!({"site": jira::site(c), "issueIdOrKey": key}))
+                .data(data))
         }
         WorkitemCmd::Transition {
             id,
@@ -1059,31 +1188,47 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             fields_json,
             transition_comment,
             transition_comment_format,
-        } => jira::transition(
-            c,
-            &issue_ref(&id),
-            transition_id.as_deref(),
-            jira::extra_fields(fields_json.as_deref(), &field)?,
-            transition_comment
-                .as_deref()
-                .map(|t| (t, transition_comment_format)),
-        ),
+        } => {
+            let key = issue_ref(&id);
+            let data = jira::transition(
+                c,
+                &key,
+                transition_id.as_deref(),
+                jira::extra_fields(fields_json.as_deref(), &field)?,
+                transition_comment
+                    .as_deref()
+                    .map(|t| (t, transition_comment_format)),
+            )?;
+            let (command, kind) = if transition_id.is_some() {
+                ("jira.workitem.transition", "jira.workitem")
+            } else {
+                ("jira.workitem.transitions", "jira.transition")
+            };
+            Ok(envelope(command, kind)
+                .request(json!({"idOrKey": key, "transitionId": transition_id}))
+                .data(data))
+        }
         WorkitemCmd::Transitions {
             cmd: TransitionsCmd::Query { id },
-        } => jira::transitions(c, &issue_ref(&id)),
+        } => {
+            let key = issue_ref(&id);
+            Ok(envelope("jira.workitem.transitions", "jira.transition")
+                .request(json!({"idOrKey": key}))
+                .data(jira::transitions(c, &key)?))
+        }
         WorkitemCmd::Field {
             cmd: WorkitemFieldCmd::CreateMetadata { space, issue_type },
-        } => jira::create_meta(c, &space, issue_type.as_deref()),
+        } => create_meta(c, &space, issue_type.as_deref()),
         WorkitemCmd::CreateMeta { space, issue_type } => {
             deprecated(
                 "jira workitem create-meta",
                 "jira workitem field create-metadata",
             );
-            jira::create_meta(c, &space, issue_type.as_deref())
+            create_meta(c, &space, issue_type.as_deref())
         }
         WorkitemCmd::LinkTypes {
             cmd: LinkTypesCmd::Query,
-        } => jira::link_types(c),
+        } => link_types(c),
         WorkitemCmd::Link { cmd } => match cmd {
             LinkCmd::Workitem {
                 id,
@@ -1091,7 +1236,10 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 link_type_id,
             } => {
                 let targets: Vec<String> = target_id.iter().map(|t| issue_ref(t)).collect();
-                jira::link_workitem(c, &issue_ref(&id), &targets, &link_type_id)
+                let source = issue_ref(&id);
+                Ok(envelope("jira.workitem.link.workitem", "jira.issue-link")
+                    .request(json!({"id": source, "targetId": targets, "linkTypeId": link_type_id}))
+                    .data(jira::link_workitem(c, &source, &targets, &link_type_id)?))
             }
             LinkCmd::Weblink {
                 id,
@@ -1104,7 +1252,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 summary,
                 icon_url,
                 resolved,
-            } => jira::link_remote(
+            } => weblink(
                 c,
                 &issue_ref(&id),
                 &jira::Weblink {
@@ -1121,7 +1269,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             ),
             LinkCmd::Types => {
                 deprecated("jira workitem link types", "jira workitem link-types query");
-                jira::link_types(c)
+                link_types(c)
             }
             LinkCmd::Create {
                 inward,
@@ -1132,13 +1280,16 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             } => {
                 deprecated("jira workitem link create", "jira workitem link workitem");
                 let comment = comment.map(text_arg).transpose()?;
-                jira::link_create(
-                    c,
-                    &issue_ref(&inward),
-                    &issue_ref(&outward),
-                    &link_type,
-                    comment.as_deref().map(|t| (t, comment_format)),
-                )
+                let (inward, outward) = (issue_ref(&inward), issue_ref(&outward));
+                Ok(envelope("jira.workitem.link.workitem", "jira.issue-link")
+                    .request(json!({"id": inward, "targetId": [outward], "linkTypeId": link_type}))
+                    .data(jira::link_create(
+                        c,
+                        &inward,
+                        &outward,
+                        &link_type,
+                        comment.as_deref().map(|t| (t, comment_format)),
+                    )?))
             }
             LinkCmd::Remote {
                 id,
@@ -1147,7 +1298,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 relationship,
             } => {
                 deprecated("jira workitem link remote", "jira workitem link weblink");
-                jira::link_remote(
+                weblink(
                     c,
                     &issue_ref(&id),
                     &jira::Weblink {

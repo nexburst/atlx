@@ -1,34 +1,53 @@
 //! Jira Cloud REST v3 and Agile 1.0, shaped after twg's `jira` commands.
 
 use crate::client::Client;
-use crate::markup::{TextFormat, adf_to_text, quote, to_adf};
+use crate::markup::{TextFormat, quote, to_adf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 
+/// Fields `jira workitem get` fetches by default, as twg does.
+pub const GET_FIELDS: &[&str] = &[
+    "summary",
+    "issuetype",
+    "project",
+    "status",
+    "statusCategory",
+    "priority",
+    "assignee",
+    "reporter",
+    "creator",
+    "created",
+    "updated",
+    "duedate",
+    "resolution",
+    "resolutiondate",
+    "labels",
+    "components",
+    "fixVersions",
+    "description",
+    "subtasks",
+    "issuelinks",
+    "attachment",
+    "comment",
+    "worklog",
+    "timetracking",
+    "votes",
+    "watches",
+    "parent",
+];
+
+/// Fields behind the compact rows of `jira workitem query` and `search`.
 const LIST_FIELDS: &[&str] = &[
     "summary",
     "status",
     "issuetype",
     "priority",
     "assignee",
-    "updated",
-];
-const VIEW_FIELDS: &[&str] = &[
-    "summary",
-    "status",
-    "issuetype",
-    "priority",
-    "assignee",
     "reporter",
-    "description",
-    "labels",
+    "project",
     "created",
     "updated",
-    "parent",
-    "duedate",
-    "components",
-    "fixVersions",
 ];
 
 fn enc(s: &str) -> String {
@@ -73,90 +92,158 @@ pub fn extra_fields(fields_json: Option<&str>, field: &[String]) -> Result<Map<S
     Ok(out)
 }
 
-fn summarize(c: &Client, issue: &Value, extra: &[String]) -> Value {
-    let f = &issue["fields"];
-    let key = issue["key"].as_str().unwrap_or_default();
-    let mut o = json!({
-        "key": key,
-        "summary": f["summary"],
-        "status": f["status"]["name"],
-        "type": f["issuetype"]["name"],
-        "priority": f["priority"]["name"],
-        "assignee": f["assignee"]["displayName"],
-        "updated": f["updated"],
-        "url": browse_url(c, key),
-    });
-    for name in extra {
-        if o.get(name).is_none() {
-            o[name] = f[name].clone();
-        }
-    }
-    o
+/// The host name of the client's site, as twg echoes it in `request.site`.
+pub fn site(c: &Client) -> String {
+    let b = c.base();
+    b.split_once("://")
+        .map_or(b, |(_, h)| h)
+        .trim_end_matches('/')
+        .to_string()
 }
 
-fn field_list(base: &[&str], extra: &[String]) -> String {
-    let mut all: Vec<&str> = base.to_vec();
-    all.extend(
-        extra
-            .iter()
-            .map(String::as_str)
-            .filter(|e| !base.contains(e)),
+/// Remove avatar and icon URLs at any depth, as twg does in JSON output.
+pub fn strip_media(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            m.shift_remove("avatarUrls");
+            m.shift_remove("iconUrl");
+            m.values_mut().for_each(strip_media);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_media),
+        _ => {}
+    }
+}
+
+/// A REST issue with its fields lifted to the top level next to `id`,
+/// `key` and `self`, plus the browse `url`: twg's work item shape.
+pub fn flatten(c: &Client, issue: &Value) -> Value {
+    let mut out = Map::new();
+    for k in ["expand", "id", "self", "key"] {
+        if let Some(v) = issue.get(k) {
+            out.insert(k.into(), v.clone());
+        }
+    }
+    if let Some(f) = issue["fields"].as_object() {
+        out.extend(f.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    let key = issue["key"].as_str().unwrap_or_default();
+    out.insert("url".into(), browse_url(c, key).into());
+    let mut out = Value::Object(out);
+    strip_media(&mut out);
+    out
+}
+
+/// Keep only `keys` of an object, dropping missing and null ones.
+fn pick(v: &Value, keys: &[&str]) -> Option<Value> {
+    let m = v.as_object()?;
+    let out: Map<String, Value> = keys
+        .iter()
+        .filter_map(|k| {
+            m.get(*k)
+                .filter(|x| !x.is_null())
+                .map(|x| (k.to_string(), x.clone()))
+        })
+        .collect();
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// twg's compact work item row for query and search results. Fields that
+/// are empty on the issue are left out.
+fn row(c: &Client, issue: &Value) -> Value {
+    let f = &issue["fields"];
+    let key = issue["key"].as_str().unwrap_or_default();
+    let mut o = Map::new();
+    o.insert("id".into(), issue["id"].clone());
+    o.insert("key".into(), key.into());
+    o.insert("self".into(), issue["self"].clone());
+    o.insert("url".into(), browse_url(c, key).into());
+    let mut put = |k: &str, v: Option<Value>| {
+        if let Some(v) = v.filter(|v| !v.is_null()) {
+            o.insert(k.into(), v);
+        }
+    };
+    put("summary", Some(f["summary"].clone()));
+    put(
+        "status",
+        pick(&f["status"], &["id", "name"]).map(|mut s| {
+            if let Some(cat) = pick(&f["status"]["statusCategory"], &["key", "name"]) {
+                s["statusCategory"] = cat;
+            }
+            s
+        }),
     );
-    all.join(",")
+    put("issueType", pick(&f["issuetype"], &["id", "name"]));
+    put("priority", pick(&f["priority"], &["id", "name"]));
+    put(
+        "assignee",
+        pick(&f["assignee"], &["accountId", "displayName"]),
+    );
+    put(
+        "reporter",
+        pick(&f["reporter"], &["accountId", "displayName"]),
+    );
+    put("project", pick(&f["project"], &["id", "key", "name"]));
+    put("created", Some(f["created"].clone()));
+    put("updated", Some(f["updated"].clone()));
+    Value::Object(o)
 }
 
 // --- reads -------------------------------------------------------------------
 
 pub struct GetOpts {
-    pub fields: Vec<String>,
+    /// `--fields`: fetch exactly these fields instead of [`GET_FIELDS`].
+    pub fields: Option<Vec<String>>,
+    /// `--field`: extra fields on top of the default or `--fields` list.
+    pub extra: Vec<String>,
     pub comments: bool,
     pub remote_links: bool,
     pub full: bool,
 }
 
-/// `jira workitem get`
+impl GetOpts {
+    fn field_param(&self) -> String {
+        if self.full {
+            return "*all".into();
+        }
+        let mut all: Vec<String> = match &self.fields {
+            Some(f) => f.clone(),
+            None => GET_FIELDS.iter().map(|s| s.to_string()).collect(),
+        };
+        for e in &self.extra {
+            if !all.contains(e) {
+                all.push(e.clone());
+            }
+        }
+        all.join(",")
+    }
+}
+
+/// `jira workitem get`: the REST issue, flattened as twg prints it. With
+/// `--comments` (or `--full`) the complete `comments` list is added, and
+/// with `--remote-links` (or `--full`) the `remoteLinks`.
 pub fn get(c: &Client, key: &str, o: &GetOpts) -> Result<Value> {
-    let fields = if o.full {
-        "*all".to_string()
-    } else {
-        field_list(VIEW_FIELDS, &o.fields)
-    };
     let v = c.get(
         &format!("/rest/api/3/issue/{}", enc(key)),
-        &[("fields", &fields)],
+        &[("fields", &o.field_param())],
     )?;
-    let f = &v["fields"];
     let key = v["key"].as_str().unwrap_or(key).to_string();
-    let mut out = summarize(c, &v, &o.fields);
-    out["reporter"] = f["reporter"]["displayName"].clone();
-    out["created"] = f["created"].clone();
-    out["due_date"] = f["duedate"].clone();
-    out["labels"] = f["labels"].clone();
-    out["components"] = names(&f["components"]);
-    out["fix_versions"] = names(&f["fixVersions"]);
-    out["parent"] = f["parent"]["key"].clone();
-    out["description"] = adf_to_text(&f["description"]).into();
-    if o.full {
-        out["fields"] = f.clone();
-    }
+    let mut out = flatten(c, &v);
+    let url = out
+        .as_object_mut()
+        .and_then(|m| m.shift_remove("url"))
+        .unwrap_or(Value::Null);
     if o.comments || o.full {
         out["comments"] = comments(c, &key)?;
     }
     if o.remote_links || o.full {
-        out["remote_links"] = remote_links(c, &key)?;
+        out["remoteLinks"] = c.get(&format!("/rest/api/3/issue/{}/remotelink", enc(&key)), &[])?;
     }
+    out["url"] = url;
+    strip_media(&mut out);
     Ok(out)
 }
 
-fn names(v: &Value) -> Value {
-    v.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|x| x["name"].as_str())
-        .map(Value::from)
-        .collect()
-}
-
+/// Every comment of a work item, oldest first, as REST returns them.
 fn comments(c: &Client, key: &str) -> Result<Value> {
     let mut out = Vec::new();
     loop {
@@ -170,39 +257,33 @@ fn comments(c: &Client, key: &str) -> Result<Value> {
             ],
         )?;
         let page = v["comments"].as_array().cloned().unwrap_or_default();
-        out.extend(page.iter().map(|cm| {
-            json!({
-                "id": cm["id"],
-                "author": cm["author"]["displayName"],
-                "created": cm["created"],
-                "body": adf_to_text(&cm["body"]),
-            })
-        }));
-        if page.is_empty() || out.len() as u64 >= v["total"].as_u64().unwrap_or(0) {
+        let empty = page.is_empty();
+        out.extend(page);
+        if empty || out.len() as u64 >= v["total"].as_u64().unwrap_or(0) {
             return Ok(Value::Array(out));
         }
     }
 }
 
-fn remote_links(c: &Client, key: &str) -> Result<Value> {
-    let v = c.get(&format!("/rest/api/3/issue/{}/remotelink", enc(key)), &[])?;
-    Ok(v.as_array()
-        .into_iter()
-        .flatten()
-        .map(|l| json!({"id": l["id"], "title": l["object"]["title"], "url": l["object"]["url"], "relationship": l["relationship"]}))
-        .collect())
+/// Work item results: `{"issues": [...]}` and the cursor of the next page.
+pub struct Found {
+    pub data: Value,
+    /// Jira's `nextPageToken`, which twg prints as `pageInfo.nextCursor`.
+    pub next: Option<String>,
 }
 
 /// `jira workitem query`: JQL, following `nextPageToken` up to `limit`.
-/// `after` resumes from a previous `next_cursor`.
+/// `after` resumes from a previous cursor. Without `fields` each issue is
+/// twg's compact row; with `fields` it is the flattened REST issue holding
+/// just those fields.
 pub fn query(
     c: &Client,
     jql: &str,
     limit: usize,
-    fields: &[String],
+    fields: Option<&[String]>,
     after: Option<&str>,
-) -> Result<Value> {
-    let field_param = field_list(LIST_FIELDS, fields);
+) -> Result<Found> {
+    let field_param = fields.map_or_else(|| LIST_FIELDS.join(","), |f| f.join(","));
     let mut issues = Vec::new();
     let mut token = after.map(String::from);
     loop {
@@ -221,31 +302,41 @@ pub fn query(
             batch
                 .iter()
                 .take(limit - issues.len())
-                .map(|i| summarize(c, i, fields)),
+                .map(|i| issue_row(c, i, fields.is_some())),
         );
         token = v["nextPageToken"].as_str().map(String::from);
         if batch.is_empty() || token.is_none() || issues.len() >= limit {
             break;
         }
     }
-    Ok(json!({"issues": issues, "next_cursor": token}))
+    Ok(Found {
+        data: json!({"issues": issues}),
+        next: token,
+    })
 }
 
-/// `jira workitem search`: fuzzy text, as twg builds it.
+fn issue_row(c: &Client, issue: &Value, raw: bool) -> Value {
+    if raw {
+        flatten(c, issue)
+    } else {
+        row(c, issue)
+    }
+}
+
+/// The JQL `jira workitem search` runs for `text`, as twg builds it.
+pub fn search_jql(text: &str) -> String {
+    format!("text ~ {} ORDER BY updated DESC", quote(text))
+}
+
+/// `jira workitem search`: fuzzy text.
 pub fn search(
     c: &Client,
     text: &str,
     limit: usize,
-    fields: &[String],
+    fields: Option<&[String]>,
     after: Option<&str>,
-) -> Result<Value> {
-    query(
-        c,
-        &format!("text ~ {} ORDER BY updated DESC", quote(text)),
-        limit,
-        fields,
-        after,
-    )
+) -> Result<Found> {
+    query(c, &search_jql(text), limit, fields, after)
 }
 
 // --- writes ------------------------------------------------------------------
@@ -304,7 +395,7 @@ pub fn create(c: &Client, n: NewWorkitem) -> Result<Value> {
     fields.extend(n.extra);
     let v = c.post("/rest/api/3/issue", &json!({"fields": fields}))?;
     let key = v["key"].as_str().unwrap_or_default();
-    Ok(json!({"key": key, "id": v["id"], "url": browse_url(c, key)}))
+    Ok(json!({"id": v["id"], "key": key, "self": v["self"], "url": browse_url(c, key)}))
 }
 
 /// Set / add / remove a multi-value field the way twg's `--x`, `--add-x`, `--remove-x` do.
@@ -435,12 +526,12 @@ pub fn update(c: &Client, key: &str, u: Update) -> Result<Value> {
     if let Some(s) = u.status {
         let t = transition(c, key, Some(s), Map::new(), u.transition_comment)?;
         out["status"] = t["status"].clone();
-        if !t["comment_id"].is_null() {
-            out["transition_comment_id"] = t["comment_id"].clone();
+        if !t["commentId"].is_null() {
+            out["transitionCommentId"] = t["commentId"].clone();
         }
     }
     if let Some((body, f)) = u.comment {
-        out["comment_id"] = comment(c, key, body, f, None, false)?["id"].clone();
+        out["commentId"] = comment(c, key, body, f, None, false)?["id"].clone();
     }
     out["url"] = browse_url(c, key).into();
     Ok(out)
@@ -462,42 +553,36 @@ pub fn comment(
     if internal {
         req["properties"] = json!([{"key": "sd.public.comment", "value": {"internal": true}}]);
     }
-    let v = c.post(&format!("/rest/api/3/issue/{}/comment", enc(key)), &req)?;
-    let id = v["id"].as_str().unwrap_or_default();
-    Ok(
-        json!({"key": key, "id": id, "url": format!("{}?focusedCommentId={id}", browse_url(c, key))}),
-    )
+    let mut v = c.post(&format!("/rest/api/3/issue/{}/comment", enc(key)), &req)?;
+    let id = v["id"].as_str().unwrap_or_default().to_string();
+    if v.is_object() {
+        v["issueKey"] = key.into();
+        v["url"] = format!("{}?focusedCommentId={id}", browse_url(c, key)).into();
+    }
+    Ok(v)
 }
 
-/// `jira workitem transitions query`: transitions plus the screen fields each requires.
+/// The REST transitions available on a work item.
+fn raw_transitions(c: &Client, key: &str) -> Result<Vec<Value>> {
+    let v = c.get(&format!("/rest/api/3/issue/{}/transitions", enc(key)), &[])?;
+    Ok(v["transitions"].as_array().cloned().unwrap_or_default())
+}
+
+/// `jira workitem transitions query`: `{"transitions": [{id, name, toName,
+/// category}]}`, where `category` is the target status's category.
 pub fn transitions(c: &Client, key: &str) -> Result<Value> {
-    let v = c.get(
-        &format!("/rest/api/3/issue/{}/transitions", enc(key)),
-        &[("expand", "transitions.fields")],
-    )?;
-    Ok(v["transitions"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    let list: Vec<Value> = raw_transitions(c, key)?
+        .iter()
         .map(|t| {
-            let required: Vec<Value> = t["fields"]
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter(|(_, f)| f["required"] == true)
-                .map(|(id, f)| {
-                    let allowed: Vec<&str> = f["allowedValues"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|a| a["name"].as_str().or(a["value"].as_str()))
-                        .collect();
-                    json!({"id": id, "name": f["name"], "allowed_values": allowed})
-                })
-                .collect();
-            json!({"id": t["id"], "name": t["name"], "to": t["to"]["name"], "has_screen": t["hasScreen"], "requirements": required})
+            json!({
+                "id": t["id"],
+                "name": t["name"],
+                "toName": t["to"]["name"],
+                "category": t["to"]["statusCategory"]["name"],
+            })
         })
-        .collect())
+        .collect();
+    Ok(json!({"transitions": list}))
 }
 
 /// `jira workitem transition`: without a target, list transitions (read-only).
@@ -509,19 +594,15 @@ pub fn transition(
     fields: Map<String, Value>,
     transition_comment: Option<(&str, TextFormat)>,
 ) -> Result<Value> {
-    let ts = transitions(c, key)?;
     let Some(target) = target else {
-        return Ok(json!({"key": key, "transitions": ts}));
+        return transitions(c, key);
     };
-    let is = |t: &Value, k: &str| {
-        t[k].as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case(target))
-    };
-    let list = ts.as_array().unwrap();
+    let list = raw_transitions(c, key)?;
+    let is = |v: &Value| v.as_str().is_some_and(|s| s.eq_ignore_ascii_case(target));
     let Some(t) = list
         .iter()
-        .find(|t| is(t, "id"))
-        .or_else(|| list.iter().find(|t| is(t, "name") || is(t, "to")))
+        .find(|t| is(&t["id"]))
+        .or_else(|| list.iter().find(|t| is(&t["name"]) || is(&t["to"]["name"])))
     else {
         let names: Vec<_> = list.iter().filter_map(|t| t["name"].as_str()).collect();
         bail!(
@@ -535,21 +616,50 @@ pub fn transition(
     }
     // Jira silently drops a transition comment when the transition has no
     // screen, so in that case add it as a regular comment afterwards.
-    let has_screen = t["has_screen"] == true;
+    let has_screen = t["hasScreen"] == true;
     if let Some((body, f)) = transition_comment.filter(|_| has_screen) {
         req["update"] = json!({"comment": [{"add": {"body": to_adf(body, f)}}]});
     }
     c.post(&format!("/rest/api/3/issue/{}/transitions", enc(key)), &req)?;
-    let mut out =
-        json!({"key": key, "transition": t["name"], "status": t["to"], "url": browse_url(c, key)});
+    let mut out = json!({
+        "key": key,
+        "transition": {"id": t["id"], "name": t["name"]},
+        "status": t["to"]["name"],
+        "url": browse_url(c, key),
+    });
     if let Some((body, f)) = transition_comment.filter(|_| !has_screen) {
-        out["comment_id"] = comment(c, key, body, f, None, false)?["id"].clone();
+        out["commentId"] = comment(c, key, body, f, None, false)?["id"].clone();
     }
     Ok(out)
 }
 
 pub fn myself(c: &Client) -> Result<Value> {
     c.get("/rest/api/3/myself", &[])
+}
+
+/// twg's user profile shape (`whoami`) from Jira's `myself`. Fields Jira
+/// REST doesn't expose (`extendedProfile`) are null.
+pub fn profile(me: &Value) -> Value {
+    json!({
+        "accountId": me["accountId"],
+        "name": me["displayName"],
+        "picture": me["avatarUrls"]["48x48"],
+        "accountStatus": match me["active"].as_bool() {
+            Some(true) => "active",
+            Some(false) => "inactive",
+            None => "unknown",
+        },
+        "email": me["emailAddress"],
+        "nickname": me["displayName"],
+        "locale": me["locale"],
+        "zoneinfo": me["timeZone"],
+        "extendedProfile": {
+            "jobTitle": null,
+            "department": null,
+            "organization": null,
+            "location": null,
+        },
+    })
 }
 
 fn fetch_users(c: &Client, query: &str, max_results: Option<usize>) -> Result<Vec<Value>> {
@@ -562,16 +672,19 @@ fn fetch_users(c: &Client, query: &str, max_results: Option<usize>) -> Result<Ve
     Ok(v.as_array().cloned().unwrap_or_default())
 }
 
-fn summarize_user(u: &Value) -> Value {
+/// One `user search` result in twg's shape. `sources` names where the
+/// match came from; atlx only searches Jira.
+fn user_row(u: &Value) -> Value {
+    let id = u["accountId"].as_str().unwrap_or_default();
     let mut o = json!({
-        "account_id": u["accountId"],
-        "display_name": u["displayName"],
+        "accountId": id,
+        "userAri": format!("ari:cloud:identity::user/{id}"),
+        "name": u["displayName"],
     });
     if let Some(email) = u["emailAddress"].as_str().filter(|s| !s.is_empty()) {
         o["email"] = email.into();
     }
-    o["active"] = u["active"].clone();
-    o["account_type"] = u["accountType"].clone();
+    o["sources"] = json!(["jira-rest"]);
     o
 }
 
@@ -581,7 +694,7 @@ pub fn user_search(c: &Client, query: &str, limit: usize) -> Result<Value> {
         return Ok(json!([]));
     }
     let users = fetch_users(c, query, Some(limit))?;
-    Ok(users.iter().take(limit).map(summarize_user).collect())
+    Ok(users.iter().take(limit).map(user_row).collect())
 }
 
 /// `user search --account-id`: one user by account ID (or identity ARI), as
@@ -591,7 +704,7 @@ pub fn user_by_account(c: &Client, account: &str) -> Result<Value> {
         .strip_prefix("ari:cloud:identity::user/")
         .unwrap_or(account);
     let v = c.get("/rest/api/3/user", &[("accountId", id)])?;
-    Ok(json!([summarize_user(&v)]))
+    Ok(json!([user_row(&v)]))
 }
 
 /// `me`, a raw accountId, or a name/email that matches exactly one user.
@@ -662,6 +775,41 @@ pub fn fields(c: &Client, query: Option<&str>, custom_only: bool) -> Result<Valu
     Ok(Value::Array(filter_fields(list, query, custom_only)))
 }
 
+/// Items collected from an offset-paged endpoint.
+pub struct Paged {
+    pub values: Vec<Value>,
+    pub start: usize,
+    pub limit: usize,
+    /// `total` from the last page, when the endpoint reports it.
+    pub total: Option<u64>,
+    /// Whether the last item of the collection was reached.
+    pub is_last: bool,
+    /// The first page's `self` link, when the endpoint gives one.
+    pub self_link: Option<Value>,
+}
+
+impl Paged {
+    /// The REST page envelope twg prints, with the list under `collection`
+    /// (`projects`, `boards`, `sprints`): `{collection, total, startAt,
+    /// maxResults, isLast}`.
+    pub fn to_value(&self, collection: &str) -> Value {
+        let mut m = Map::new();
+        m.insert(collection.into(), Value::Array(self.values.clone()));
+        if let Some(t) = self.total {
+            m.insert("total".into(), t.into());
+        }
+        m.insert("startAt".into(), self.start.into());
+        m.insert("maxResults".into(), self.limit.into());
+        m.insert("isLast".into(), self.is_last.into());
+        if let Some(s) = &self.self_link {
+            m.insert("self".into(), s.clone());
+        }
+        let mut v = Value::Object(m);
+        strip_media(&mut v);
+        v
+    }
+}
+
 /// Collect up to `limit` items from an offset-paged endpoint, starting at
 /// item `offset`.
 fn paginate_values(
@@ -670,48 +818,47 @@ fn paginate_values(
     query: &[(&str, &str)],
     offset: usize,
     limit: usize,
-) -> Result<Vec<Value>> {
+) -> Result<Paged> {
+    let mut out = Paged {
+        values: Vec::new(),
+        start: offset,
+        limit,
+        total: None,
+        is_last: true,
+        self_link: None,
+    };
     if limit == 0 {
-        return Ok(Vec::new());
+        return Ok(out);
     }
-    let mut out = Vec::new();
     loop {
-        let start = (offset + out.len()).to_string();
-        let max_page = (limit - out.len()).min(50);
+        let start = (offset + out.values.len()).to_string();
+        let max_page = (limit - out.values.len()).min(50);
         let page_size = max_page.to_string();
         let mut q = query.to_vec();
         q.push(("startAt", &start));
         q.push(("maxResults", &page_size));
         let v = c.get(path, &q)?;
+        if out.self_link.is_none() {
+            out.self_link = v.get("self").cloned();
+        }
         let page = v["values"].as_array().cloned().unwrap_or_default();
         let page_len = page.len();
-        out.extend(page);
+        out.values.extend(page);
         let is_last = v["isLast"].as_bool();
         let total = v["total"].as_u64();
-        if page_len == 0
+        out.total = total;
+        let seen = (offset + out.values.len()) as u64;
+        let done = page_len == 0
             || is_last == Some(true)
-            || total.is_some_and(|t| (offset + out.len()) as u64 >= t)
-            || (is_last.is_none() && total.is_none() && page_len < max_page)
-            || out.len() >= limit
-        {
+            || total.is_some_and(|t| seen >= t)
+            || (is_last.is_none() && total.is_none() && page_len < max_page);
+        if done || out.values.len() >= limit {
+            out.is_last = done && out.values.len() <= limit;
             break;
         }
     }
-    out.truncate(limit);
+    out.values.truncate(limit);
     Ok(out)
-}
-
-fn summarize_project(c: &Client, p: &Value) -> Value {
-    let key = p["key"].as_str().unwrap_or_default();
-    json!({
-        "id": p["id"],
-        "key": key,
-        "name": p["name"],
-        "type": p["projectTypeKey"],
-        "style": p["style"],
-        "simplified": p["simplified"],
-        "url": browse_url(c, key),
-    })
 }
 
 /// Filters for `jira space query` (Jira REST `project/search`).
@@ -729,12 +876,14 @@ pub struct SpaceQuery<'a> {
     pub status: Option<&'a str>,
     pub properties: &'a [String],
     pub property_query: Option<&'a str>,
+    /// Defaults to `key`, as in twg.
     pub order_by: Option<&'a str>,
     pub start: usize,
     pub limit: usize,
 }
 
-/// `jira space query` (and the old `jira project list`)
+/// `jira space query` (and the old `jira project list`): REST
+/// `project/search` with its `values` renamed `projects`, as twg prints it.
 pub fn space_query(c: &Client, o: &SpaceQuery) -> Result<Value> {
     let mut q = Vec::new();
     if let Some(s) = o.query.map(str::trim).filter(|s| !s.is_empty()) {
@@ -750,29 +899,53 @@ pub fn space_query(c: &Client, o: &SpaceQuery) -> Result<Value> {
         ("expand", o.expand),
         ("status", o.status),
         ("propertyQuery", o.property_query),
-        ("orderBy", o.order_by),
+        ("orderBy", Some(o.order_by.unwrap_or("key"))),
     ] {
         if let Some(v) = v {
             q.push((k, v));
         }
     }
-    let items = paginate_values(c, "/rest/api/3/project/search", &q, o.start, o.limit)?;
-    Ok(items.iter().map(|p| summarize_project(c, p)).collect())
+    let page = paginate_values(c, "/rest/api/3/project/search", &q, o.start, o.limit)?;
+    Ok(page.to_value("projects"))
 }
 
-/// `jira space get` (and the old `jira project get`)
+/// `jira space get` (and the old `jira project get`): a one-element list
+/// with the project's main fields, lead and issue types, as twg prints it.
 pub fn project(c: &Client, key_or_id: &str) -> Result<Value> {
     let v = c.get(&format!("/rest/api/3/project/{}", enc(key_or_id)), &[])?;
-    let mut out = summarize_project(c, &v);
-    out["lead"] = v["lead"]["displayName"].clone();
-    out["description"] = v["description"].clone();
-    out["issue_types"] = v["issueTypes"]
+    let mut out = Map::new();
+    for k in ["id", "key", "name", "projectTypeKey", "description"] {
+        out.insert(k.into(), v[k].clone());
+    }
+    out.insert(
+        "lead".into(),
+        pick(&v["lead"], &["self", "accountId", "displayName", "active"]).unwrap_or(Value::Null),
+    );
+    let types: Vec<Value> = v["issueTypes"]
         .as_array()
         .into_iter()
         .flatten()
-        .map(summarize_issue_type)
+        .map(issue_type_row)
         .collect();
-    Ok(out)
+    out.insert("issueTypes".into(), types.into());
+    Ok(json!([out]))
+}
+
+/// A REST issue type without its avatar URL and entity ID.
+fn issue_type_row(t: &Value) -> Value {
+    pick(
+        t,
+        &[
+            "self",
+            "id",
+            "description",
+            "name",
+            "subtask",
+            "avatarId",
+            "hierarchyLevel",
+        ],
+    )
+    .unwrap_or(Value::Null)
 }
 
 fn paginate_createmeta(c: &Client, path: &str, key: &str, alt_key: &str) -> Result<Vec<Value>> {
@@ -799,15 +972,6 @@ fn paginate_createmeta(c: &Client, path: &str, key: &str, alt_key: &str) -> Resu
     }
 }
 
-fn summarize_issue_type(t: &Value) -> Value {
-    json!({
-        "id": t["id"],
-        "name": t["name"],
-        "subtask": t["subtask"],
-        "description": t["description"],
-    })
-}
-
 fn resolve_issue_type<'a>(types: &'a [Value], target: &str) -> Result<&'a Value> {
     let is = |t: &Value, k: &str| {
         t[k].as_str()
@@ -823,79 +987,109 @@ fn resolve_issue_type<'a>(types: &'a [Value], target: &str) -> Result<&'a Value>
         })
 }
 
-fn summarize_create_fields(fields: &[Value]) -> Vec<Value> {
-    let mut out: Vec<Value> = fields
-        .iter()
-        .map(|f| {
-            let id = f["fieldId"]
-                .as_str()
-                .or_else(|| f["key"].as_str())
-                .unwrap_or_default();
-            let allowed: Vec<&str> = f["allowedValues"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|a| {
-                    a["name"]
-                        .as_str()
-                        .or(a["value"].as_str())
-                        .or(a["key"].as_str())
-                        .or(a["id"].as_str())
-                })
-                .collect();
-            json!({
-                "id": id,
-                "name": f["name"],
-                "required": f["required"],
-                "type": f["schema"]["type"],
-                "has_default": f["hasDefaultValue"],
-                "allowed_values": allowed,
-            })
-        })
-        .collect();
-    out.sort_by_key(|f| f["required"].as_bool() != Some(true));
-    out
+/// What a `--field NAME=VALUE` value means for a field schema, in twg's
+/// words (`date`, `multi-option`, ...).
+fn accepted_input(schema: &Value) -> &'static str {
+    let ty = schema["type"].as_str().unwrap_or_default();
+    let items = schema["items"].as_str().unwrap_or_default();
+    match (ty, items) {
+        ("array", "option") => "multi-option",
+        ("array", "user") => "multi-user",
+        ("array", "version") => "multi-version",
+        ("array", "component") => "multi-component",
+        ("array", "string") => "multi-text",
+        ("option", _) | ("option-with-child", _) => "option",
+        ("date", _) => "date",
+        ("datetime", _) => "datetime",
+        ("number", _) => "number",
+        ("string", _) => "text",
+        ("user", _) => "user",
+        ("version", _) => "version",
+        _ => "value",
+    }
 }
 
-/// `jira workitem create-meta`
+/// The custom fields of a create screen, in twg's shape: REST's field
+/// metadata plus `acceptedInput` and an `example` `--field` argument.
+/// Standard fields have their own flags, so they are left out, as in twg.
+fn create_fields(fields: &[Value]) -> Vec<Value> {
+    let mut custom: Vec<&Value> = fields
+        .iter()
+        .filter(|f| {
+            f["fieldId"]
+                .as_str()
+                .or_else(|| f["key"].as_str())
+                .is_some_and(|id| id.starts_with("customfield_"))
+        })
+        .collect();
+    custom.sort_by_key(|f| {
+        let id = f["fieldId"].as_str().or(f["key"].as_str()).unwrap_or("");
+        let n: u64 = id
+            .trim_start_matches("customfield_")
+            .parse()
+            .unwrap_or(u64::MAX);
+        n
+    });
+    custom
+        .into_iter()
+        .map(|f| {
+            let id = f["fieldId"].as_str().or(f["key"].as_str()).unwrap_or("");
+            let name = f["name"].as_str().unwrap_or(id);
+            let first = f["allowedValues"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|a| a["value"].as_str().or(a["name"].as_str()))
+                .unwrap_or("VALUE");
+            let mut o = Map::new();
+            o.insert("id".into(), id.into());
+            o.insert("key".into(), f["key"].as_str().unwrap_or(id).into());
+            o.insert("name".into(), name.into());
+            o.insert("required".into(), f["required"].clone());
+            o.insert("schema".into(), f["schema"].clone());
+            for k in ["allowedValues", "defaultValue"] {
+                if let Some(v) = f.get(k) {
+                    o.insert(k.into(), v.clone());
+                }
+            }
+            o.insert("operations".into(), f["operations"].clone());
+            o.insert("acceptedInput".into(), accepted_input(&f["schema"]).into());
+            o.insert(
+                "example".into(),
+                format!("--field \"{name}={first}\"").into(),
+            );
+            Value::Object(o)
+        })
+        .collect()
+}
+
+/// `jira workitem field create-metadata`: with an issue type,
+/// `{"fields": [...]}` (custom fields, as twg prints them); without one,
+/// `{"issueTypes": [...]}` for the space.
 pub fn create_meta(c: &Client, space: &str, issue_type: Option<&str>) -> Result<Value> {
     let types_path = format!("/rest/api/3/issue/createmeta/{}/issuetypes", enc(space));
     let types = paginate_createmeta(c, &types_path, "issueTypes", "values")?;
     let Some(target) = issue_type else {
         return Ok(json!({
-            "space": space,
-            "issue_types": types.iter().map(summarize_issue_type).collect::<Vec<_>>(),
+            "issueTypes": types.iter().map(issue_type_row).collect::<Vec<_>>(),
         }));
     };
     let it = resolve_issue_type(&types, target)?;
     let it_id = it["id"].as_str().unwrap_or_default();
     let fields_path = format!("{types_path}/{}", enc(it_id));
     let raw_fields = paginate_createmeta(c, &fields_path, "fields", "values")?;
-    Ok(json!({
-        "space": space,
-        "issue_type": summarize_issue_type(it),
-        "fields": summarize_create_fields(&raw_fields),
-    }))
+    let mut out = json!({"fields": create_fields(&raw_fields)});
+    strip_media(&mut out);
+    Ok(out)
 }
 
 // --- issue & remote links ----------------------------------------------------
 
-/// `jira workitem link types`
+/// `jira workitem link-types query`: REST's link types as a list.
 pub fn link_types(c: &Client) -> Result<Value> {
     let v = c.get("/rest/api/3/issueLinkType", &[])?;
-    Ok(v["issueLinkTypes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|t| {
-            json!({
-                "id": t["id"],
-                "name": t["name"],
-                "inward": t["inward"],
-                "outward": t["outward"],
-            })
-        })
-        .collect())
+    let mut types = v["issueLinkTypes"].clone();
+    strip_media(&mut types);
+    Ok(types)
 }
 
 fn build_issue_link_payload(
@@ -929,8 +1123,8 @@ pub fn link_create(
         "inward": inward,
         "outward": outward,
         "type": link_type,
-        "inward_url": browse_url(c, inward),
-        "outward_url": browse_url(c, outward),
+        "inwardUrl": browse_url(c, inward),
+        "outwardUrl": browse_url(c, outward),
     }))
 }
 
@@ -1014,11 +1208,12 @@ pub fn link_remote(c: &Client, key: &str, w: &Weblink) -> Result<Value> {
     let req = build_remote_link_payload(w);
     let v = c.post(&format!("/rest/api/3/issue/{}/remotelink", enc(key)), &req)?;
     let mut out = json!({
-        "key": key,
         "id": v["id"],
+        "self": v["self"],
+        "key": key,
         "title": w.title,
         "url": w.url,
-        "issue_url": browse_url(c, key),
+        "issueUrl": browse_url(c, key),
     });
     if let Some(rel) = w.relationship {
         out["relationship"] = rel.into();
@@ -1043,16 +1238,6 @@ impl BoardType {
     }
 }
 
-fn summarize_board(b: &Value) -> Value {
-    json!({
-        "id": b["id"],
-        "name": b["name"],
-        "type": b["type"],
-        "project_key": b["location"]["projectKey"],
-        "project_name": b["location"]["projectName"],
-    })
-}
-
 /// Filters for `jira board query` (Agile REST `board`).
 #[derive(Default)]
 pub struct BoardQuery<'a> {
@@ -1066,7 +1251,7 @@ pub struct BoardQuery<'a> {
     pub limit: usize,
 }
 
-fn board_values(c: &Client, o: &BoardQuery) -> Result<Vec<Value>> {
+fn board_values(c: &Client, o: &BoardQuery) -> Result<Paged> {
     let mut q = Vec::new();
     if let Some(p) = o.project {
         q.push(("projectKeyOrId", p));
@@ -1083,9 +1268,10 @@ fn board_values(c: &Client, o: &BoardQuery) -> Result<Vec<Value>> {
     paginate_values(c, "/rest/agile/1.0/board", &q, o.start, o.limit)
 }
 
-/// `jira board query` (and the old `jira board list`)
+/// `jira board query` (and the old `jira board list`): Agile REST's board
+/// page with `values` renamed `boards`, as twg prints it.
 pub fn board_query(c: &Client, o: &BoardQuery) -> Result<Value> {
-    Ok(board_values(c, o)?.iter().map(summarize_board).collect())
+    Ok(board_values(c, o)?.to_value("boards"))
 }
 
 /// The project key of a work item, for `--issue` filters.
@@ -1154,7 +1340,8 @@ pub fn resolve_board(c: &Client, r: &str) -> Result<u64> {
             limit: 50,
             ..Default::default()
         },
-    )?;
+    )?
+    .values;
     let exact: Vec<&Value> = found
         .iter()
         .filter(|b| {
@@ -1181,7 +1368,8 @@ pub fn project_board(c: &Client, project: &str) -> Result<u64> {
             limit: 50,
             ..Default::default()
         },
-    )?;
+    )?
+    .values;
     match found.as_slice() {
         [b] => b["id"].as_u64().ok_or_else(|| anyhow!("board has no ID")),
         [] => bail!("project {project} has no boards"),
@@ -1214,21 +1402,8 @@ pub fn normalize_sprint_states(s: &str) -> Result<String> {
     Ok(out.join(","))
 }
 
-fn summarize_sprint(s: &Value) -> Value {
-    json!({
-        "id": s["id"],
-        "name": s["name"],
-        "state": s["state"],
-        "start_date": s["startDate"],
-        "end_date": s["endDate"],
-        "complete_date": s["completeDate"],
-        "board_id": s["originBoardId"],
-        "goal": s["goal"],
-    })
-}
-
 /// `jira board sprints query` (and the old `jira sprint list`); sprints
-/// from item `start`.
+/// from item `start`, as Agile REST's page with `values` renamed `sprints`.
 pub fn sprints(
     c: &Client,
     board_id: u64,
@@ -1241,14 +1416,14 @@ pub fn sprints(
     if let Some(st) = &state_param {
         q.push(("state", st.as_str()));
     }
-    let items = paginate_values(
+    let page = paginate_values(
         c,
         &format!("/rest/agile/1.0/board/{board_id}/sprint"),
         &q,
         start,
         limit,
     )?;
-    Ok(items.iter().map(summarize_sprint).collect())
+    Ok(page.to_value("sprints"))
 }
 
 /// Options for `jira sprint workitems query`.
@@ -1284,15 +1459,20 @@ pub fn sprint_ref(s: &str) -> Result<u64> {
         .ok_or_else(|| anyhow!("'{s}' is not a sprint ID, ARI or URL"))
 }
 
-/// `jira sprint workitems query` (and the old `jira sprint issues`)
+/// `jira sprint workitems query` (and the old `jira sprint issues`):
+/// `{"issues": [...], "startAt", "maxResults", "total"}` with the same rows
+/// as `jira workitem query` (flattened REST issues when `fields` is given).
 pub fn sprint_issues(c: &Client, sprint_id: u64, o: &SprintIssues) -> Result<Value> {
     let limit = o.limit;
-    if limit == 0 {
-        return Ok(json!([]));
-    }
-    let field_param = field_list(LIST_FIELDS, o.fields);
+    let raw = !o.fields.is_empty();
+    let field_param = if raw {
+        o.fields.join(",")
+    } else {
+        LIST_FIELDS.join(",")
+    };
     let mut issues = Vec::new();
-    loop {
+    let mut total = None;
+    while issues.len() < limit {
         let start = (o.start + issues.len()).to_string();
         let page_size = (limit - issues.len()).min(100).to_string();
         let mut q = vec![
@@ -1313,18 +1493,21 @@ pub fn sprint_issues(c: &Client, sprint_id: u64, o: &SprintIssues) -> Result<Val
             batch
                 .iter()
                 .take(limit - issues.len())
-                .map(|i| summarize(c, i, o.fields)),
+                .map(|i| issue_row(c, i, raw)),
         );
-        let total = v["total"].as_u64();
+        total = v["total"].as_u64();
         if batch_len == 0
-            || issues.len() >= limit
             || total.is_some_and(|t| (o.start + issues.len()) as u64 >= t)
             || (total.is_none() && batch_len < 100)
         {
             break;
         }
     }
-    Ok(Value::Array(issues))
+    let mut out = json!({"issues": issues, "startAt": o.start, "maxResults": limit});
+    if let Some(t) = total {
+        out["total"] = t.into();
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1350,7 +1533,14 @@ mod tests {
         assert_eq!(csv("a, b,,c"), vec!["a", "b", "c"]);
         assert_eq!(id_or_name("10001", "key"), json!({"id": "10001"}));
         assert_eq!(id_or_name("PROJ", "key"), json!({"key": "PROJ"}));
-        assert_eq!(field_list(&["a", "b"], &["b".into(), "c".into()]), "a,b,c");
+        let o = GetOpts {
+            fields: Some(vec!["summary".into()]),
+            extra: vec!["summary".into(), "customfield_1".into()],
+            comments: false,
+            remote_links: false,
+            full: false,
+        };
+        assert_eq!(o.field_param(), "summary,customfield_1");
     }
 
     #[test]
@@ -1403,7 +1593,7 @@ mod tests {
     }
 
     #[test]
-    fn user_summary_handles_optional_email() {
+    fn user_rows_follow_twg() {
         let with_email = json!({
             "accountId": "123",
             "displayName": "Alice",
@@ -1412,25 +1602,27 @@ mod tests {
             "accountType": "atlassian"
         });
         assert_eq!(
-            summarize_user(&with_email),
+            user_row(&with_email),
             json!({
-                "account_id": "123",
-                "display_name": "Alice",
+                "accountId": "123",
+                "userAri": "ari:cloud:identity::user/123",
+                "name": "Alice",
                 "email": "alice@example.com",
-                "active": true,
-                "account_type": "atlassian"
+                "sources": ["jira-rest"]
             })
         );
-        let without_email = json!({
-            "accountId": "456",
-            "displayName": "Bob",
-            "active": false,
-            "accountType": "customer"
-        });
-        let s = summarize_user(&without_email);
-        assert!(s.get("email").is_none());
-        assert_eq!(s["account_id"], "456");
-        assert_eq!(s["active"], false);
+        let without_email = json!({"accountId": "456", "displayName": "Bob"});
+        assert!(user_row(&without_email).get("email").is_none());
+
+        let me = json!({"accountId": "123", "displayName": "Alice", "active": true,
+                        "avatarUrls": {"48x48": "https://a/48"}, "locale": "en-US",
+                        "timeZone": "Europe/Madrid", "emailAddress": "alice@example.com"});
+        let p = profile(&me);
+        assert_eq!(p["name"], "Alice");
+        assert_eq!(p["picture"], "https://a/48");
+        assert_eq!(p["accountStatus"], "active");
+        assert_eq!(p["zoneinfo"], "Europe/Madrid");
+        assert!(p["extendedProfile"]["jobTitle"].is_null());
     }
 
     #[test]
@@ -1464,14 +1656,22 @@ mod tests {
         assert!(resolve_issue_type(&types, "Epic").is_err());
 
         let fields = vec![
-            json!({"fieldId": "labels", "name": "Labels", "required": false, "schema": {"type": "array"}, "hasDefaultValue": false}),
-            json!({"fieldId": "priority", "name": "Priority", "required": true, "schema": {"type": "priority"}, "hasDefaultValue": true, "allowedValues": [{"name": "High"}, {"name": "Low"}]}),
+            json!({"fieldId": "labels", "key": "labels", "name": "Labels", "required": false, "schema": {"type": "array"}}),
+            json!({"fieldId": "customfield_10021", "key": "customfield_10021", "name": "Flagged", "required": false,
+                   "schema": {"type": "array", "items": "option"}, "operations": ["add", "set", "remove"],
+                   "allowedValues": [{"value": "Impediment", "id": "1", "iconUrl": "x"}]}),
+            json!({"fieldId": "customfield_10015", "key": "customfield_10015", "name": "Start date", "required": false,
+                   "schema": {"type": "date"}, "operations": ["set"]}),
         ];
-        let summarized = summarize_create_fields(&fields);
-        assert_eq!(summarized[0]["id"], "priority");
-        assert_eq!(summarized[0]["required"], true);
-        assert_eq!(summarized[0]["allowed_values"], json!(["High", "Low"]));
-        assert_eq!(summarized[1]["id"], "labels");
+        let out = create_fields(&fields);
+        assert_eq!(out.len(), 2, "standard fields are left out");
+        assert_eq!(out[0]["id"], "customfield_10015");
+        assert_eq!(out[0]["acceptedInput"], "date");
+        assert_eq!(out[0]["example"], "--field \"Start date=VALUE\"");
+        assert_eq!(out[1]["acceptedInput"], "multi-option");
+        assert_eq!(out[1]["example"], "--field \"Flagged=Impediment\"");
+        assert_eq!(accepted_input(&json!({"type": "string"})), "text");
+        assert_eq!(accepted_input(&json!({"type": "any"})), "value");
     }
 
     #[test]
@@ -1547,75 +1747,62 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_boards_sprints_and_projects() {
+    fn shapes_issues_and_pages_like_twg() {
         let c = Client::new(
             "https://acme.atlassian.net".into(),
             "u@acme.com",
             "tok",
             None,
         );
-        let proj = json!({
-            "id": "10000",
-            "key": "PROJ",
-            "name": "Main Project",
-            "projectTypeKey": "software",
-            "style": "classic",
-            "simplified": false
+        assert_eq!(site(&c), "acme.atlassian.net");
+        let issue = json!({
+            "id": "10001", "key": "PROJ-1", "self": "https://acme.atlassian.net/rest/api/3/issue/10001",
+            "fields": {
+                "summary": "First",
+                "status": {"id": "3", "name": "Done", "iconUrl": "x",
+                           "statusCategory": {"id": 3, "key": "done", "name": "Done", "colorName": "green"}},
+                "issuetype": {"id": "1", "name": "Task", "iconUrl": "x"},
+                "assignee": null,
+                "reporter": {"accountId": "a1", "displayName": "Ann", "avatarUrls": {"48x48": "x"}},
+                "project": {"id": "100", "key": "PROJ", "name": "Project"},
+                "created": "2026-01-01", "updated": "2026-01-02"
+            }
         });
-        assert_eq!(
-            summarize_project(&c, &proj),
-            json!({
-                "id": "10000",
-                "key": "PROJ",
-                "name": "Main Project",
-                "type": "software",
-                "style": "classic",
-                "simplified": false,
-                "url": "https://acme.atlassian.net/browse/PROJ"
-            })
-        );
+        let flat = flatten(&c, &issue);
+        assert_eq!(flat["summary"], "First");
+        assert_eq!(flat["url"], "https://acme.atlassian.net/browse/PROJ-1");
+        assert!(flat["status"].get("iconUrl").is_none());
+        assert!(flat["reporter"].get("avatarUrls").is_none());
+        assert!(flat.get("fields").is_none());
 
-        let board = json!({
-            "id": 7,
-            "name": "PROJ board",
-            "type": "scrum",
-            "location": {"projectKey": "PROJ", "projectName": "Main Project"}
-        });
         assert_eq!(
-            summarize_board(&board),
+            row(&c, &issue),
             json!({
-                "id": 7,
-                "name": "PROJ board",
-                "type": "scrum",
-                "project_key": "PROJ",
-                "project_name": "Main Project"
+                "id": "10001", "key": "PROJ-1",
+                "self": "https://acme.atlassian.net/rest/api/3/issue/10001",
+                "url": "https://acme.atlassian.net/browse/PROJ-1",
+                "summary": "First",
+                "status": {"id": "3", "name": "Done", "statusCategory": {"key": "done", "name": "Done"}},
+                "issueType": {"id": "1", "name": "Task"},
+                "reporter": {"accountId": "a1", "displayName": "Ann"},
+                "project": {"id": "100", "key": "PROJ", "name": "Project"},
+                "created": "2026-01-01", "updated": "2026-01-02"
             })
         );
         assert_eq!(BoardType::Scrum.as_str(), "scrum");
         assert_eq!(BoardType::Kanban.as_str(), "kanban");
 
-        let sprint = json!({
-            "id": 42,
-            "name": "Sprint 42",
-            "state": "active",
-            "startDate": "2026-01-01T00:00:00Z",
-            "endDate": "2026-01-14T00:00:00Z",
-            "completeDate": null,
-            "originBoardId": 7,
-            "goal": "Ship it"
-        });
+        let page = Paged {
+            values: vec![json!({"id": 7, "avatarUrls": {}})],
+            start: 0,
+            limit: 50,
+            total: Some(1),
+            is_last: true,
+            self_link: None,
+        };
         assert_eq!(
-            summarize_sprint(&sprint),
-            json!({
-                "id": 42,
-                "name": "Sprint 42",
-                "state": "active",
-                "start_date": "2026-01-01T00:00:00Z",
-                "end_date": "2026-01-14T00:00:00Z",
-                "complete_date": null,
-                "board_id": 7,
-                "goal": "Ship it"
-            })
+            page.to_value("boards"),
+            json!({"boards": [{"id": 7}], "total": 1, "startAt": 0, "maxResults": 50, "isLast": true})
         );
     }
 }

@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::{bitbucket, jira};
 use anyhow::Result;
 use clap::{Args, Subcommand};
+use serde_json::{Value, json};
 
 #[derive(Args)]
 pub(crate) struct RepoArgs {
@@ -533,9 +534,12 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     diff: diff || full,
                     statuses: statuses || full,
                 };
-                batch(ids, strict, batch_concurrency, |id| {
-                    bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
-                })?
+                bb_batch(
+                    &p,
+                    batch(ids, strict, batch_concurrency, |id| {
+                        bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
+                    })?,
+                )
             }
             PrCmd::Create {
                 title,
@@ -608,15 +612,18 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 repo,
             } => {
                 let p = path(&repo, None)?;
-                batch(ids, strict, batch_concurrency, |id| {
-                    bitbucket::pr_activity(
-                        &c,
-                        &p,
-                        bitbucket::pr_number(id)?,
-                        event_type.as_deref(),
-                        limit,
-                    )
-                })?
+                bb_batch(
+                    &p,
+                    batch(ids, strict, batch_concurrency, |id| {
+                        bitbucket::pr_activity(
+                            &c,
+                            &p,
+                            bitbucket::pr_number(id)?,
+                            event_type.as_deref(),
+                            limit,
+                        )
+                    })?,
+                )
             }
             PrCmd::Task {
                 cmd:
@@ -739,6 +746,33 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
         }
     };
     Ok(Out::Data(data))
+}
+
+/// twg's Bitbucket batch shape: `{workspace, repository, items, summary:
+/// {requested, succeeded, failed}, partial}`, with no `data` envelope.
+/// A single result passes through unchanged.
+fn bb_batch(repo_path: &str, v: Value) -> Value {
+    let (Some(items), Some(summary)) = (v.get("items"), v.get("summary")) else {
+        return v;
+    };
+    let mut parts = repo_path
+        .trim_start_matches("/repositories/")
+        .splitn(2, '/');
+    let failed = summary["failed"].as_u64().unwrap_or(0);
+    let mut out = json!({
+        "workspace": parts.next(),
+        "repository": parts.next(),
+        "items": items,
+        "summary": {
+            "requested": summary["requested"],
+            "succeeded": summary["succeeded"],
+            "failed": failed,
+        },
+    });
+    if failed > 0 {
+        out["partial"] = true.into();
+    }
+    out
 }
 
 #[cfg(test)]

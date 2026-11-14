@@ -1,0 +1,35 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.field.create-metadata",
+  "request": {
+    "site": "text",
+    "space": "text",
+    "type": "text"
+  },
+  "data": {
+    "fields": [
+      {
+        "id": "customfield_10000",
+        "key": "customfield_10000",
+        "name": "text",
+        "required": false,
+        "schema": {
+          "type": "text",
+          "custom": "text",
+          "customId": 1
+        },
+        "operations": [
+          "text"
+        ],
+        "acceptedInput": "text",
+        "example": "text"
+      }
+    ]
+  },
+  "meta": {
+    "resourceClass": "collection",
+    "sourceMode": "native",
+    "resourceType": "jira.workitem.field",
+    "backend": "text"
+  }
+}

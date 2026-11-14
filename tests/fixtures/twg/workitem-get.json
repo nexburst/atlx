@@ -1,0 +1,150 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.get",
+  "request": {
+    "issueIdOrKey": "text",
+    "site": "text"
+  },
+  "data": [
+    {
+      "expand": "text",
+      "id": "text",
+      "self": "text",
+      "key": "text",
+      "issuetype": {
+        "self": "text",
+        "id": "text",
+        "description": "text",
+        "name": "text",
+        "subtask": false,
+        "avatarId": 1,
+        "entityId": "text",
+        "hierarchyLevel": 1
+      },
+      "components": [],
+      "project": {
+        "self": "text",
+        "id": "text",
+        "key": "text",
+        "name": "text",
+        "projectTypeKey": "text",
+        "simplified": true
+      },
+      "description": {
+        "type": "text",
+        "version": 1,
+        "content": []
+      },
+      "fixVersions": [],
+      "statusCategory": {
+        "self": "text",
+        "id": 1,
+        "key": "text",
+        "colorName": "text",
+        "name": "text"
+      },
+      "resolution": null,
+      "timetracking": {},
+      "attachment": [],
+      "resolutiondate": null,
+      "summary": "text",
+      "watches": {
+        "self": "text",
+        "watchCount": 1,
+        "isWatching": true
+      },
+      "creator": {
+        "self": "text",
+        "accountId": "text",
+        "emailAddress": "text",
+        "displayName": "text",
+        "active": true,
+        "timeZone": "text",
+        "accountType": "text"
+      },
+      "subtasks": [],
+      "created": "text",
+      "reporter": {
+        "self": "text",
+        "accountId": "text",
+        "emailAddress": "text",
+        "displayName": "text",
+        "active": true,
+        "timeZone": "text",
+        "accountType": "text"
+      },
+      "priority": null,
+      "labels": [],
+      "duedate": "text",
+      "votes": {
+        "self": "text",
+        "votes": 1,
+        "hasVoted": false
+      },
+      "issuelinks": [],
+      "comment": {
+        "comments": [],
+        "self": "text",
+        "maxResults": 1,
+        "total": 1,
+        "startAt": 1
+      },
+      "worklog": {
+        "startAt": 1,
+        "maxResults": 1,
+        "total": 1,
+        "worklogs": []
+      },
+      "assignee": null,
+      "updated": "text",
+      "status": {
+        "self": "text",
+        "description": "text",
+        "name": "text",
+        "id": "text",
+        "statusCategory": {
+          "self": "text",
+          "id": 1,
+          "key": "text",
+          "colorName": "text",
+          "name": "text"
+        }
+      },
+      "url": "text"
+    }
+  ],
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.workitem",
+    "backend": "text",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.workitem"
+    },
+    "acquisition": {
+      "requested": 1,
+      "returned": 1,
+      "succeeded": 1,
+      "failed": 1,
+      "omitted": 1,
+      "truncated": 1
+    },
+    "evidence": {
+      "provenance": {
+        "source": "text"
+      },
+      "coverage": {
+        "status": "text",
+        "covered": [
+          "text"
+        ]
+      },
+      "truncation": {
+        "truncated": false
+      }
+    }
+  }
+}

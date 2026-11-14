@@ -52,10 +52,11 @@ fn live_jira_myself_and_search() {
         "expected accountId in {me}"
     );
 
-    let results = jira::search(&client, "test", 5, &[], None).expect("jira::search failed");
+    let results = jira::search(&client, "test", 5, None, None).expect("jira::search failed");
     assert!(
-        results["issues"].is_array(),
-        "expected issues array in {results}"
+        results.data["issues"].is_array(),
+        "expected issues array in {}",
+        results.data
     );
 
     if let Some(key) = env_opt("ATLX_TEST_ISSUE") {
@@ -63,7 +64,8 @@ fn live_jira_myself_and_search() {
             &client,
             &key,
             &JiraGetOpts {
-                fields: vec![],
+                fields: None,
+                extra: vec![],
                 comments: true,
                 remote_links: false,
                 full: false,

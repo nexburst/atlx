@@ -23,6 +23,10 @@ output controls `--select`, `--agent-fields`, `--output-file`,
 `--output-summary` and `--api-version` (see [Output controls](#output-controls)).
 When stdout is piped, atlx defaults to JSON.
 
+**Prints twg's JSON.** Output uses twg's envelope and key names (see
+[JSON output](#json-output)), so jq paths and `--select` presets written for
+twg, such as `.data.issues[].key`, work on atlx output as they are.
+
 ## Install
 
 Prebuilt binaries are published on the
@@ -220,11 +224,12 @@ These global flags behave as in twg, so agent workflows written for twg work
 unchanged.
 
 - **`--select <paths>`** keeps only the listed comma-separated dot paths of the
-  JSON or JSONL output, e.g. `--select issues.key,issues.status`. A step that
+  JSON or JSONL output, e.g. `--select data.issues.key,data.issues.status.name`. A step that
   meets an array applies to every element, and the result keeps the original
   nesting. Paths that don't exist are skipped; if none matches, the full output
-  is printed with a warning on stderr. A leading `data.` is optional (twg's
-  payloads sit under `data`). `@compact`, `@evidence` and `@rows` expand to a
+  is printed with a warning on stderr. A leading `data.` is optional, and
+  the envelope's `apiVersion`, `command` and `meta` are kept, as in twg.
+  `@compact`, `@evidence` and `@rows` expand to a
   per-command list (Jira work items, Confluence pages and search, Bitbucket
   repositories, pull requests and pipelines, user search); an unknown preset is
   an error that lists the valid ones. Error envelopes are never projected. In
@@ -234,7 +239,7 @@ unchanged.
   `stdout=<path>` instead. Errors are written there too and keep their exit
   code. With `confluence content get --body-only --output-file page.html -o
   json`, the page body goes to the file and stdout gets the rest of the result,
-  including `snapshot_token`, with `body.outputFile` pointing at the file, ready
+  including `data.snapshotToken`, with `data.body.outputFile` pointing at the file, ready
   for `content update --snapshot-token`.
 - **`--output-summary [none|stats|auto|inline]`** (JSON and JSONL only) writes
   the full output to `--output-file`, or to a fresh file under
@@ -250,17 +255,59 @@ unchanged.
   the full output. Unlike `--select`, it never changes the full output file.
 - **`--api-version v2`** is accepted; any other version is rejected.
 
+## JSON output
+
+JSON output follows twg 1.4.4. Jira, Confluence, user and account commands
+print an envelope:
+
+```json
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.query",
+  "request": {"jql": "project = PROJ", "site": "acme.atlassian.net", "maxResults": 25},
+  "data": {"issues": [{"id": "10001", "key": "PROJ-1", "summary": "...", "status": {"id": "3", "name": "Done", "statusCategory": {"key": "done", "name": "Done"}}}]},
+  "pageInfo": {"hasNextPage": true, "nextCursor": "..."},
+  "meta": {"resourceClass": "entity", "sourceMode": "rest", "resourceType": "jira.workitem"}
+}
+```
+
+- `command` is twg's operation name, which is not always the CLI path
+  (`jira.workitem.transitions` for `transitions query`, `user-search.query`
+  for `user search`, `user.get` for `whoami`). `request` echoes the inputs.
+  `pageInfo` appears only when there is another page; pass its `nextCursor`
+  to `--after`.
+- `data` holds twg's key names. Most are Jira's and Confluence's own REST
+  names: `jira workitem get` prints the REST issue with its fields next to
+  `key` (`.data[0].status.name`, `.data[0].description` as ADF), `query` and
+  `search` print compact rows (`.data.issues[]`), `space query` prints
+  `projects`, `board query` prints `boards`. Avatar and icon URLs are left
+  out, as twg does.
+- Reading several IDs at once (`jira workitem get A B`, `confluence content
+  get 1 2`) gives `data: {items: [{input, ok, data | error}], summary:
+  {requested, returned, succeeded, failed, omitted, truncated}}`, mirrored in
+  `meta.acquisition`.
+- Bitbucket commands print Bitbucket's REST objects without an envelope, as
+  twg does: `repo query` is a list of repositories, `pull-requests query` is
+  `{values, page, pagelen, returned, hasNextPage, hasMore}`, `pull-requests
+  get --comments --diff --statuses` adds `_comments`, `_diffstat` and
+  `_statuses`, `pipeline query` adds `_repo`, and `pipeline get --logs`
+  adds `log`, `log_total_lines` and `log_truncated` to each step. Batches are
+  `{workspace, repository, items, summary, partial}`.
+- `-o jsonl` prints one line per element of the main collection
+  (`data.issues`, `data.items`, a list `data`, ...), each with a `_twg`
+  locator `{command, resourceType, collection, index}`.
+- Text output shows the `data` part as fields and tables.
+
+[COMPAT.md](COMPAT.md#json-output-shapes) records which shapes were compared
+with twg on a live site and which were inferred.
+
 ## Compatibility with twg
 
 The target is for `atlx` to behave exactly like `twg` for Jira, Confluence and
-Bitbucket Cloud: the same command names, flags, output envelope and
-confirmation behavior. [COMPAT.md](COMPAT.md) tracks how far along that is,
-command by command. Today these differences remain:
+Bitbucket Cloud: the same command names, flags, JSON output and confirmation
+behavior. [COMPAT.md](COMPAT.md) tracks how far along that is, command by
+command. These are the intentional differences:
 
-- **JSON payloads are not wrapped yet**: `atlx` emits unwrapped JSON
-  objects/arrays (and `{"items": [...], "summary": {...}}` for multi-ID
-  batches). Switching to `twg`'s `{"data": ...}` envelope and key names is
-  planned in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 - **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
   with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
   environment variables) instead of `twg`'s OAuth flow.
@@ -268,6 +315,9 @@ command by command. Today these differences remain:
   private graph/Rovo APIs (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
   are intentionally excluded; `atlx` uses only the public REST APIs (with
   `atlx search` as a cross-product alternative). COMPAT.md marks these ⛔.
+  Running one fails with "not supported by atlx (requires Teamwork Graph)" in
+  twg's error envelope and exit code 2; a twg command that is planned but not
+  built yet fails with a pointer to its issue.
 
 ## Errors and exit codes
 
@@ -328,6 +378,7 @@ With `--strict`, any failure makes the whole command fail.
 | --- | --- |
 | `0` | Success |
 | `1` | Any failure: API, network, configuration or argument errors (unknown flags included), a `--strict` batch with a failed input, or a batch where every input failed |
+| `2` | A twg command atlx doesn't support because it needs Teamwork Graph, Rovo or the GraphQL gateway (`category: "unsupported"`) |
 | `3` | Partial batch: some, but not all, inputs of a multi-ID read failed. The output is still printed |
 
 `atlx doctor --strict` keeps its own non-zero exit when checks fail. To tell

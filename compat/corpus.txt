@@ -221,6 +221,7 @@ ok user search --email alice@example.com
 ok user search --name 'Alice Example'
 ok user search --account-id 5b10ac8d82e05b22cc7d4ef5
 ok user search alice -n 5
+ok user search --name alice --compact
 
 # --- jira service management ---
 gap #37 jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop request'

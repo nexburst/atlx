@@ -72,7 +72,8 @@ fn jira_get_with_comments_remote_links_and_full() {
         &client,
         "PROJ-1",
         &JiraGetOpts {
-            fields: vec!["customfield_100".into()],
+            fields: None,
+            extra: vec!["customfield_100".into()],
             comments: true,
             remote_links: true,
             full: true,
@@ -80,18 +81,22 @@ fn jira_get_with_comments_remote_links_and_full() {
     )
     .unwrap();
 
+    // twg's shape: REST fields lifted next to `key`, ADF kept as is.
     assert_eq!(out["key"], "PROJ-1");
     assert_eq!(out["summary"], "Fix bug");
-    assert_eq!(out["description"], "Details here");
-    assert_eq!(out["components"], json!(["api"]));
-    assert_eq!(out["fix_versions"], json!(["v1.0"]));
-    assert_eq!(out["parent"], "PROJ-0");
+    assert_eq!(out["description"]["type"], "doc");
+    assert_eq!(out["components"], json!([{"name": "api"}]));
+    assert_eq!(out["fixVersions"], json!([{"name": "v1.0"}]));
+    assert_eq!(out["parent"]["key"], "PROJ-0");
     assert_eq!(out["customfield_100"], "extra-val");
-    assert!(out["fields"].is_object());
+    assert!(out.get("fields").is_none());
     assert_eq!(out["url"], format!("{}/browse/PROJ-1", srv.base_url()));
     assert_eq!(out["comments"].as_array().unwrap().len(), 3);
-    assert_eq!(out["comments"][2]["body"], "Third");
-    assert_eq!(out["remote_links"][0]["title"], "PR #5");
+    assert_eq!(out["comments"][2]["id"], "12");
+    assert_eq!(out["comments"][2]["body"]["type"], "doc");
+    assert_eq!(out["remoteLinks"][0]["object"]["title"], "PR #5");
+    let keys: Vec<&String> = out.as_object().unwrap().keys().collect();
+    assert_eq!(keys.last().unwrap().as_str(), "url");
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 4);
@@ -133,16 +138,16 @@ fn jira_query_paginates_next_page_token_and_respects_limit_and_after() {
         &client,
         "project = P",
         3,
-        &["customfield_1".into()],
+        Some(&["customfield_1".into()]),
         Some("tok-0"),
     )
     .unwrap();
-    let issues = out["issues"].as_array().unwrap();
+    let issues = out.data["issues"].as_array().unwrap();
     assert_eq!(issues.len(), 3);
     assert_eq!(issues[0]["key"], "P-1");
     assert_eq!(issues[2]["key"], "P-3");
     assert_eq!(issues[2]["customfield_1"], "x3");
-    assert_eq!(out["next_cursor"], "tok-2");
+    assert_eq!(out.next.as_deref(), Some("tok-2"));
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 2);
@@ -318,7 +323,8 @@ fn jira_transition_handles_has_screen_true_and_false() {
     )
     .unwrap();
     assert_eq!(res1["status"], "Resolved");
-    assert!(res1.get("comment_id").is_none());
+    assert_eq!(res1["transition"], json!({"id": "21", "name": "Resolve"}));
+    assert!(res1.get("commentId").is_none());
 
     let res2 = jira::transition(
         &client,
@@ -329,7 +335,7 @@ fn jira_transition_handles_has_screen_true_and_false() {
     )
     .unwrap();
     assert_eq!(res2["status"], "Closed");
-    assert_eq!(res2["comment_id"], "c-77");
+    assert_eq!(res2["commentId"], "c-77");
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 5);
@@ -370,8 +376,9 @@ fn jira_space_query_sends_twg_filters_and_offset() {
         },
     )
     .unwrap();
-    assert_eq!(out[0]["key"], "PROJ");
-    assert_eq!(out[0]["type"], "software");
+    assert_eq!(out["projects"][0]["key"], "PROJ");
+    assert_eq!(out["projects"][0]["projectTypeKey"], "software");
+    assert_eq!(out["startAt"], 10);
 
     let reqs = srv.requests();
     assert_eq!(reqs[0].path, "/rest/api/3/project/search");
@@ -423,12 +430,14 @@ fn jira_board_query_by_issue_and_sprints_for_project() {
         },
     )
     .unwrap();
-    assert_eq!(boards[0]["id"], 12);
-    assert_eq!(boards[0]["project_key"], "PROJ");
+    assert_eq!(boards["boards"][0]["id"], 12);
+    assert_eq!(boards["boards"][0]["location"]["projectKey"], "PROJ");
+    assert_eq!(boards["isLast"], true);
 
     let board = jira::project_board(&client, "PROJ").unwrap();
     let sprints = jira::sprints(&client, board, Some("active"), 5, 10).unwrap();
-    assert_eq!(sprints[0]["id"], 99);
+    assert_eq!(sprints["sprints"][0]["id"], 99);
+    assert_eq!(sprints["startAt"], 5);
 
     let reqs = srv.requests();
     assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1");
@@ -516,8 +525,9 @@ fn jira_sprint_workitems_with_fields_and_offset() {
         },
     )
     .unwrap();
-    assert_eq!(out[0]["key"], "PROJ-3");
-    assert_eq!(out[0]["labels"], json!(["x"]));
+    assert_eq!(out["issues"][0]["key"], "PROJ-3");
+    assert_eq!(out["issues"][0]["labels"], json!(["x"]));
+    assert_eq!(out["total"], 3);
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 1);
     assert_eq!(reqs[0].path, "/rest/agile/1.0/sprint/99/issue");
@@ -584,7 +594,8 @@ fn jira_weblink_and_user_by_account() {
     .unwrap();
     assert_eq!(out["id"], 10001);
     let users = jira::user_by_account(&client, "ari:cloud:identity::user/abc").unwrap();
-    assert_eq!(users[0]["display_name"], "Alice");
+    assert_eq!(users[0]["name"], "Alice");
+    assert_eq!(users[0]["accountId"], "abc");
 
     let reqs = srv.requests();
     assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1/remotelink");

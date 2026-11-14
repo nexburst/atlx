@@ -5,6 +5,7 @@ use super::Globals;
 use super::util::{require_yes, text_arg};
 use crate::client::ApiError;
 use crate::config::{self, Config, ConfigFile, DEFAULT_PROFILE, Profile};
+use crate::output::envelope::envelope;
 use crate::{bitbucket, jira};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
@@ -125,11 +126,16 @@ pub(crate) fn logout(g: &Globals) -> Result<Value> {
 pub(crate) fn whoami(g: &Globals) -> Result<Value> {
     let cfg = g.config()?;
     let me = jira::myself(&cfg.jira()?)?;
-    Ok(json!({
-        "name": me["displayName"], "email": me["emailAddress"], "account_id": me["accountId"],
-        "site": cfg.site, "bitbucket_workspace": cfg.bitbucket.workspace,
-        "profile": cfg.profile, "token_source": cfg.token_source(),
-    }))
+    // twg's `user.get` shape; where atlx's credentials come from goes in
+    // `meta`, since twg has no such fields.
+    Ok(envelope("user.get", "user")
+        .request(json!({"accountId": null}))
+        .meta("resultCount", 1)
+        .meta("site", cfg.site.clone())
+        .meta("profile", cfg.profile.clone())
+        .meta("tokenSource", cfg.token_source())
+        .meta("bitbucketWorkspace", cfg.bitbucket.workspace.clone())
+        .data(jira::profile(&me)))
 }
 
 #[cfg(unix)]

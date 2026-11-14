@@ -47,8 +47,9 @@ row 🟡. Bitbucket's `--workspace`/`--repo`, which twg declares on the
 - **Coverage**, which may only go up. Record a rise with
   `UPDATE_COVERAGE=1 cargo test --test twg_compat`.
 
-The checks are about parsing. Output shape and runtime behavior are tracked in
-the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
+These checks are about parsing. Output shapes are covered by
+[`tests/twg_shapes.rs`](tests/twg_shapes.rs) and the
+[JSON output shapes](#json-output-shapes) section below.
 
 ## Global flags and behavior
 
@@ -64,10 +65,43 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `--output-file` | ➕ | twg 1.4.4 lists no such global flag; atlx writes stdout to a file |
 | `--usage-counts` | ⛔ | usage counts come from the GraphQL gateway |
 | `--output-shape` | ⛔ | the shapes reshape Teamwork Graph relationships |
-| `{"data": ...}` JSON envelope and key names | 📋 | atlx prints unwrapped payloads today ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
+| `{"data": ...}` JSON envelope and key names | ✅ | `apiVersion`, `command`, `request`, `data`, `pageInfo`, `meta` as twg prints them; Bitbucket unwrapped, as in twg ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)); see [JSON output shapes](#json-output-shapes) |
+| JSONL rows with `_twg` locators | ✅ | one line per element of the main collection ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
+| Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)" in twg's error envelope, `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
 | Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/pedrosanzmtz/atlx/issues/17) |
 | No `--yes` on merge, decline and content delete | ✅ | `--yes` is still accepted and ignored; nothing asks for confirmation ([#18](https://github.com/pedrosanzmtz/atlx/issues/18)) |
 | API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
+
+## JSON output shapes
+
+Maintainer decision on [#21](https://github.com/pedrosanzmtz/atlx/issues/21):
+**atlx behaves as twg.** The default JSON and JSONL output uses twg's
+envelope and key names; there is no separate compatibility mode. Commands
+that need Teamwork Graph or Rovo fail with "not supported by atlx (requires
+Teamwork Graph)".
+
+`scripts/conformance.sh` runs read-only commands through twg 1.4.4 and atlx
+against the same site and reports every key path only one side prints. The
+run for #21 used a site with Jira but no Confluence and no Bitbucket
+repositories, so:
+
+| Area | How the shape was established | Result |
+| --- | --- | --- |
+| `whoami`, `user search` (with and without `--compact`) | Live side by side | Same key paths. `whoami` data comes from Jira's `myself`: `zoneinfo` is the Jira time zone (twg prints `null`) and `extendedProfile` is all `null`; profile, site and token source are in `meta` |
+| Jira `workitem get` (default, `--comments`, `--fields`, `--full`, several IDs), `workitem query` (rows, `--fields`, paging), `workitem search`, `transitions query`, `field create-metadata`, `link-types query`, `space query`, `space get`, `board query` | Live side by side | Same key paths and types. Differences in values only: `self` links use the site URL (twg goes through `api.atlassian.com`), and `meta` describes atlx's REST source instead of twg's backend |
+| Jira `board sprints query`, `sprint workitems query` | Inferred: the site has no sprints. Follows the pattern twg uses for the other Agile lists (REST page, `values` renamed `sprints`; work item rows as in `workitem query`) | Not verified |
+| Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...) | Not verified |
+| Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary`, `outline` and `body.lossyConversion` are not produced |
+| Other Confluence commands | Inferred: REST v2 objects with `externalUrl` and `snapshotToken`, lists as `{results, nextCursor}` | Not verified |
+| Bitbucket | Partly live: twg printed `repo query` as a bare list and a failed batch `pull-requests get` as `{workspace, repository, items, summary, partial}`, both without an envelope. The rest is inferred from the presets: REST 2.0 objects plus `_comments`, `_statuses`, `_repo` and the step log fields | Not verified with data. One known difference: when every ID of a Bitbucket batch fails, twg still prints the batch object (exit 1) while atlx prints the error envelope (exit 1) |
+| Account commands (`login`, `logout`, `auth profile ...`, `setup ...`, `doctor`) and `atlx search` | Envelope only. twg's data here describes its OAuth token store, which atlx doesn't have, so the data keeps atlx's own keys | Intentional |
+| Errors | The error envelope from #17; JSONL error lines get `_twg: {collection: "root", index: 0}` as in twg | Live |
+
+`tests/twg_shapes.rs` replays the live-verified commands against synthetic
+fixtures (`tests/fixtures/twg/`, made by `scripts/twg-fixtures.sh`, values
+replaced and key names kept) so the shapes can't drift. Re-run the
+conformance script on a site with Confluence and Bitbucket data to verify the
+inferred rows.
 
 ## Jira
 
@@ -468,7 +502,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 
 ## Users
 
-7 twg commands: 🟡 1, 📋 2, ⛔ 4.
+7 twg commands: ✅ 1, 📋 2, ⛔ 4.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -478,7 +512,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `user manager` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user manager-chain` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user peers` | ⛔ | reporting lines come from the Teamwork Graph |
-| `user search` | 🟡 | missing `--compact` (#21, it changes the output shape); `--name`, `--query` and `--email` all use Jira's user search (#18); GraphQL-only `--include-slack` not planned |
+| `user search` | ✅ | `--compact` is accepted; the JSON is the same either way, as in twg (#21). `--name`, `--query` and `--email` all use Jira's user search, so `sources` is always `["jira-rest"]` (#18); GraphQL-only `--include-slack` not planned |
 
 ## Accounts and setup
 

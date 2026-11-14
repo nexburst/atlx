@@ -1,0 +1,33 @@
+{
+  "apiVersion": "v2",
+  "command": "user-search.query",
+  "request": {
+    "site": "text",
+    "name": "text",
+    "email": null,
+    "compact": false,
+    "includeSlack": false,
+    "limit": 1
+  },
+  "data": [
+    {
+      "accountId": "text",
+      "userAri": "text",
+      "name": "text",
+      "email": "text",
+      "sources": [
+        "text"
+      ]
+    }
+  ],
+  "meta": {
+    "resourceClass": "relation",
+    "sourceMode": "mixed",
+    "resourceType": "user-search",
+    "backend": "text",
+    "resultCount": 1,
+    "sourceErrors": [
+      "text"
+    ]
+  }
+}

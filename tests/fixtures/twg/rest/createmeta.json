@@ -1,0 +1,22 @@
+{
+  "startAt": 1,
+  "maxResults": 1,
+  "total": 1,
+  "fields": [
+    {
+      "required": false,
+      "schema": {
+        "type": "text",
+        "custom": "text",
+        "customId": 1
+      },
+      "name": "text",
+      "key": "customfield_10000",
+      "hasDefaultValue": false,
+      "operations": [
+        "text"
+      ],
+      "fieldId": "customfield_10000"
+    }
+  ]
+}

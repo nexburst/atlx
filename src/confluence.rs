@@ -99,29 +99,27 @@ pub fn search_query(
     if let Some(cur) = cursor {
         q.push(("cursor", cur));
     }
-    let v = c.get("/rest/api/search", &q)?;
-    let results: Vec<Value> = v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|r| {
-            let mut o = json!({
-                "id": r["content"]["id"],
-                "type": r["content"]["type"],
-                "title": strip_highlight(r["title"].as_str().unwrap_or_default()),
-                "space": r["resultGlobalContainer"]["title"],
-                "updated": r["lastModified"],
-                "url": format!("{}{}", c.base(), r["url"].as_str().unwrap_or_default()),
-            });
-            if excerpt {
-                o["excerpt"] = strip_highlight(r["excerpt"].as_str().unwrap_or_default())
-                    .trim()
-                    .into();
+    let mut v = c.get("/rest/api/search", &q)?;
+    // twg passes REST's search results through; highlight markers are
+    // removed so titles and excerpts read as plain text.
+    if let Some(results) = v["results"].as_array_mut() {
+        for r in results {
+            for k in ["title", "excerpt"] {
+                if let Some(t) = r[k].as_str() {
+                    r[k] = strip_highlight(t).trim().into();
+                }
             }
-            o
-        })
-        .collect();
-    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
+            if !excerpt && let Some(m) = r.as_object_mut() {
+                m.shift_remove("excerpt");
+            }
+        }
+    }
+    let next = next_cursor(&v);
+    if let Some(m) = v.as_object_mut() {
+        m.shift_remove("_links");
+        m.insert("nextCursor".into(), next);
+    }
+    Ok(v)
 }
 
 /// The CQL that `confluence search text` runs: recent pages and blog posts.
@@ -161,6 +159,27 @@ fn fetch(c: &Client, id: &str, draft: bool) -> Result<(ContentType, Value)> {
         q.push(("get-draft", "true"));
     }
     try_content(|kind| c.get(&format!("/api/v2/{}/{}", kind.collection(), enc(id)), &q))
+}
+
+/// `snapshotToken` and `externalUrl` added to a REST v2 content object.
+fn with_links(c: &Client, mut v: Value) -> Value {
+    if v.is_object() {
+        v["snapshotToken"] = snapshot(&v);
+        v["externalUrl"] = optional_content_url(c, &v);
+    }
+    v
+}
+
+/// `{results, nextCursor}` from a REST v2 list response, each result passed
+/// through `f`.
+fn listing(v: &Value, f: impl Fn(&Value) -> Value) -> Value {
+    let results: Vec<Value> = v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(f)
+        .collect();
+    json!({"results": results, "nextCursor": next_cursor(v)})
 }
 
 fn content_url(c: &Client, v: &Value) -> String {
@@ -239,30 +258,50 @@ pub fn get(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
         "type": format!("{kind:?}").to_lowercase(),
         "title": v["title"],
         "status": v["status"],
-        "space_id": v["spaceId"],
-        "parent_id": v["parentId"],
-        "version": v["version"]["number"],
-        "snapshot_token": snapshot(&v),
-        "updated": v["version"]["createdAt"],
-        "url": content_url(c, &v),
+        "spaceId": v["spaceId"],
+        "parentId": v["parentId"],
+        "externalUrl": content_url(c, &v),
+        "detail": format!("{:?}", o.detail).to_lowercase(),
+        "snapshotToken": snapshot(&v),
+        "version": {"number": v["version"]["number"], "createdAt": v["version"]["createdAt"]},
     });
     match o.detail {
         Detail::Summary => {
             let text = storage_to_text(storage);
             let excerpt: String = text.chars().take(400).collect();
-            out["excerpt"] = if excerpt.len() < text.len() {
+            let excerpt = if excerpt.len() < text.len() {
                 format!("{excerpt}…")
             } else {
                 excerpt
-            }
-            .into();
+            };
+            out["summary"] = json!({
+                "excerpt": excerpt,
+                "wordCount": text.split_whitespace().count(),
+                "sectionCount": section_count(storage),
+            });
         }
         Detail::Full => {
-            out["format"] = format!("{:?}", o.format).to_lowercase().into();
-            out["body"] = format_body(storage, o.format);
+            out["body"] = json!({
+                "format": format!("{:?}", o.format).to_lowercase(),
+                "value": format_body(storage, o.format),
+            });
         }
     }
     Ok(out)
+}
+
+/// Number of headings (`<h1>` to `<h6>`) in a storage body.
+fn section_count(storage: &str) -> usize {
+    let lower = storage.to_ascii_lowercase();
+    (1..=6)
+        .map(|n| {
+            let tag = format!("<h{n}");
+            lower
+                .match_indices(&tag)
+                .filter(|(i, _)| matches!(lower.as_bytes().get(i + tag.len()), Some(b'>' | b' ')))
+                .count()
+        })
+        .sum()
 }
 
 /// Space key or numeric ID -> numeric ID.
@@ -312,10 +351,7 @@ pub fn create(c: &Client, n: NewContent) -> Result<Value> {
         req["parentId"] = content_id(p)?.into();
     }
     let v = c.post(&format!("/api/v2/{}", n.content_type.collection()), &req)?;
-    Ok(
-        json!({"id": v["id"], "title": v["title"], "status": v["status"], "version": v["version"]["number"],
-              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}),
-    )
+    Ok(with_links(c, v))
 }
 
 pub struct Edit<'a> {
@@ -361,13 +397,10 @@ pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
         "version": {"number": version + 1, "message": e.version_message.unwrap_or(""), "minorEdit": e.minor_edit},
     });
     if e.dry_run {
-        return Ok(json!({"dry_run": true, "id": id, "from_version": version, "request": req}));
+        return Ok(json!({"dryRun": true, "id": id, "fromVersion": version, "request": req}));
     }
     let v = c.put(&format!("/api/v2/{}/{}", kind.collection(), enc(&id)), &req)?;
-    Ok(
-        json!({"id": v["id"], "title": v["title"], "version": v["version"]["number"],
-              "snapshot_token": snapshot(&v), "url": content_url(c, &v)}),
-    )
+    Ok(with_links(c, v))
 }
 
 /// `confluence content list --space`
@@ -396,29 +429,19 @@ pub fn list(
         ),
         &q,
     )?;
-    let results: Vec<Value> = v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|p| json!({"id": p["id"], "title": p["title"], "status": p["status"], "parent_id": p["parentId"],
-                        "version": p["version"]["number"], "updated": p["version"]["createdAt"], "url": content_url(c, p)}))
-        .collect();
-    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
+    Ok(listing(&v, |p| with_links(c, p.clone())))
 }
 
-fn format_comment(c: &Client, cm: &Value, inline: bool, format: ReadFormat) -> Value {
+/// A REST v2 comment with its body in the requested format as
+/// `body: {format, value}` and its `externalUrl`.
+fn format_comment(c: &Client, cm: &Value, format: ReadFormat) -> Value {
     let storage = cm["body"]["storage"]["value"].as_str().unwrap_or_default();
-    let mut o = json!({
-        "id": cm["id"],
-        "author_id": cm["version"]["authorId"],
-        "updated": cm["version"]["createdAt"],
-        "parent_comment_id": cm["parentCommentId"],
-        "body": format_body(storage, format),
-        "url": optional_content_url(c, cm),
+    let mut o = cm.clone();
+    o["body"] = json!({
+        "format": format!("{format:?}").to_lowercase(),
+        "value": format_body(storage, format),
     });
-    if inline {
-        o["resolution_status"] = cm["resolutionStatus"].clone();
-    }
+    o["externalUrl"] = optional_content_url(c, cm);
     o
 }
 
@@ -448,13 +471,7 @@ pub fn comments_list(
             &q,
         )
     })?;
-    let results: Vec<Value> = v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|cm| format_comment(c, cm, inline, format))
-        .collect();
-    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
+    Ok(listing(&v, |cm| format_comment(c, cm, format)))
 }
 
 /// `confluence content comments create`
@@ -475,26 +492,11 @@ pub fn comment_create(
         id_field: id,
         "body": {"representation": "storage", "value": to_storage(body, format)},
     });
-    let v = c.post("/api/v2/footer-comments", &req)?;
-    Ok(json!({
-        "id": v["id"],
-        "status": v["status"],
-        "version": v["version"]["number"],
-        "updated": v["version"]["createdAt"],
-        "url": optional_content_url(c, &v),
-    }))
-}
-
-fn child_summary(c: &Client, p: &Value) -> Value {
-    json!({
-        "id": p["id"],
-        "type": p["type"],
-        "title": p["title"],
-        "status": p["status"],
-        "space_id": p["spaceId"],
-        "child_position": p["childPosition"],
-        "url": optional_content_url(c, p),
-    })
+    let mut v = c.post("/api/v2/footer-comments", &req)?;
+    if v.is_object() {
+        v["externalUrl"] = optional_content_url(c, &v);
+    }
+    Ok(v)
 }
 
 /// `confluence content children`
@@ -506,13 +508,11 @@ pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>)
         q.push(("cursor", cur));
     }
     let v = c.get(&format!("/api/v2/pages/{}/children", enc(&id)), &q)?;
-    let results: Vec<Value> = v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|p| child_summary(c, p))
-        .collect();
-    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
+    Ok(listing(&v, |p| {
+        let mut p = p.clone();
+        p["externalUrl"] = optional_content_url(c, &p);
+        p
+    }))
 }
 
 const MAX_TREE_DEPTH: usize = 5;
@@ -583,8 +583,8 @@ pub fn tree(c: &Client, reference: &str, depth: usize) -> Result<Value> {
         "id": page["id"],
         "title": page["title"],
         "status": page["status"],
-        "space_id": page["spaceId"],
-        "url": content_url(c, &page),
+        "spaceId": page["spaceId"],
+        "externalUrl": content_url(c, &page),
         "depth": depth,
         "ancestors": ancestors,
         "children": build_tree_nodes(c, &id, depth)?,
@@ -602,12 +602,10 @@ pub fn labels(c: &Client, reference: &str, limit: usize) -> Result<Value> {
             &q,
         )
     })?;
-    Ok(v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|l| json!({"id": l["id"], "name": l["name"], "prefix": l["prefix"]}))
-        .collect())
+    Ok(listing(
+        &v,
+        |l| json!({"id": l["id"], "name": l["name"], "prefix": l["prefix"]}),
+    ))
 }
 
 /// `confluence content delete`
@@ -630,16 +628,18 @@ pub fn delete(c: &Client, reference: &str, purge: bool) -> Result<Value> {
 
 // --- spaces ------------------------------------------------------------------
 
+/// A REST v2 space with its `externalUrl`.
 fn space_summary(c: &Client, s: &Value) -> Value {
-    json!({
-        "id": s["id"],
-        "key": s["key"],
-        "name": s["name"],
-        "type": s["type"],
-        "status": s["status"],
-        "homepage_id": s["homepageId"],
-        "url": format!("{}{}", c.base(), s["_links"]["webui"].as_str().unwrap_or_default()),
-    })
+    let mut o = s.clone();
+    if o.is_object() {
+        o["externalUrl"] = format!(
+            "{}{}",
+            c.base(),
+            s["_links"]["webui"].as_str().unwrap_or_default()
+        )
+        .into();
+    }
+    o
 }
 
 /// `confluence space list`
@@ -664,13 +664,7 @@ pub fn spaces(
         }
     }
     let v = c.get("/api/v2/spaces", &q)?;
-    let results: Vec<Value> = v["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|s| space_summary(c, s))
-        .collect();
-    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
+    Ok(listing(&v, |s| space_summary(c, s)))
 }
 
 /// `confluence space get <key-or-id>`
@@ -679,10 +673,7 @@ pub fn space(c: &Client, identifier: &str) -> Result<Value> {
         &format!("/api/v2/spaces/{}", enc(&space_id(c, identifier)?)),
         &[("description-format", "plain")],
     )?;
-    let mut o = space_summary(c, &v);
-    o["description"] = v["description"]["plain"]["value"].clone();
-    o["created"] = v["createdAt"].clone();
-    Ok(o)
+    Ok(space_summary(c, &v))
 }
 
 /// Labels of one space, as `[{id, name, prefix}]`.
@@ -939,7 +930,7 @@ mod tests {
         assert!(request_line.contains("limit=10"), "{request_line}");
         assert!(request_line.contains("cursor=page1%3D"), "{request_line}");
         assert_eq!(out["results"][0]["key"], "ENG");
-        assert_eq!(out["next_cursor"], "page2=");
+        assert_eq!(out["nextCursor"], "page2=");
     }
 
     #[test]
@@ -1014,18 +1005,21 @@ mod tests {
         });
 
         let md = comments_list(&c, "101", false, ReadFormat::Md, 10, None).unwrap();
-        assert_eq!(md["results"][0]["body"], "Hello **world**");
-        assert_eq!(md["next_cursor"], "c2");
+        assert_eq!(
+            md["results"][0]["body"],
+            json!({"format": "md", "value": "Hello **world**"})
+        );
+        assert_eq!(md["nextCursor"], "c2");
 
         let html = comments_list(&c, "101", false, ReadFormat::Html, 10, None).unwrap();
         assert_eq!(
-            html["results"][0]["body"],
+            html["results"][0]["body"]["value"],
             "<p>Hello <strong>world</strong></p>"
         );
 
         let inline = comments_list(&c, "202", true, ReadFormat::Md, 25, None).unwrap();
         assert_eq!(inline["results"][0]["id"], "ic1");
-        assert_eq!(inline["results"][0]["resolution_status"], "open");
+        assert_eq!(inline["results"][0]["resolutionStatus"], "open");
 
         let created = comment_create(&c, "202", "Nice **post**", TextFormat::Markdown).unwrap();
         assert_eq!(created["id"], "fc9");
@@ -1070,7 +1064,7 @@ mod tests {
 
         let ch = children(&c, "10", 5, Some("cur1")).unwrap();
         assert_eq!(ch["results"][0]["id"], "11");
-        assert_eq!(ch["results"][0]["child_position"], 1);
+        assert_eq!(ch["results"][0]["childPosition"], 1);
 
         let tr = tree(&c, "10", 2).unwrap();
         assert_eq!(tr["depth"], 2);
@@ -1122,7 +1116,7 @@ mod tests {
 
         let me = space_me(&c).unwrap();
         assert_eq!(me["id"], "77");
-        assert_eq!(me["description"], "My space");
+        assert_eq!(me["description"]["plain"]["value"], "My space");
 
         let got = get(
             &c,
@@ -1137,11 +1131,13 @@ mod tests {
         .unwrap();
         assert_eq!(got["id"], "901");
         assert_eq!(got["type"], "blogpost");
-        assert_eq!(got["body"], "Post");
+        assert_eq!(got["body"], json!({"format": "md", "value": "Post"}));
+        assert_eq!(got["detail"], "full");
+        assert_eq!(got["spaceId"], "55");
 
         let lbls = labels(&c, "901", 25).unwrap();
         assert_eq!(
-            lbls,
+            lbls["results"],
             json!([{"id": "l1", "name": "ops", "prefix": "global"}])
         );
 

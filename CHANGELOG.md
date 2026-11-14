@@ -58,8 +58,32 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   pull-requests get` and `bb pull-requests activity`: batch reads now run in
   parallel on scoped threads and keep the input order (#18).
 
+- `scripts/conformance.sh` compares twg's and atlx's JSON on a live site
+  (read-only; outputs stay in the git-ignored `target/conformance/`), and
+  `scripts/twg-fixtures.sh` turns a run into the synthetic fixtures behind
+  `tests/twg_shapes.rs` (#21).
+- twg commands that need Teamwork Graph, Rovo or the GraphQL gateway (`rovo`,
+  `work`, `context`, `jira board cells query`, ...) fail with "not supported
+  by atlx (requires Teamwork Graph)" in twg's error envelope and exit code 2.
+  Planned twg commands fail with a pointer to their issue (#21).
+- `user search --compact` (#21).
+
 ### Changed
 
+- **JSON output now matches twg** (#21). Jira, Confluence, user and account
+  commands print twg's envelope (`apiVersion`, `command`, `request`, `data`,
+  `pageInfo`, `meta`) with twg's key names, which are mostly the REST APIs'
+  own: `jira workitem get` prints `data: [<issue>]` with REST fields next to
+  `key`, `query`/`search` print `data.issues` rows and `pageInfo.nextCursor`
+  instead of `next_cursor`, `transitions query` prints `{id, name, toName,
+  category}`, `space query` prints `projects`, `board query` `boards`, and
+  `whoami` twg's profile fields. Bitbucket commands print Bitbucket's REST
+  objects without an envelope, as twg does. Batches gain `returned`,
+  `omitted` and `truncated` counts. `-o jsonl` adds twg's `_twg` locator to
+  each row. The old snake_case summary keys are gone, and `--select` presets
+  no longer carry fallbacks for them.
+- `user search` returns 20 users by default, as twg does (was 25).
+- `jira space query` sorts by key unless `--sort-by` is given, as twg does.
 - Merge, decline and `confluence content delete` no longer require `--yes`,
   matching twg; `--yes` is still accepted and ignored (#18).
 - The 0.1 names (`jira project`, `jira board list`, `jira sprint list|issues`,

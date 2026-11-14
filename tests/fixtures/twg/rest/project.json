@@ -1,0 +1,56 @@
+{
+  "expand": "text",
+  "self": "text",
+  "id": "text",
+  "key": "text",
+  "description": "text",
+  "lead": {
+    "self": "text",
+    "accountId": "text",
+    "avatarUrls": {
+      "48x48": "text",
+      "24x24": "text",
+      "16x16": "text",
+      "32x32": "text"
+    },
+    "displayName": "text",
+    "active": true
+  },
+  "components": [],
+  "issueTypes": [
+    {
+      "self": "text",
+      "id": "text",
+      "description": "text",
+      "iconUrl": "text",
+      "name": "text",
+      "subtask": false,
+      "avatarId": 1,
+      "hierarchyLevel": 1
+    }
+  ],
+  "assigneeType": "text",
+  "versions": [],
+  "name": "text",
+  "roles": {
+    "atlassian-addons-project-access": "text",
+    "Administrator": "text",
+    "jira-guest-member": "text",
+    "Viewer": "text",
+    "Member": "text"
+  },
+  "avatarUrls": {
+    "48x48": "text",
+    "24x24": "text",
+    "16x16": "text",
+    "32x32": "text"
+  },
+  "projectTypeKey": "text",
+  "simplified": true,
+  "style": "text",
+  "isPrivate": false,
+  "properties": {},
+  "entityId": "text",
+  "uuid": "text",
+  "isLiveTemplate": false
+}

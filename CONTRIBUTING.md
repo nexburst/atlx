@@ -25,7 +25,7 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `src/main.rs` | A few lines that call `atlx::cli::main()` |
 | `src/lib.rs` | Module list and the shared `Product` enum |
 | `src/client.rs`, `src/config.rs`, `src/output.rs`, `src/markup.rs`, `src/time.rs` | HTTP client, config and credentials, output formats, body-format conversion, date helpers |
-| `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return a summarized `serde_json::Value` |
+| `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return the `data` part of twg's output as a `serde_json::Value` |
 | `src/cli/mod.rs` | `Cli` with the global flags, the top-level `Cmd`, `Globals`, `Out`, dispatch and `main()` |
 | `src/cli/<product>.rs` (`jira`, `confluence`, `bitbucket`) | That product's clap enums and its dispatch function, plus parse tests |
 | `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs`, `completion.rs` | The non-product commands (`completion.rs` also holds the hidden `man` generator) |
@@ -33,6 +33,8 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `tests/common/mod.rs` | Offline mock HTTP server (`MockServer`, `MockResponse`, `RecordedRequest`) |
 | `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
 | `tests/cli_tree.rs` + `tests/snapshots/cli-tree.txt` | Snapshot of the full command tree |
+| `tests/twg_shapes.rs` + `tests/fixtures/twg/` | atlx's JSON against synthetic copies of twg's output shapes (made by `scripts/twg-fixtures.sh`) |
+| `scripts/conformance.sh` | Side-by-side live run of twg and atlx (read-only), reporting shape differences into the git-ignored `target/conformance/` |
 | `tests/live_smoke.rs` | Opt-in live checks (`#[ignore]`) |
 | `tests/twg_compat.rs` | Checks `compat/corpus.txt`, `COMPAT.md` and `compat/coverage.txt` against the parser |
 | `compat/twg-<version>.txt` | twg's command tree (paths, positionals, flag names), made by `scripts/twg-inventory.sh` |
@@ -46,11 +48,13 @@ the mock server and keeps product PRs out of each other's files.
 1. **Clap variant**: add it to the product's enum in `src/cli/<product>.rs`,
    using twg's command path and flag names (check `twg <cmd> --help`).
 2. **API function**: add it to `src/<product>.rs`. It takes a `&Client` and
-   typed arguments, and returns a summarized `Value`.
+   typed arguments, and returns twg's `data` for the command as a `Value`.
 3. **Dispatch**: wire the variant to the function in the product's dispatch
-   function in `src/cli/<product>.rs`.
+   function in `src/cli/<product>.rs`, wrapping Jira, Confluence and user
+   results in `envelope("<twg command>", "<resourceType>")` with a `request`
+   echo of the inputs.
 4. **Mock-HTTP test** in `tests/<product>.rs`: assert the method, path, query
-   and body sent, and the summarized output.
+   and body sent, and the output keys.
 5. **Parse test**: add the twg-style invocation to the `tests` module in
    `src/cli/<product>.rs` (or to `parses_twg_style_invocations` in
    `src/cli/mod.rs`).
@@ -67,8 +71,12 @@ the mock server and keeps product PRs out of each other's files.
 
 - **twg naming.** If twg has the command or flag, use its exact path and
   spelling. atlx-only commands are labelled "(atlx extra)" in their help.
-- **Output.** Summary keys are `snake_case`. Text on a terminal, JSON when
-  piped, and always overridable with `-o text|json|jsonl`.
+- **Output.** JSON follows twg: Jira, Confluence, user and account commands
+  return `output::envelope::envelope(<twg command>, <resourceType>)` around
+  data with twg's key names (usually the REST payload's own names), and
+  Bitbucket commands return the REST objects unwrapped. Check new shapes
+  against twg with `scripts/conformance.sh` when you can. Text on a
+  terminal, JSON when piped, and always overridable with `-o text|json|jsonl`.
 - **Errors.** Return them as `anyhow::Error`. For a classified failure, return
   a `client::ApiError` (`ApiError::usage(..)` for bad arguments,
   `ApiError::config(..)` for missing setup; the client produces HTTP and network

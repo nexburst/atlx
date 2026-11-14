@@ -54,7 +54,8 @@ pub(crate) fn concurrency_arg(s: &str) -> std::result::Result<usize, String> {
 
 /// Run `f` for each input, up to `concurrency` at a time on scoped threads.
 /// One input returns its result directly; several return `{items: [{input,
-/// ok, data|error}], summary}` like twg's batch reads, in input order.
+/// ok, data|error}], summary: {requested, returned, succeeded, failed,
+/// omitted, truncated}}` like twg's batch reads, in input order.
 /// Without `strict`, some failures mark the run partial (exit 3); if every
 /// input fails, or any fails with `strict`, the batch is an error whose class
 /// and status are those of the first failure in input order.
@@ -100,7 +101,14 @@ pub(crate) fn batch(
     }
     Ok(json!({
         "items": items,
-        "summary": {"requested": total, "succeeded": total - failed, "failed": failed},
+        "summary": {
+            "requested": total,
+            "returned": total - failed,
+            "succeeded": total - failed,
+            "failed": failed,
+            "omitted": 0,
+            "truncated": 0,
+        },
     }))
 }
 
@@ -189,7 +197,7 @@ mod tests {
         assert_eq!(item["category"], "not_found");
         assert_eq!(
             v["summary"],
-            json!({"requested": 2, "succeeded": 1, "failed": 1})
+            json!({"requested": 2, "returned": 1, "succeeded": 1, "failed": 1, "omitted": 0, "truncated": 0})
         );
 
         let other = batch(vec!["ok".into(), "bad".into()], false, 2, read).unwrap();
