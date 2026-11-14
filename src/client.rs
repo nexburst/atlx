@@ -40,6 +40,10 @@ impl Client {
         self.request("PUT", path, &[], Some(body))
     }
 
+    pub fn delete(&self, path: &str, query: &[(&str, &str)]) -> Result<Value> {
+        self.request("DELETE", path, query, None)
+    }
+
     /// `path` is appended to the base URL unless it is already absolute
     /// (e.g. a Bitbucket `next` pagination link).
     pub fn request(&self, method: &str, path: &str, query: &[(&str, &str)], body: Option<&Value>) -> Result<Value> {

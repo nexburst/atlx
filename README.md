@@ -63,9 +63,11 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 | `jira project list\|get` | `--query`, `--limit`, or `<key-or-id>` |
 | `jira board list`, `jira sprint list\|issues` | Agile boards (`--project`, `--type`) and sprints (`--board`, `--state`, `--sprint`, `--jql`) |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
-| `confluence content get <id-or-url...>` | `--detail summary\|full`, `--format html\|md`, `--body-only` |
-| `confluence content create` / `update` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run` |
-| `confluence content list --space`, `confluence space list\|get` | |
+| `confluence content get <ref...>` | `--detail summary\|full`, `--format html\|md`, `--body-only`, `--reference-space` |
+| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; delete needs `--yes`, optional `--purge` |
+| `confluence content comments list\|create` | `--inline`, `--format md\|html`, `--limit`, `--cursor`; `--body`, `--format` |
+| `confluence content list\|children\|labels`, `confluence tree` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
+| `confluence space list\|get\|me` | `me` resolves current user's personal space |
 | `bitbucket\|bb repo query\|get` | `--workspace`, `--repo` (slug, `ws/slug` or URL) |
 | `bb pull-requests query\|get\|create`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses` |
 | `bb pipeline query\|get` | `--logs --failed-steps --lines` |

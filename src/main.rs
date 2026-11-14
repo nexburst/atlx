@@ -534,6 +534,13 @@ enum ConfCmd {
         #[command(subcommand)]
         cmd: SpaceCmd,
     },
+    /// Page ancestors and descendant tree
+    Tree {
+        reference: String,
+        /// Max descendant depth (default 2, capped at 5)
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -589,6 +596,9 @@ enum ContentCmd {
         /// Fetch the draft version
         #[arg(long)]
         draft: bool,
+        /// Space key or ID for resolving non-ID/URL references by exact title
+        #[arg(long)]
+        reference_space: Option<String>,
         /// Accepted for twg compatibility (metadata is always included)
         #[arg(long)]
         include_metadata: bool,
@@ -666,6 +676,63 @@ enum ContentCmd {
         #[arg(long)]
         cursor: Option<String>,
     },
+    /// Comments on a page or blog post
+    #[command(visible_alias = "comment")]
+    Comments {
+        #[command(subcommand)]
+        cmd: ConfCommentCmd,
+    },
+    /// Child pages of a page
+    Children {
+        reference: String,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Labels on a page or blog post
+    Labels {
+        reference: String,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+    /// Delete (or purge) a page or blog post
+    Delete {
+        reference: String,
+        /// Confirm deletion
+        #[arg(long, short, required = true)]
+        yes: bool,
+        /// Permanently purge instead of moving to trash
+        #[arg(long)]
+        purge: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfCommentCmd {
+    /// List footer (or inline) comments
+    List {
+        reference: String,
+        /// Fetch inline comments instead of footer comments
+        #[arg(long)]
+        inline: bool,
+        /// Body format: md (default) or html
+        #[arg(long, value_enum, default_value_t = confluence::ReadFormat::Md)]
+        format: confluence::ReadFormat,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Add a footer comment
+    Create {
+        reference: String,
+        /// Comment body (`-` reads stdin)
+        #[arg(long)]
+        body: String,
+        #[arg(long, value_enum, default_value_t)]
+        format: TextFormat,
+    },
 }
 
 #[derive(Subcommand)]
@@ -688,6 +755,8 @@ enum SpaceCmd {
     },
     /// Get a space by key or ID
     Get { identifier: String },
+    /// Current user's personal space
+    Me,
 }
 
 // --- bitbucket -------------------------------------------------------------------
@@ -1504,18 +1573,11 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
         }
         ConfCmd::Content { cmd } => match cmd {
-            ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, include_metadata: _, strict } => {
+            ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, reference_space, include_metadata: _, strict } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
-                let detail = if body_only {
-                    confluence::Detail::Full
-                } else {
-                    detail.unwrap_or_default()
-                };
-                let opts = confluence::GetOpts {
-                    detail,
-                    format,
-                    draft,
-                };
+                let detail = if body_only { confluence::Detail::Full } else { detail.unwrap_or_default() };
+                let opts =
+                    confluence::GetOpts { detail, format, draft, reference_space: reference_space.as_deref() };
                 if body_only {
                     let [one] = inputs.as_slice() else {
                         bail!("--body-only takes exactly one ID")
@@ -1582,18 +1644,34 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     },
                 )?
             }
-            ContentCmd::List {
-                space,
-                content_type,
-                status,
-                limit,
-                cursor,
-            } => confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?,
+            ContentCmd::List { space, content_type, status, limit, cursor } => {
+                confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?
+            }
+            ContentCmd::Comments { cmd } => match cmd {
+                ConfCommentCmd::List { reference, inline, format, limit, cursor } => {
+                    confluence::comments_list(c, &reference, inline, format, limit, cursor.as_deref())?
+                }
+                ConfCommentCmd::Create { reference, body, format } => {
+                    confluence::comment_create(c, &reference, &text_arg(body)?, format)?
+                }
+            },
+            ContentCmd::Children { reference, limit, cursor } => {
+                confluence::children(c, &reference, limit, cursor.as_deref())?
+            }
+            ContentCmd::Labels { reference, limit } => confluence::labels(c, &reference, limit)?,
+            ContentCmd::Delete { reference, yes, purge } => {
+                if !yes {
+                    bail!("deleting Confluence content requires --yes");
+                }
+                confluence::delete(c, &reference, purge)?
+            }
         },
         ConfCmd::Space { cmd: SpaceCmd::List { kind, status, keys, limit, cursor } } => {
             confluence::spaces(c, kind.as_deref(), status.as_deref(), keys.as_deref(), limit, cursor.as_deref())?
         }
         ConfCmd::Space { cmd: SpaceCmd::Get { identifier } } => confluence::space(c, &identifier)?,
+        ConfCmd::Space { cmd: SpaceCmd::Me } => confluence::space_me(c)?,
+        ConfCmd::Tree { reference, depth } => confluence::tree(c, &reference, depth)?,
     };
     Ok(Out::Data(data))
 }
@@ -1859,10 +1937,18 @@ mod tests {
             "atlx confluence search query --cql type=page --excerpt",
             "atlx confluence search text launch plan --since 7d",
             "atlx confluence content get 12345 --detail full --format md",
+            "atlx confluence content get 'Runbook' --reference-space ENG",
             "atlx confluence content create --space-id ENG --content-type page --title T --body-file f --format html --ack-body-formats -y",
             "atlx confluence content update 12345 --snapshot-token 3 --body x --format markdown --dry-run",
             "atlx confluence content list --space ENG --status archived",
+            "atlx confluence content comments list 12345 --inline --format html --limit 10 --cursor c1",
+            "atlx confluence content comments create 12345 --body 'Looks good' --format markdown",
+            "atlx confluence content children 12345 --limit 10 --cursor c1",
+            "atlx confluence content labels 12345 --limit 20",
+            "atlx confluence content delete 12345 --yes --purge",
+            "atlx confluence tree 12345 --depth 3",
             "atlx confluence space get ENG",
+            "atlx confluence space me",
             "atlx bb repo query --workspace acme",
             "atlx bitbucket repo get --workspace acme --repo api",
             "atlx bb pull-requests query --workspace acme --repo api --state MERGED",
@@ -1975,5 +2061,19 @@ mod tests {
         })
         .unwrap_err();
         assert!(err.to_string().contains("1 of 2 reads failed"), "{err}");
+    }
+
+    #[test]
+    fn confluence_delete_requires_yes_and_comments_default_md() {
+        assert!(Cli::try_parse_from(["atlx", "confluence", "content", "delete", "12345"]).is_err());
+
+        let cli = Cli::try_parse_from(["atlx", "confluence", "content", "comments", "list", "12345"]).unwrap();
+        let Cmd::Confluence {
+            cmd: ConfCmd::Content { cmd: ContentCmd::Comments { cmd: ConfCommentCmd::List { format, .. } } },
+        } = cli.cmd
+        else {
+            panic!("unexpected parsed command");
+        };
+        assert_eq!(format, confluence::ReadFormat::Md);
     }
 }
