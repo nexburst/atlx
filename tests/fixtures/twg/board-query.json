@@ -1,0 +1,43 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.board.query",
+  "request": {
+    "site": "text"
+  },
+  "data": {
+    "boards": [
+      {
+        "id": 1,
+        "self": "text",
+        "name": "text",
+        "type": "text",
+        "location": {
+          "projectId": 1,
+          "displayName": "text",
+          "projectName": "text",
+          "projectKey": "text",
+          "projectTypeKey": "text",
+          "avatarURI": "text",
+          "name": "text"
+        },
+        "isPrivate": false
+      }
+    ],
+    "total": 1,
+    "startAt": 1,
+    "maxResults": 1,
+    "isLast": true
+  },
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.board-search-result",
+    "backend": "text",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "agile-v1",
+      "resourceType": "jira.board-search-result"
+    }
+  }
+}

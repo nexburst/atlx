@@ -1,0 +1,44 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.space.query",
+  "request": {
+    "site": "text",
+    "maxResults": 1,
+    "orderBy": "text"
+  },
+  "data": {
+    "projects": [
+      {
+        "expand": "text",
+        "self": "text",
+        "id": "text",
+        "key": "text",
+        "name": "text",
+        "projectTypeKey": "text",
+        "simplified": true,
+        "style": "text",
+        "isPrivate": false,
+        "properties": {},
+        "entityId": "text",
+        "uuid": "text"
+      }
+    ],
+    "total": 1,
+    "startAt": 1,
+    "maxResults": 1,
+    "isLast": true,
+    "self": "text"
+  },
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.space",
+    "backend": "text",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.space"
+    }
+  }
+}

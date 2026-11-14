@@ -15,7 +15,8 @@ UPDATE_SNAPSHOTS=1 cargo test --test cli_tree   # after any CLI change
 
 ## Where code goes
 
-- API calls: `src/<product>.rs`. They return a summarized `serde_json::Value`.
+- API calls: `src/<product>.rs`. They return twg's `data` as a `serde_json::Value`;
+  dispatch wraps it with `output::envelope::envelope` (not for Bitbucket).
 - Clap definitions and dispatch: `src/cli/<product>.rs`. Shared helpers are in
   `src/cli/util.rs`, global flags and top-level dispatch in `src/cli/mod.rs`.
 - Mock-HTTP tests: `tests/<product>.rs`, using `tests/common/mod.rs`.

@@ -40,7 +40,7 @@ pub fn run_with(
         let j = want(Product::Jira).then(|| {
             s.spawn(|| {
                 let c = jira_client()?;
-                Ok(jira::search(&c, query, limit, &[], None)?["issues"].take())
+                Ok(jira::search(&c, query, limit, None, None)?.data["issues"].take())
             })
         });
         let cf = want(Product::Confluence).then(|| {

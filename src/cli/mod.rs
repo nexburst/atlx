@@ -13,12 +13,13 @@ mod doctor;
 mod jira;
 mod search;
 mod shape;
+mod unsupported;
 mod user;
 mod util;
 
 use crate::client::{ApiError, exit};
 use crate::config::{self, Config};
-use crate::output::Format;
+use crate::output::{self, Format};
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use serde_json::Value;
@@ -167,7 +168,7 @@ pub fn main() {
         timeout_ms: cli.timeout_ms,
         profile: cli.profile,
     };
-    let code = match run(&globals, cli.cmd) {
+    let code = match run(&globals, cli.cmd).map(|out| wrap(&path, out)) {
         Ok(Out::Exit(v, code)) => shaping.emit(Out::Exit(v, code), code),
         Ok(out) => {
             let code = if util::take_partial() {
@@ -183,14 +184,51 @@ pub fn main() {
 }
 
 /// clap errors: help and version go to stdout with exit 0; argument errors go
-/// to stderr with exit 1, as in twg.
+/// to stderr with exit 1, as in twg. A twg command atlx doesn't offer gets a
+/// twg error envelope instead (see [`unsupported`]).
 fn exit_clap(e: clap::Error) -> ! {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if e.use_stderr()
+        && let Some(api) = unsupported::explain(&args)
+    {
+        let fmt = output_from_args(&args);
+        let plain = shape::Shaping::plain(fmt, "");
+        if fmt == Format::Text {
+            eprintln!("✗ {}", api.message);
+        } else {
+            plain.emit_error(&api.envelope());
+        }
+        eprint!("{}", api.report());
+        std::process::exit(api.exit_code());
+    }
     let _ = e.print();
     std::process::exit(if e.use_stderr() {
         exit::FAILURE
     } else {
         exit::OK
     })
+}
+
+/// The output format named on a command line clap could not parse: `-o`,
+/// `ATLX_OUTPUT`, else text on a terminal and JSON when piped.
+fn output_from_args(args: &[String]) -> Format {
+    let named = args
+        .iter()
+        .zip(args.iter().skip(1))
+        .find(|(a, _)| *a == "-o" || *a == "--output")
+        .map(|(_, v)| v.clone())
+        .or_else(|| {
+            args.iter()
+                .find_map(|a| a.strip_prefix("--output=").map(String::from))
+        })
+        .or_else(|| std::env::var("ATLX_OUTPUT").ok());
+    match named.as_deref() {
+        Some("json") => Format::Json,
+        Some("jsonl") => Format::Jsonl,
+        Some("text") => Format::Text,
+        _ if std::io::stdout().is_terminal() => Format::Text,
+        _ => Format::Json,
+    }
 }
 
 /// `jira.workitem.get` for `atlx jira workitem get ...`.
@@ -215,6 +253,38 @@ fn report_error(e: &anyhow::Error, fmt: Format, path: &str, shaping: &shape::Sha
     shaping.emit_error(&api.envelope());
     eprint!("{}", api.report());
     api.exit_code()
+}
+
+/// Put results that are not already in twg's envelope into one, as twg does
+/// for every command outside Bitbucket. The command name is the dotted CLI
+/// path (twg calls `doctor` `doctor.get`). Bitbucket payloads, raw text and
+/// the atlx-only `api`, `completion` and `man` output stay as they are.
+fn wrap(path: &str, out: Out) -> Out {
+    let first = path.split('.').next().unwrap_or_default();
+    if matches!(
+        first,
+        "bitbucket" | "bb" | "api" | "completion" | "man" | "jira" | "confluence" | "user"
+    ) {
+        return out;
+    }
+    let command = if path == "doctor" { "doctor.get" } else { path };
+    let kind = match first {
+        "doctor" => "doctor",
+        "search" => "search-result",
+        _ => "auth",
+    };
+    let env = |v: Value| {
+        if output::envelope::is_envelope(&v) {
+            v
+        } else {
+            output::envelope::envelope(command, kind).data(v)
+        }
+    };
+    match out {
+        Out::Data(v) => Out::Data(env(v)),
+        Out::Exit(v, code) => Out::Exit(env(v), code),
+        other => other,
+    }
 }
 
 pub(crate) struct Globals {

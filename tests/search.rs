@@ -50,7 +50,7 @@ fn search_fans_out_in_parallel_and_isolates_product_failures() {
     assert_eq!(ok["query"], "deploy");
     assert_eq!(ok["jira"][0]["key"], "J-1");
     assert_eq!(ok["confluence"][0]["title"], "Deploy Guide");
-    assert_eq!(ok["bitbucket"][0]["repo"], "acme/deploy");
+    assert_eq!(ok["bitbucket"][0]["full_name"], "acme/deploy");
 
     // 2. Confluence fails with HTTP 500 while Jira and Bitbucket still return results
     let partial = search::run_with(
@@ -63,7 +63,7 @@ fn search_fans_out_in_parallel_and_isolates_product_failures() {
         || Ok((bb_srv.client(), Some("acme".into()))),
     );
     assert_eq!(partial["jira"][0]["key"], "J-2");
-    assert_eq!(partial["bitbucket"][0]["repo"], "acme/infra");
+    assert_eq!(partial["bitbucket"][0]["full_name"], "acme/infra");
     let conf_err = &partial["confluence"]["error"];
     assert_eq!(conf_err["statusCode"], 500, "{conf_err}");
     assert_eq!(conf_err["category"], "server", "{conf_err}");

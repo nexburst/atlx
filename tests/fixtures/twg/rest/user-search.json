@@ -1,0 +1,19 @@
+[
+  {
+    "self": "text",
+    "accountId": "text",
+    "accountType": "text",
+    "emailAddress": "text",
+    "avatarUrls": {
+      "48x48": "text",
+      "24x24": "text",
+      "16x16": "text",
+      "32x32": "text"
+    },
+    "displayName": "text",
+    "active": true,
+    "timeZone": "text",
+    "locale": "text",
+    "guest": false
+  }
+]

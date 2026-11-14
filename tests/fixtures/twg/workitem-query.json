@@ -1,0 +1,55 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.query",
+  "request": {
+    "jql": "text",
+    "site": "text",
+    "maxResults": 1
+  },
+  "data": {
+    "issues": [
+      {
+        "id": "text",
+        "key": "text",
+        "self": "text",
+        "url": "text",
+        "summary": "text",
+        "status": {
+          "id": "text",
+          "name": "text",
+          "statusCategory": {
+            "key": "text",
+            "name": "text"
+          }
+        },
+        "issueType": {
+          "id": "text",
+          "name": "text"
+        },
+        "reporter": {
+          "accountId": "text",
+          "displayName": "text"
+        },
+        "project": {
+          "id": "text",
+          "key": "text",
+          "name": "text"
+        },
+        "created": "text",
+        "updated": "text"
+      }
+    ]
+  },
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.workitem",
+    "backend": "text",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.workitem"
+    }
+  }
+}

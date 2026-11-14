@@ -1,8 +1,10 @@
 //! Output: JSON for agents and scripts, aligned text for humans.
 //!
 //! The global output controls live in the submodules: `--select` and
-//! `--agent-fields` in [`select`], `--output-summary` in [`summary`].
+//! `--agent-fields` in [`select`], `--output-summary` in [`summary`]; twg's
+//! `{"data": ...}` envelope and its JSONL rows are in [`envelope`].
 
+pub mod envelope;
 pub mod select;
 pub mod summary;
 
@@ -13,8 +15,9 @@ use serde_json::Value;
 pub enum Format {
     Text,
     Json,
-    /// One JSON record per line: the elements of the main list (the payload
-    /// itself, or its `issues`/`results` array), else the whole payload.
+    /// One JSON record per line: each element of the main list (twg's
+    /// `data` array or its `issues`/`results`/... collection), with a `_twg`
+    /// locator, else the whole payload.
     Jsonl,
 }
 
@@ -26,17 +29,17 @@ pub fn print(v: &Value, f: Format) {
 pub fn render(v: &Value, f: Format) -> String {
     match f {
         Format::Json => serde_json::to_string_pretty(v).unwrap_or_default() + "\n",
+        // Text shows the data part of an envelope; the rest is for machines.
+        Format::Text if envelope::is_envelope(v) => match v["data"].as_array() {
+            // One work item or space reads better as fields than as a table.
+            Some(one) if one.len() == 1 && one[0].is_object() => to_text(&one[0]),
+            _ => to_text(&v["data"]),
+        },
         Format::Text => to_text(v),
-        Format::Jsonl => {
-            let rows = v
-                .as_array()
-                .or_else(|| v["issues"].as_array())
-                .or_else(|| v["results"].as_array());
-            match rows {
-                Some(rows) => rows.iter().map(|r| format!("{r}\n")).collect(),
-                None => format!("{v}\n"),
-            }
-        }
+        Format::Jsonl => envelope::jsonl_rows(v)
+            .iter()
+            .map(|r| format!("{r}\n"))
+            .collect(),
     }
 }
 
@@ -60,8 +63,22 @@ fn scalar(v: &Value) -> String {
     }
 }
 
+/// A table cell: objects show their most telling name-like field (a
+/// status's `name`, a user's `displayName`), else compact JSON.
+fn cell_text(v: &Value) -> String {
+    match v {
+        Value::Object(m) => ["displayName", "name", "key", "value", "title", "id"]
+            .iter()
+            .find_map(|k| m.get(*k).filter(|x| !x.is_null() && !x.is_object()))
+            .map(scalar)
+            .unwrap_or_else(|| v.to_string()),
+        Value::Array(a) => a.iter().map(cell_text).collect::<Vec<_>>().join(", "),
+        other => scalar(other),
+    }
+}
+
 fn cell(v: &Value) -> String {
-    let s = scalar(v).replace(['\n', '\r', '\t'], " ");
+    let s = cell_text(v).replace(['\n', '\r', '\t'], " ");
     if s.chars().count() > MAX_CELL {
         s.chars().take(MAX_CELL - 1).collect::<String>() + "…"
     } else {

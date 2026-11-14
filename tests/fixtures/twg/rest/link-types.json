@@ -1,0 +1,11 @@
+{
+  "issueLinkTypes": [
+    {
+      "id": "text",
+      "name": "text",
+      "inward": "text",
+      "outward": "text",
+      "self": "text"
+    }
+  ]
+}

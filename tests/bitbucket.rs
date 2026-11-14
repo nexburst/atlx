@@ -71,8 +71,8 @@ fn bitbucket_repo_query_and_pr_query_follow_next_urls_up_to_limit() {
     .unwrap();
     let repo_arr = repos.as_array().unwrap();
     assert_eq!(repo_arr.len(), 3);
-    assert_eq!(repo_arr[0]["repo"], "acme/r1");
-    assert_eq!(repo_arr[2]["repo"], "acme/r3");
+    assert_eq!(repo_arr[0]["full_name"], "acme/r1");
+    assert_eq!(repo_arr[2]["full_name"], "acme/r3");
 
     let prs = bitbucket::pr_query(
         &client,
@@ -85,8 +85,10 @@ fn bitbucket_repo_query_and_pr_query_follow_next_urls_up_to_limit() {
         },
     )
     .unwrap();
-    let pr_arr = prs.as_array().unwrap();
+    let pr_arr = prs["values"].as_array().unwrap();
     assert_eq!(pr_arr.len(), 3);
+    assert_eq!(prs["returned"], 3);
+    assert_eq!(prs["hasNextPage"], true);
     assert_eq!(pr_arr[0]["id"], 10);
     assert_eq!(pr_arr[2]["id"], 12);
 
@@ -178,14 +180,13 @@ fn bitbucket_pr_get_with_comments_diff_and_statuses() {
     .unwrap();
 
     assert_eq!(out["id"], 42);
-    assert_eq!(out["reviewers"], json!(["Bob"]));
-    assert_eq!(out["approved_by"], json!(["Bob"]));
-    assert_eq!(out["comments"].as_array().unwrap().len(), 1);
-    assert_eq!(out["comments"][0]["path"], "src/lib.rs");
-    assert_eq!(out["comments"][0]["line"], 12);
-    assert_eq!(out["comments"][0]["body"], "LGTM");
-    assert_eq!(out["diffstat"][0]["added"], 20);
-    assert_eq!(out["statuses"][0]["state"], "SUCCESSFUL");
+    assert_eq!(out["reviewers"][0]["display_name"], "Bob");
+    assert_eq!(out["_comments"].as_array().unwrap().len(), 1);
+    assert_eq!(out["_comments"][0]["inline"]["path"], "src/lib.rs");
+    assert_eq!(out["_comments"][0]["inline"]["to"], 12);
+    assert_eq!(out["_comments"][0]["content"]["raw"], "LGTM");
+    assert_eq!(out["_diffstat"][0]["lines_added"], 20);
+    assert_eq!(out["_statuses"][0]["state"], "SUCCESSFUL");
 
     let created = bitbucket::pr_create(
         &client,
@@ -260,8 +261,8 @@ fn bitbucket_pipeline_get_with_logs_failed_steps_and_lines() {
     )
     .unwrap();
 
-    assert_eq!(out["build"], 1234);
-    assert_eq!(out["commit"], "0123456789ab");
+    assert_eq!(out["build_number"], 1234);
+    assert_eq!(out["target"]["commit"]["hash"], "0123456789abcdef");
     let steps = out["steps"].as_array().unwrap();
     assert_eq!(steps.len(), 2);
     assert!(
@@ -269,6 +270,8 @@ fn bitbucket_pipeline_get_with_logs_failed_steps_and_lines() {
         "passed step log should not be fetched"
     );
     assert_eq!(steps[1]["log"], "line3\nline4");
+    assert_eq!(steps[1]["log_total_lines"], 4);
+    assert_eq!(steps[1]["log_truncated"], true);
 
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 3);
@@ -306,7 +309,8 @@ fn bitbucket_pipeline_query_filters_client_side() {
     .unwrap();
     let arr = out.as_array().unwrap();
     assert_eq!(arr.len(), 1);
-    assert_eq!(arr[0]["build"], 2);
+    assert_eq!(arr[0]["build_number"], 2);
+    assert_eq!(arr[0]["_repo"], "acme/api");
     assert_eq!(
         srv.requests()[0].query_param("target.branch").as_deref(),
         Some("main")

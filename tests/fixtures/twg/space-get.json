@@ -1,0 +1,46 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.space.get",
+  "request": {
+    "site": "text",
+    "projectIdOrKey": "text"
+  },
+  "data": [
+    {
+      "id": "text",
+      "key": "text",
+      "name": "text",
+      "projectTypeKey": "text",
+      "description": "text",
+      "lead": {
+        "self": "text",
+        "accountId": "text",
+        "displayName": "text",
+        "active": true
+      },
+      "issueTypes": [
+        {
+          "self": "text",
+          "id": "text",
+          "description": "text",
+          "name": "text",
+          "subtask": false,
+          "avatarId": 1,
+          "hierarchyLevel": 1
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.space",
+    "backend": "text",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.space"
+    }
+  }
+}

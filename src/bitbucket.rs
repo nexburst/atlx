@@ -62,29 +62,34 @@ pub fn workspace_or<'a>(ws: Option<&'a str>, default_ws: Option<&'a str>) -> Res
     })
 }
 
-fn web_url(path: &str) -> String {
-    format!(
-        "https://bitbucket.org{}",
-        path.trim_start_matches("/repositories")
-    )
-}
-
 /// Collect up to `limit` items, following `next` links.
 fn paginate(c: &Client, path: &str, query: &[(&str, &str)], limit: usize) -> Result<Vec<Value>> {
+    Ok(paginate_more(c, path, query, limit)?.0)
+}
+
+/// [`paginate`], also saying whether more items exist past `limit`.
+fn paginate_more(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    limit: usize,
+) -> Result<(Vec<Value>, bool)> {
     let pagelen = limit.clamp(1, 50).to_string();
     let mut q = query.to_vec();
     q.push(("pagelen", &pagelen));
     let mut v = c.get(path, &q)?;
     let mut out = Vec::new();
-    loop {
+    let more = loop {
         out.extend(v["values"].as_array().into_iter().flatten().cloned());
         match v["next"].as_str() {
             Some(next) if out.len() < limit => v = c.get(next, &[])?,
-            _ => break,
+            Some(_) => break true,
+            None => break false,
         }
-    }
+    };
+    let more = more || out.len() > limit;
     out.truncate(limit);
-    Ok(out)
+    Ok((out, more))
 }
 
 fn and(filters: Vec<String>) -> Option<String> {
@@ -102,20 +107,7 @@ pub struct RepoQuery<'a> {
     pub limit: usize,
 }
 
-fn repo_summary(r: &Value) -> Value {
-    json!({
-        "repo": r["full_name"],
-        "name": r["name"],
-        "project": r["project"]["key"],
-        "private": r["is_private"],
-        "language": r["language"],
-        "main_branch": r["mainbranch"]["name"],
-        "updated": r["updated_on"],
-        "url": r["links"]["html"]["href"],
-    })
-}
-
-/// `bitbucket repo query`
+/// `bitbucket repo query`: REST repositories as a list, as twg prints them.
 pub fn repo_query(c: &Client, ws: &str, o: &RepoQuery) -> Result<Value> {
     let mut f = Vec::new();
     if let Some(q) = o.query {
@@ -135,24 +127,12 @@ pub fn repo_query(c: &Client, ws: &str, o: &RepoQuery) -> Result<Value> {
     if let Some(r) = o.role {
         q.push(("role", r));
     }
-    let items = paginate(c, &format!("/repositories/{}", enc(ws)), &q, o.limit)?;
-    Ok(items.iter().map(repo_summary).collect())
+    Ok(paginate(c, &format!("/repositories/{}", enc(ws)), &q, o.limit)?.into())
 }
 
-/// `bitbucket repo get`
+/// `bitbucket repo get`: the REST repository.
 pub fn repo_get(c: &Client, path: &str) -> Result<Value> {
-    let r = c.get(path, &[])?;
-    let mut o = repo_summary(&r);
-    o["description"] = r["description"].clone();
-    o["size"] = r["size"].clone();
-    o["created"] = r["created_on"].clone();
-    o["clone"] = r["links"]["clone"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|l| json!({"name": l["name"], "href": l["href"]}))
-        .collect();
-    Ok(o)
+    c.get(path, &[])
 }
 
 pub enum RepoFile {
@@ -173,20 +153,6 @@ fn repo_src_path(repo_path: &str, git_ref: &str, file_path: &str) -> String {
     } else {
         format!("{repo_path}/src/{}/{}", enc(git_ref), rel.join("/"))
     }
-}
-
-fn dir_entry_summary(e: &Value) -> Value {
-    let kind = match e["type"].as_str() {
-        Some("commit_directory") => "dir",
-        Some("commit_file") => "file",
-        Some(other) => other,
-        None => "",
-    };
-    json!({
-        "path": e["path"],
-        "type": kind,
-        "size": e["size"],
-    })
 }
 
 /// `bitbucket repo file`
@@ -218,7 +184,7 @@ pub fn repo_file(
             }
         }
         items.truncate(500);
-        return Ok(RepoFile::Dir(items.iter().map(dir_entry_summary).collect()));
+        return Ok(RepoFile::Dir(items.into()));
     }
     let text = match v {
         Value::String(s) => s,
@@ -226,21 +192,6 @@ pub fn repo_file(
         other => serde_json::to_string_pretty(&other)?,
     };
     Ok(RepoFile::Raw(text))
-}
-
-fn branch_summary(b: &Value) -> Value {
-    let hash = b["target"]["hash"].as_str().unwrap_or_default();
-    let short: String = hash.chars().take(12).collect();
-    json!({
-        "name": b["name"],
-        "commit": short,
-        "date": b["target"]["date"],
-        "author": b["target"]["author"]["user"]["display_name"]
-            .as_str()
-            .or(b["target"]["author"]["raw"].as_str()),
-        "message": b["target"]["message"].as_str().map(|m| m.lines().next().unwrap_or_default()),
-        "url": b["links"]["html"]["href"],
-    })
 }
 
 /// Options for `bitbucket branch query`.
@@ -274,7 +225,8 @@ fn branch_by_author(b: &Value, who: &str) -> bool {
         .any(|s| s.to_lowercase().contains(&who_l))
 }
 
-/// `bitbucket branch query` (and the old `repo branches`)
+/// `bitbucket branch query` (and the old `repo branches`): REST branches as
+/// a list.
 pub fn branch_query(c: &Client, path: &str, o: &BranchQuery) -> Result<Value> {
     let filter = o.query.map(|q| format!("name ~ {}", quote(q)));
     let mut params = Vec::new();
@@ -294,25 +246,11 @@ pub fn branch_query(c: &Client, path: &str, o: &BranchQuery) -> Result<Value> {
         .iter()
         .filter(|b| o.author.is_none_or(|a| branch_by_author(b, a)))
         .take(o.limit)
-        .map(branch_summary)
+        .cloned()
         .collect())
 }
 
 // --- pull requests -----------------------------------------------------------
-
-fn pr_summary(p: &Value) -> Value {
-    json!({
-        "id": p["id"],
-        "title": p["title"],
-        "state": p["state"],
-        "draft": p["draft"],
-        "author": p["author"]["display_name"],
-        "source": p["source"]["branch"]["name"],
-        "destination": p["destination"]["branch"]["name"],
-        "updated": p["updated_on"],
-        "url": p["links"]["html"]["href"],
-    })
-}
 
 #[derive(Default)]
 pub struct PrQuery<'a> {
@@ -365,7 +303,8 @@ fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
     Ok(and(f))
 }
 
-/// `bitbucket pull-requests query`
+/// `bitbucket pull-requests query`: REST's page of pull requests with
+/// twg's paging summary (`returned`, `hasNextPage`, `hasMore`).
 pub fn pr_query(c: &Client, path: &str, o: &PrQuery) -> Result<Value> {
     let state = o.state.unwrap_or("OPEN").to_ascii_uppercase();
     let filter = pr_filter(o)?;
@@ -373,8 +312,15 @@ pub fn pr_query(c: &Client, path: &str, o: &PrQuery) -> Result<Value> {
     if let Some(f) = &filter {
         q.push(("q", f));
     }
-    let items = paginate(c, &format!("{path}/pullrequests"), &q, o.limit)?;
-    Ok(items.iter().map(pr_summary).collect())
+    let (items, more) = paginate_more(c, &format!("{path}/pullrequests"), &q, o.limit)?;
+    Ok(json!({
+        "values": items,
+        "page": 1,
+        "pagelen": o.limit.clamp(1, 50),
+        "returned": items.len(),
+        "hasNextPage": more,
+        "hasMore": more,
+    }))
 }
 
 pub struct PrGet {
@@ -383,67 +329,23 @@ pub struct PrGet {
     pub statuses: bool,
 }
 
-/// `bitbucket pull-requests get`
+/// `bitbucket pull-requests get`: the REST pull request. `--comments`,
+/// `--diff` and `--statuses` add `_comments`, `_diffstat` and `_statuses`
+/// (REST lists, as twg names its extra sections).
 pub fn pr_get(c: &Client, path: &str, id: u64, o: &PrGet) -> Result<Value> {
     let base = format!("{path}/pullrequests/{id}");
-    let p = c.get(&base, &[])?;
-    let mut out = pr_summary(&p);
-    let names = |key: &str, only_approved: bool| -> Value {
-        p[key]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|u| !only_approved || u["approved"] == true)
-            .map(|u| {
-                u["display_name"]
-                    .as_str()
-                    .or(u["user"]["display_name"].as_str())
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect::<Vec<_>>()
-            .into()
-    };
-    out["reviewers"] = names("reviewers", false);
-    out["approved_by"] = names("participants", true);
-    out["comment_count"] = p["comment_count"].clone();
-    out["task_count"] = p["task_count"].clone();
-    out["description"] = p["description"].clone();
+    let mut out = c.get(&base, &[])?;
     if o.comments {
-        out["comments"] = paginate(c, &format!("{base}/comments"), &[], 500)?
-            .iter()
+        out["_comments"] = paginate(c, &format!("{base}/comments"), &[], 500)?
+            .into_iter()
             .filter(|cm| cm["deleted"] != true)
-            .map(|cm| {
-                json!({
-                    "id": cm["id"],
-                    "author": cm["user"]["display_name"],
-                    "created": cm["created_on"],
-                    "reply_to": cm["parent"]["id"],
-                    "path": cm["inline"]["path"],
-                    "line": cm["inline"]["to"],
-                    "body": cm["content"]["raw"],
-                })
-            })
             .collect();
     }
     if o.diff {
-        out["diffstat"] = paginate(c, &format!("{base}/diffstat"), &[], 500)?
-            .iter()
-            .map(|d| {
-                json!({
-                    "path": d["new"]["path"].as_str().or(d["old"]["path"].as_str()),
-                    "status": d["status"],
-                    "added": d["lines_added"],
-                    "removed": d["lines_removed"],
-                })
-            })
-            .collect();
+        out["_diffstat"] = paginate(c, &format!("{base}/diffstat"), &[], 500)?.into();
     }
     if o.statuses {
-        out["statuses"] = paginate(c, &format!("{base}/statuses"), &[], 100)?
-            .iter()
-            .map(|s| json!({"name": s["name"], "key": s["key"], "state": s["state"], "url": s["url"]}))
-            .collect();
+        out["_statuses"] = paginate(c, &format!("{base}/statuses"), &[], 100)?.into();
     }
     Ok(out)
 }
@@ -486,7 +388,7 @@ pub fn pr_create(c: &Client, path: &str, n: NewPr) -> Result<Value> {
     if !reviewers.is_empty() {
         req["reviewers"] = reviewers.into();
     }
-    Ok(pr_summary(&c.post(&format!("{path}/pullrequests"), &req)?))
+    c.post(&format!("{path}/pullrequests"), &req)
 }
 
 /// A PR number or a Bitbucket pull-request URL.
@@ -522,8 +424,7 @@ pub fn pr_comment(c: &Client, path: &str, id: u64, n: NewComment) -> Result<Valu
             req["inline"]["to"] = l.into();
         }
     }
-    let v = c.post(&format!("{path}/pullrequests/{id}/comments"), &req)?;
-    Ok(json!({"id": v["id"], "pull_request": id, "url": v["links"]["html"]["href"]}))
+    c.post(&format!("{path}/pullrequests/{id}/comments"), &req)
 }
 
 /// `bitbucket pull-requests diff`
@@ -551,68 +452,7 @@ fn activity_event(item: &Value) -> (&str, &Value) {
     ("unknown", item)
 }
 
-fn activity_summary(item: &Value) -> Value {
-    let (kind, ev) = activity_event(item);
-    let actor = match kind {
-        "update" => ev["author"]["display_name"]
-            .as_str()
-            .or(ev["user"]["display_name"].as_str()),
-        _ => ev["user"]["display_name"]
-            .as_str()
-            .or(ev["author"]["display_name"].as_str()),
-    };
-    let timestamp = ev["created_on"].as_str().or(ev["date"].as_str());
-    let details = match kind {
-        "comment" => {
-            let body = if ev["deleted"] == true {
-                "(deleted)"
-            } else {
-                ev["content"]["raw"].as_str().unwrap_or_default()
-            };
-            let loc = ev["inline"]["path"]
-                .as_str()
-                .map(|p| match ev["inline"]["to"].as_u64() {
-                    Some(line) => format!("[{p}:{line}] "),
-                    None => format!("[{p}] "),
-                })
-                .unwrap_or_default();
-            match ev["id"].as_u64() {
-                Some(id) => format!("#{id} {loc}{body}"),
-                None => format!("{loc}{body}"),
-            }
-        }
-        "approval" => "approved".to_string(),
-        "changes_requested" => "requested changes".to_string(),
-        "update" => {
-            let state = ev["state"].as_str().unwrap_or_default();
-            let mut parts = Vec::new();
-            if !state.is_empty() {
-                parts.push(state.to_string());
-            }
-            if let Some(changes) = ev["changes"].as_object().filter(|m| !m.is_empty()) {
-                let keys: Vec<&str> = changes.keys().map(String::as_str).collect();
-                parts.push(format!("changed: {}", keys.join(", ")));
-            }
-            if let Some(reason) = ev["reason"].as_str().filter(|s| !s.is_empty()) {
-                parts.push(format!("reason: {reason}"));
-            }
-            if parts.is_empty() {
-                ev["title"].as_str().unwrap_or("updated").to_string()
-            } else {
-                parts.join("; ")
-            }
-        }
-        _ => ev.to_string(),
-    };
-    json!({
-        "type": kind,
-        "actor": actor,
-        "timestamp": timestamp,
-        "details": details,
-    })
-}
-
-/// `bitbucket pull-requests activity`
+/// `bitbucket pull-requests activity`: REST activity entries as a list.
 pub fn pr_activity(
     c: &Client,
     path: &str,
@@ -633,66 +473,39 @@ pub fn pr_activity(
             event_type.is_none_or(|want| want.eq_ignore_ascii_case(kind))
         })
         .take(limit)
-        .map(activity_summary)
+        .cloned()
         .collect())
-}
-
-fn task_summary(t: &Value) -> Value {
-    json!({
-        "id": t["id"],
-        "state": t["state"],
-        "body": t["content"]["raw"],
-        "creator": t["creator"]["display_name"],
-        "comment_id": t["comment"]["id"],
-        "created": t["created_on"],
-        "updated": t["updated_on"],
-    })
 }
 
 /// `bitbucket pull-requests task query` (and the old `tasks`)
 pub fn pr_tasks(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    let items = paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], limit)?;
-    Ok(items.iter().map(task_summary).collect())
-}
-
-fn participant_summary(id: u64, v: &Value) -> Value {
-    json!({
-        "pull_request": id,
-        "approved": v["approved"],
-        "state": v["state"],
-        "user": v["user"]["display_name"],
-    })
+    Ok(paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], limit)?.into())
 }
 
 /// `bitbucket pull-requests approve`
 pub fn pr_approve(c: &Client, path: &str, id: u64) -> Result<Value> {
-    let v = c.request(
+    c.request(
         "POST",
         &format!("{path}/pullrequests/{id}/approve"),
         &[],
         None,
-    )?;
-    Ok(participant_summary(id, &v))
+    )
 }
 
 /// `bitbucket pull-requests unapprove`
 pub fn pr_unapprove(c: &Client, path: &str, id: u64) -> Result<Value> {
     c.delete(&format!("{path}/pullrequests/{id}/approve"), &[])?;
-    Ok(json!({
-        "pull_request": id,
-        "approved": false,
-    }))
+    Ok(json!({"id": id, "approved": false}))
 }
 
 /// `bitbucket pull-requests request-changes`
 pub fn pr_request_changes(c: &Client, path: &str, id: u64) -> Result<Value> {
-    let v = c.request(
+    c.request(
         "POST",
         &format!("{path}/pullrequests/{id}/request-changes"),
         &[],
         None,
-    )?;
-    Ok(participant_summary(id, &v))
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -743,20 +556,17 @@ fn pr_merge_body(o: &PrMerge) -> Value {
 /// `bitbucket pull-requests merge`
 pub fn pr_merge(c: &Client, path: &str, id: u64, o: &PrMerge) -> Result<Value> {
     let req = pr_merge_body(o);
-    Ok(pr_summary(
-        &c.post(&format!("{path}/pullrequests/{id}/merge"), &req)?,
-    ))
+    c.post(&format!("{path}/pullrequests/{id}/merge"), &req)
 }
 
 /// `bitbucket pull-requests decline`
 pub fn pr_decline(c: &Client, path: &str, id: u64) -> Result<Value> {
-    let v = c.request(
+    c.request(
         "POST",
         &format!("{path}/pullrequests/{id}/decline"),
         &[],
         None,
-    )?;
-    Ok(pr_summary(&v))
+    )
 }
 
 // --- search ------------------------------------------------------------------
@@ -776,43 +586,6 @@ fn code_search_query(query: &str, repo: Option<&str>) -> String {
     }
 }
 
-fn code_search_summary(r: &Value) -> Value {
-    let self_href = r["file"]["links"]["self"]["href"].as_str();
-    let repo = self_href.and_then(|u| {
-        let rest = u.split("/repositories/").nth(1)?;
-        let mut parts = rest.split('/');
-        Some(format!("{}/{}", parts.next()?, parts.next()?))
-    });
-    let snippet = r["content_matches"]
-        .as_array()
-        .and_then(|ms| ms.first())
-        .and_then(|m| m["lines"].as_array())
-        .map(|lines| {
-            lines
-                .iter()
-                .filter_map(|l| {
-                    let text: String = l["segments"]
-                        .as_array()?
-                        .iter()
-                        .filter_map(|s| s["text"].as_str())
-                        .collect();
-                    Some(match l["line"].as_u64() {
-                        Some(n) => format!("{n}: {}", text.trim_end()),
-                        None => text.trim_end().to_string(),
-                    })
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-    json!({
-        "repo": repo,
-        "path": r["file"]["path"],
-        "matches": r["content_match_count"],
-        "snippet": snippet,
-        "url": self_href,
-    })
-}
-
 /// `bitbucket search code`
 pub fn search_code(
     c: &Client,
@@ -828,7 +601,7 @@ pub fn search_code(
         &[("search_query", &q)],
         limit,
     )?;
-    Ok(items.iter().map(code_search_summary).collect())
+    Ok(items.into())
 }
 
 // --- pipelines ---------------------------------------------------------------
@@ -842,21 +615,9 @@ fn state_of(p: &Value) -> (String, Option<String>) {
     (state, result)
 }
 
-fn pipeline_summary(path: &str, p: &Value) -> Value {
-    let (state, result) = state_of(p);
-    let hash = p["target"]["commit"]["hash"].as_str().unwrap_or_default();
-    json!({
-        "build": p["build_number"],
-        "uuid": p["uuid"],
-        "state": state,
-        "result": result,
-        "branch": p["target"]["ref_name"],
-        "trigger": p["trigger"]["name"],
-        "commit": &hash[..hash.len().min(12)],
-        "created": p["created_on"],
-        "seconds": p["duration_in_seconds"],
-        "url": format!("{}/pipelines/results/{}", web_url(path), p["build_number"]),
-    })
+/// `workspace/slug` from a `/repositories/workspace/slug` path.
+fn full_name(path: &str) -> String {
+    path.trim_start_matches("/repositories/").to_string()
 }
 
 #[derive(Default)]
@@ -868,8 +629,9 @@ pub struct PipelineQuery<'a> {
     pub limit: usize,
 }
 
-/// `bitbucket pipeline query`. State/result/trigger are filtered client-side
-/// over the most recent runs.
+/// `bitbucket pipeline query`: REST pipelines as a list, each with `_repo`
+/// (`workspace/slug`) as twg adds. State/result/trigger are filtered
+/// client-side over the most recent runs.
 pub fn pipeline_query(c: &Client, path: &str, o: &PipelineQuery) -> Result<Value> {
     let mut q = vec![("sort", "-created_on")];
     if let Some(b) = o.branch {
@@ -896,7 +658,11 @@ pub fn pipeline_query(c: &Client, path: &str, o: &PipelineQuery) -> Result<Value
                 )
         })
         .take(o.limit)
-        .map(|p| pipeline_summary(path, p))
+        .map(|p| {
+            let mut p = p.clone();
+            p["_repo"] = full_name(path).into();
+            p
+        })
         .collect())
 }
 
@@ -920,7 +686,9 @@ pub struct PipelineGet<'a> {
     pub step: Option<&'a str>,
 }
 
-/// `bitbucket pipeline get`: run details and steps, optionally with log tails.
+/// `bitbucket pipeline get`: the REST pipeline with its REST `steps`; with
+/// `--logs`, each selected step gets `log` (the last `lines` lines),
+/// `log_total_lines` and `log_truncated`, or `log_error`.
 pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> Result<Value> {
     let p = c.get(
         &format!("{path}/pipelines/{}", enc(&pipeline_ref(pipeline))),
@@ -929,7 +697,7 @@ pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> 
     let uuid = p["uuid"]
         .as_str()
         .ok_or_else(|| anyhow!("pipeline has no uuid"))?;
-    let mut out = pipeline_summary(path, &p);
+    let mut out = p.clone();
     let steps = paginate(
         c,
         &format!("{path}/pipelines/{}/steps", enc(uuid)),
@@ -938,10 +706,9 @@ pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> 
     )?;
     let mut rendered = Vec::new();
     for s in &steps {
-        let (state, result) = state_of(s);
+        let (_, result) = state_of(s);
         let name = s["name"].as_str().unwrap_or_default();
-        let mut step = json!({"name": name, "uuid": s["uuid"], "state": state, "result": result,
-                              "seconds": s["duration_in_seconds"]});
+        let mut step = s.clone();
         let failed = matches!(result.as_deref(), Some("FAILED" | "ERROR"));
         let wanted = o
             .step
@@ -952,12 +719,20 @@ pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> 
                 enc(uuid),
                 enc(s["uuid"].as_str().unwrap_or(""))
             );
-            step["log"] = match c.get(&log_path, &[]) {
-                Ok(Value::String(text)) => tail(&text, o.lines).into(),
-                Ok(Value::Null) => "".into(),
-                Ok(other) => other,
-                Err(e) => json!({"error": format!("{e:#}")}),
-            };
+            match c.get(&log_path, &[]) {
+                Ok(v) => {
+                    let text = match v {
+                        Value::String(t) => t,
+                        Value::Null => String::new(),
+                        other => other.to_string(),
+                    };
+                    let total = text.lines().count();
+                    step["log"] = tail(&text, o.lines).into();
+                    step["log_total_lines"] = total.into();
+                    step["log_truncated"] = (o.lines > 0 && total > o.lines).into();
+                }
+                Err(e) => step["log_error"] = format!("{e:#}").into(),
+            }
         }
         rendered.push(step);
     }
@@ -1054,77 +829,6 @@ mod tests {
             repo_src_path("/repositories/acme/api", "HEAD", "."),
             "/repositories/acme/api/src/HEAD/"
         );
-
-        let dir = dir_entry_summary(&json!({"path": "src", "type": "commit_directory"}));
-        assert_eq!(dir["type"], "dir");
-        let file =
-            dir_entry_summary(&json!({"path": "src/main.rs", "type": "commit_file", "size": 42}));
-        assert_eq!(file["type"], "file");
-        assert_eq!(file["size"], 42);
-
-        let br = branch_summary(&json!({
-            "name": "main",
-            "target": {
-                "hash": "0123456789abcdef",
-                "date": "2026-01-01T00:00:00Z",
-                "author": {"user": {"display_name": "Jane"}},
-                "message": "Initial commit\n\nBody"
-            },
-            "links": {"html": {"href": "https://bitbucket.org/acme/api/branch/main"}}
-        }));
-        assert_eq!(br["name"], "main");
-        assert_eq!(br["commit"], "0123456789ab");
-        assert_eq!(br["author"], "Jane");
-        assert_eq!(br["message"], "Initial commit");
-    }
-
-    #[test]
-    fn activity_and_task_summaries() {
-        let c = activity_summary(&json!({
-            "comment": {
-                "id": 7,
-                "created_on": "2026-01-02T00:00:00Z",
-                "user": {"display_name": "Alice"},
-                "content": {"raw": "Nit here"},
-                "inline": {"path": "src/lib.rs", "to": 14}
-            }
-        }));
-        assert_eq!(c["type"], "comment");
-        assert_eq!(c["actor"], "Alice");
-        assert_eq!(c["details"], "#7 [src/lib.rs:14] Nit here");
-
-        let a = activity_summary(&json!({
-            "approval": {"date": "2026-01-03T00:00:00Z", "user": {"display_name": "Bob"}}
-        }));
-        assert_eq!(a["type"], "approval");
-        assert_eq!(a["actor"], "Bob");
-        assert_eq!(a["details"], "approved");
-
-        let u = activity_summary(&json!({
-            "update": {
-                "date": "2026-01-04T00:00:00Z",
-                "state": "MERGED",
-                "author": {"display_name": "Carol"},
-                "changes": {"status": {"old": "OPEN", "new": "MERGED"}}
-            }
-        }));
-        assert_eq!(u["type"], "update");
-        assert_eq!(u["actor"], "Carol");
-        assert_eq!(u["details"], "MERGED; changed: status");
-
-        let t = task_summary(&json!({
-            "id": 9,
-            "state": "UNRESOLVED",
-            "content": {"raw": "Add test"},
-            "creator": {"display_name": "Alice"},
-            "comment": {"id": 7},
-            "created_on": "2026-01-02T00:00:00Z",
-            "updated_on": "2026-01-02T01:00:00Z"
-        }));
-        assert_eq!(t["id"], 9);
-        assert_eq!(t["state"], "UNRESOLVED");
-        assert_eq!(t["body"], "Add test");
-        assert_eq!(t["comment_id"], 7);
     }
 
     #[test]
@@ -1154,21 +858,6 @@ mod tests {
         assert_eq!(code_search_query("foo bar", None), "foo bar");
         assert_eq!(code_search_query("foo", Some("api")), "foo repo:api");
         assert_eq!(code_search_query("foo", Some("acme/api")), "foo repo:api");
-
-        let cs = code_search_summary(&json!({
-            "content_match_count": 1,
-            "content_matches": [{
-                "lines": [{"line": 12, "segments": [{"text": "fn ", "match": false}, {"text": "foo", "match": true}]}]
-            }],
-            "file": {
-                "path": "src/main.rs",
-                "links": {"self": {"href": "https://api.bitbucket.org/2.0/repositories/acme/api/src/abc/src/main.rs"}}
-            }
-        }));
-        assert_eq!(cs["repo"], "acme/api");
-        assert_eq!(cs["path"], "src/main.rs");
-        assert_eq!(cs["matches"], 1);
-        assert_eq!(cs["snippet"], "12: fn foo");
     }
 
     fn mock_server(
@@ -1304,7 +993,7 @@ mod tests {
         assert_eq!(pr_diff(&c, p, 5).unwrap(), "diff --git a/a b/a\n+hi\n");
         let act = pr_activity(&c, p, 5, Some("comment"), 10).unwrap();
         assert_eq!(act.as_array().unwrap().len(), 1);
-        assert_eq!(act[0]["type"], "comment");
+        assert_eq!(act[0]["comment"]["content"]["raw"], "hi");
 
         let tasks = pr_tasks(&c, p, 5, 50).unwrap();
         assert_eq!(tasks[0]["id"], 3);
@@ -1388,7 +1077,7 @@ mod tests {
         match repo_file(&c, p, "src", None).unwrap() {
             RepoFile::Dir(v) => {
                 assert_eq!(v[0]["path"], "src/main.rs");
-                assert_eq!(v[0]["type"], "file");
+                assert_eq!(v[0]["type"], "commit_file");
             }
             RepoFile::Raw(_) => panic!("expected directory listing"),
         }
@@ -1403,11 +1092,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(branches[0]["name"], "feat/x");
-        assert_eq!(branches[0]["commit"], "abcdef123456");
+        assert!(branches[0]["target"]["hash"].is_string());
 
         let hits = search_code(&c, "acme", "needle", Some("api"), 10).unwrap();
-        assert_eq!(hits[0]["path"], "lib.rs");
-        assert_eq!(hits[0]["matches"], 2);
+        assert_eq!(hits[0]["file"]["path"], "lib.rs");
+        assert_eq!(hits[0]["content_match_count"], 2);
         h.join().unwrap();
     }
 }

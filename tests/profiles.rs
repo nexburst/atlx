@@ -66,7 +66,14 @@ impl Drop for Sandbox {
     }
 }
 
+/// The `data` of a successful command's twg envelope.
 fn ok_json(o: &Output) -> Value {
+    let v = ok_envelope(o);
+    assert_eq!(v["apiVersion"], "v2", "{v}");
+    v["data"].clone()
+}
+
+fn ok_envelope(o: &Output) -> Value {
     assert!(
         o.status.success(),
         "exit {:?}\nstdout: {}\nstderr: {}",
@@ -278,14 +285,15 @@ fn whoami_uses_the_profile_token_cmd_and_reports_its_source() {
         "site = \"legacy\"\nemail = \"legacy@x.com\"\ntoken = \"legacy\"\n\n\
          [profiles.work]\nsite = \"work\"\nemail = \"me@work.com\"\ntoken_cmd = \"echo cmd-token\"\n",
     );
-    let out = ok_json(
+    let out = ok_envelope(
         &sb.cmd(&["-p", "work", "whoami", "-o", "json"])
             .env("ATLX_SITE", srv.base_url())
             .output()
             .unwrap(),
     );
-    assert_eq!(out["profile"], "work");
-    assert_eq!(out["token_source"], "token_cmd");
+    assert_eq!(out["command"], "user.get");
+    assert_eq!(out["meta"]["profile"], "work");
+    assert_eq!(out["meta"]["tokenSource"], "token_cmd");
     let raw = serde_json::to_string(&out).unwrap();
     assert!(!raw.contains("cmd-token"), "{raw}");
     let auth = srv.requests()[0]

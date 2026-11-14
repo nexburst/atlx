@@ -1,0 +1,22 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.transitions",
+  "request": {
+    "idOrKey": "text"
+  },
+  "data": {
+    "transitions": [
+      {
+        "id": "text",
+        "name": "text",
+        "toName": "text",
+        "category": "text"
+      }
+    ]
+  },
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "rest",
+    "resourceType": "jira.transition"
+  }
+}

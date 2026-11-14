@@ -44,8 +44,6 @@ pub fn parse_paths<'a>(specs: impl IntoIterator<Item = &'a str>) -> Vec<Vec<Stri
 pub struct Fields {
     /// Every path to keep, with presets expanded, in order.
     pub paths: Vec<Vec<String>>,
-    /// Extra preset paths for atlx's unwrapped output; see [`Preset`].
-    pub atlx: Vec<Vec<String>>,
     /// `@preset` tokens the command has no table for.
     pub unresolved: Vec<String>,
 }
@@ -54,20 +52,6 @@ impl Fields {
     /// The paths joined back into dotted strings.
     pub fn dotted(&self) -> Vec<String> {
         self.paths.iter().map(|p| p.join(".")).collect()
-    }
-
-    /// The paths to apply to `v`: the atlx extras join in when `v` is not
-    /// wrapped in a `data` envelope.
-    pub fn for_payload(&self, v: &Value) -> Vec<Vec<String>> {
-        let mut out = self.paths.clone();
-        if !has_key(v, "data") {
-            for p in &self.atlx {
-                if !out.contains(p) {
-                    out.push(p.clone());
-                }
-            }
-        }
-        out
     }
 }
 
@@ -81,7 +65,6 @@ const UNIVERSAL: [&str; 2] = ["compact", "evidence"];
 pub fn resolve(flag: &str, spec: &str, command: &str) -> anyhow::Result<Fields> {
     let table = presets(command);
     let mut raw: Vec<String> = Vec::new();
-    let mut extra: Vec<&str> = Vec::new();
     let mut unresolved = Vec::new();
     for token in spec.split(',').map(str::trim).filter(|t| !t.is_empty()) {
         let Some(name) = token.strip_prefix('@') else {
@@ -90,10 +73,7 @@ pub fn resolve(flag: &str, spec: &str, command: &str) -> anyhow::Result<Fields> 
         };
         match table {
             Some(t) => match t.iter().find(|p| p.name == name) {
-                Some(p) => {
-                    raw.extend(p.twg.iter().map(|p| p.to_string()));
-                    extra.extend(p.atlx);
-                }
+                Some(p) => raw.extend(p.twg.iter().map(|p| p.to_string())),
                 None => {
                     let names: Vec<String> = t.iter().map(|p| format!("@{}", p.name)).collect();
                     return Err(ApiError::usage(format!(
@@ -116,7 +96,6 @@ pub fn resolve(flag: &str, spec: &str, command: &str) -> anyhow::Result<Fields> 
     }
     Ok(Fields {
         paths: parse_paths(raw.iter().map(String::as_str)),
-        atlx: parse_paths(extra),
         unresolved,
     })
 }
@@ -347,23 +326,18 @@ fn adapt(v: &Value, paths: &[Vec<String>]) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// One `@name` preset: twg's paths, plus paths for atlx's current
-/// unwrapped output shape that are only used when the payload has no `data`
-/// envelope.
+/// One `@name` preset and the paths twg expands it to.
 pub struct Preset {
     pub name: &'static str,
     pub twg: &'static [&'static str],
-    pub atlx: &'static [&'static str],
 }
 
 type Table = &'static [Preset];
 
 /// Per-command presets, keyed by the dotted command path.
 ///
-/// The `twg` lists match what twg 1.4.4 expands each preset to, so output in
-/// twg's envelope (#21) projects exactly as in twg. The `atlx` lists cover
-/// the keys atlx prints today without the envelope; drop them once every
-/// command emits twg's shape.
+/// The lists match what twg 1.4.4 expands each preset to; atlx prints twg's
+/// shapes (#21), so they project the same way.
 pub fn presets(command: &str) -> Option<Table> {
     let cmd = command.replacen("bb.", "bitbucket.", 1);
     Some(match cmd.as_str() {
@@ -422,15 +396,6 @@ const BITBUCKET_PIPELINE_GET: Table = &[
             "test_results.test_cases_truncated",
             "test_results.test_cases_error",
         ],
-        atlx: &[
-            "build",
-            "state",
-            "result",
-            "branch",
-            "url",
-            "steps.state",
-            "steps.result",
-        ],
     },
     Preset {
         name: "rows",
@@ -469,15 +434,6 @@ const BITBUCKET_PIPELINE_GET: Table = &[
             "test_results.test_cases_truncated",
             "test_results.test_cases_error",
         ],
-        atlx: &[
-            "build",
-            "state",
-            "result",
-            "branch",
-            "url",
-            "steps.state",
-            "steps.result",
-        ],
     },
 ];
 
@@ -507,7 +463,6 @@ const BITBUCKET_PIPELINE_QUERY: Table = &[
             "trigger.name",
             "links.html.href",
         ],
-        atlx: &["build", "state", "result", "branch", "url"],
     },
     Preset {
         name: "evidence",
@@ -544,9 +499,6 @@ const BITBUCKET_PIPELINE_QUERY: Table = &[
             "expired",
             "has_variables",
         ],
-        atlx: &[
-            "build", "state", "result", "branch", "url", "trigger", "commit", "created", "seconds",
-        ],
     },
     Preset {
         name: "rows",
@@ -573,7 +525,6 @@ const BITBUCKET_PIPELINE_QUERY: Table = &[
             "trigger.name",
             "links.html.href",
         ],
-        atlx: &["build", "state", "result", "branch", "url"],
     },
 ];
 
@@ -599,7 +550,6 @@ const BITBUCKET_PULL_REQUESTS_ACTIVITY: Table = &[
             "comment.content.raw",
             "comment.inline.path",
         ],
-        atlx: &[],
     },
     Preset {
         name: "rows",
@@ -622,7 +572,6 @@ const BITBUCKET_PULL_REQUESTS_ACTIVITY: Table = &[
             "comment.content.raw",
             "comment.inline.path",
         ],
-        atlx: &[],
     },
 ];
 
@@ -653,7 +602,6 @@ const BITBUCKET_PULL_REQUESTS_GET: Table = &[
             "_failures.message",
             "_failures.statusCode",
         ],
-        atlx: &["author", "source", "destination", "updated", "url"],
     },
     Preset {
         name: "evidence",
@@ -680,7 +628,6 @@ const BITBUCKET_PULL_REQUESTS_GET: Table = &[
             "_comments.user.display_name",
             "_failures",
         ],
-        atlx: &["author", "source", "destination", "updated", "url"],
     },
     Preset {
         name: "rows",
@@ -708,7 +655,6 @@ const BITBUCKET_PULL_REQUESTS_GET: Table = &[
             "_failures.message",
             "_failures.statusCode",
         ],
-        atlx: &["author", "source", "destination", "updated", "url"],
     },
 ];
 
@@ -739,7 +685,6 @@ const BITBUCKET_PULL_REQUESTS_QUERY: Table = &[
             "warnings",
             "failures",
         ],
-        atlx: &["author", "updated", "url"],
     },
     Preset {
         name: "evidence",
@@ -771,7 +716,6 @@ const BITBUCKET_PULL_REQUESTS_QUERY: Table = &[
             "warnings",
             "failures",
         ],
-        atlx: &["author", "updated", "url", "source", "destination"],
     },
     Preset {
         name: "rows",
@@ -799,7 +743,6 @@ const BITBUCKET_PULL_REQUESTS_QUERY: Table = &[
             "warnings",
             "failures",
         ],
-        atlx: &["author", "updated", "url"],
     },
 ];
 
@@ -816,7 +759,6 @@ const BITBUCKET_REPO_QUERY: Table = &[
             "updated_on",
             "project.key",
         ],
-        atlx: &["repo", "project", "updated", "url"],
     },
     Preset {
         name: "evidence",
@@ -835,14 +777,6 @@ const BITBUCKET_REPO_QUERY: Table = &[
             "project.name",
             "mainbranch.name",
         ],
-        atlx: &[
-            "repo",
-            "project",
-            "updated",
-            "url",
-            "private",
-            "main_branch",
-        ],
     },
     Preset {
         name: "rows",
@@ -856,7 +790,6 @@ const BITBUCKET_REPO_QUERY: Table = &[
             "updated_on",
             "project.key",
         ],
-        atlx: &["repo", "project", "updated", "url"],
     },
 ];
 
@@ -903,18 +836,6 @@ const CONFLUENCE_CONTENT_GET: Table = &[
             "data.items.data.body.lossyConversion",
             "data.items.data.body.lostFeatures",
             "data.items.data.body.outputFile",
-        ],
-        atlx: &[
-            "data.space_id",
-            "data.version",
-            "data.snapshot_token",
-            "data.updated",
-            "data.url",
-            "data.format",
-            "data.items.error.message",
-            "data.items.data.space_id",
-            "data.items.data.snapshot_token",
-            "data.items.data.url",
         ],
     },
     Preset {
@@ -964,20 +885,6 @@ const CONFLUENCE_CONTENT_GET: Table = &[
             "data.items.data.body.value",
             "data.items.data.body.outputFile",
         ],
-        atlx: &[
-            "data.space_id",
-            "data.version",
-            "data.snapshot_token",
-            "data.updated",
-            "data.url",
-            "data.format",
-            "data.excerpt",
-            "data.body",
-            "data.items.error.message",
-            "data.items.data.space_id",
-            "data.items.data.snapshot_token",
-            "data.items.data.url",
-        ],
     },
     Preset {
         name: "metadata",
@@ -1022,18 +929,6 @@ const CONFLUENCE_CONTENT_GET: Table = &[
             "data.items.data.body.lostFeatures",
             "data.items.data.body.outputFile",
         ],
-        atlx: &[
-            "data.space_id",
-            "data.version",
-            "data.snapshot_token",
-            "data.updated",
-            "data.url",
-            "data.format",
-            "data.items.error.message",
-            "data.items.data.space_id",
-            "data.items.data.snapshot_token",
-            "data.items.data.url",
-        ],
     },
     Preset {
         name: "rows",
@@ -1078,18 +973,6 @@ const CONFLUENCE_CONTENT_GET: Table = &[
             "data.items.data.body.lostFeatures",
             "data.items.data.body.outputFile",
         ],
-        atlx: &[
-            "data.space_id",
-            "data.version",
-            "data.snapshot_token",
-            "data.updated",
-            "data.url",
-            "data.format",
-            "data.items.error.message",
-            "data.items.data.space_id",
-            "data.items.data.snapshot_token",
-            "data.items.data.url",
-        ],
     },
 ];
 
@@ -1117,13 +1000,6 @@ const CONFLUENCE_SEARCH_QUERY: Table = &[
             "meta.acquisition",
             "meta.page",
             "meta.evidence",
-        ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
         ],
     },
     Preset {
@@ -1153,13 +1029,6 @@ const CONFLUENCE_SEARCH_QUERY: Table = &[
             "meta.page",
             "meta.evidence",
         ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
-        ],
     },
     Preset {
         name: "rows",
@@ -1184,13 +1053,6 @@ const CONFLUENCE_SEARCH_QUERY: Table = &[
             "meta.acquisition",
             "meta.page",
             "meta.evidence",
-        ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
         ],
     },
 ];
@@ -1221,13 +1083,6 @@ const CONFLUENCE_SEARCH_TEXT: Table = &[
             "meta.page",
             "meta.evidence",
         ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
-        ],
     },
     Preset {
         name: "evidence",
@@ -1257,13 +1112,6 @@ const CONFLUENCE_SEARCH_TEXT: Table = &[
             "meta.page",
             "meta.evidence",
         ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
-        ],
     },
     Preset {
         name: "rows",
@@ -1290,13 +1138,6 @@ const CONFLUENCE_SEARCH_TEXT: Table = &[
             "meta.page",
             "meta.evidence",
         ],
-        atlx: &[
-            "data.results.id",
-            "data.results.title",
-            "data.results.type",
-            "data.results.space",
-            "data.next_cursor",
-        ],
     },
 ];
 
@@ -1309,18 +1150,6 @@ const JIRA_WORKITEM_GET: Table = &[
             "data.status.name",
             "data.assignee.displayName",
             "data.url",
-        ],
-        atlx: &[
-            "data.status",
-            "data.assignee",
-            "data.items.input",
-            "data.items.ok",
-            "data.items.error.message",
-            "data.items.data.key",
-            "data.items.data.summary",
-            "data.items.data.status",
-            "data.items.data.assignee",
-            "data.items.data.url",
         ],
     },
     Preset {
@@ -1336,19 +1165,6 @@ const JIRA_WORKITEM_GET: Table = &[
             "data.updated",
             "data.url",
         ],
-        atlx: &[
-            "data.items.input",
-            "data.items.ok",
-            "data.items.error.message",
-            "data.items.data.key",
-            "data.items.data.summary",
-            "data.items.data.status",
-            "data.items.data.assignee",
-            "data.items.data.url",
-            "data.items.data.description",
-            "data.items.data.reporter",
-            "data.items.data.updated",
-        ],
     },
     Preset {
         name: "rows",
@@ -1358,18 +1174,6 @@ const JIRA_WORKITEM_GET: Table = &[
             "data.status.name",
             "data.assignee.displayName",
             "data.url",
-        ],
-        atlx: &[
-            "data.status",
-            "data.assignee",
-            "data.items.input",
-            "data.items.ok",
-            "data.items.error.message",
-            "data.items.data.key",
-            "data.items.data.summary",
-            "data.items.data.status",
-            "data.items.data.assignee",
-            "data.items.data.url",
         ],
     },
 ];
@@ -1397,13 +1201,6 @@ const JIRA_WORKITEM_QUERY: Table = &[
             "data.issues.issuelinks.inwardIssue.key",
             "data.issues.issuelinks.outwardIssue.key",
         ],
-        atlx: &[
-            "data.issues.status",
-            "data.issues.assignee",
-            "data.issues.type",
-            "data.issues.priority",
-            "data.next_cursor",
-        ],
     },
     Preset {
         name: "evidence",
@@ -1416,7 +1213,6 @@ const JIRA_WORKITEM_QUERY: Table = &[
             "data.issues.url",
             "data.issues.updated",
         ],
-        atlx: &["data.next_cursor"],
     },
     Preset {
         name: "rows",
@@ -1440,13 +1236,6 @@ const JIRA_WORKITEM_QUERY: Table = &[
             "data.issues.issuelinks.inwardIssue.key",
             "data.issues.issuelinks.outwardIssue.key",
         ],
-        atlx: &[
-            "data.issues.status",
-            "data.issues.assignee",
-            "data.issues.type",
-            "data.issues.priority",
-            "data.next_cursor",
-        ],
     },
 ];
 
@@ -1460,7 +1249,6 @@ const JIRA_WORKITEM_SEARCH: Table = &[
             "data.issues.url",
             "data.issues.updated",
         ],
-        atlx: &["data.next_cursor"],
     },
     Preset {
         name: "evidence",
@@ -1473,7 +1261,6 @@ const JIRA_WORKITEM_SEARCH: Table = &[
             "data.issues.url",
             "data.issues.updated",
         ],
-        atlx: &["data.next_cursor"],
     },
     Preset {
         name: "rows",
@@ -1484,7 +1271,6 @@ const JIRA_WORKITEM_SEARCH: Table = &[
             "data.issues.url",
             "data.issues.updated",
         ],
-        atlx: &["data.next_cursor"],
     },
 ];
 
@@ -1500,7 +1286,6 @@ const USER_SEARCH: Table = &[
             "data.slackStatus",
             "meta.guidance",
         ],
-        atlx: &["data.account_id", "data.display_name"],
     },
     Preset {
         name: "evidence",
@@ -1514,7 +1299,6 @@ const USER_SEARCH: Table = &[
             "data.slack",
             "meta.guidance",
         ],
-        atlx: &["data.account_id", "data.display_name", "data.active"],
     },
     Preset {
         name: "rows",
@@ -1527,7 +1311,6 @@ const USER_SEARCH: Table = &[
             "data.slackStatus",
             "meta.guidance",
         ],
-        atlx: &["data.account_id", "data.display_name"],
     },
 ];
 
@@ -1641,12 +1424,16 @@ mod tests {
     fn presets_expand_per_command() {
         let f = resolve("--select", "@compact", "jira.workitem.get").unwrap();
         assert!(f.dotted().contains(&"data.status.name".to_string()));
-        let v = json!({"key": "A-1", "summary": "s", "status": "Done", "type": "Bug",
-                       "assignee": null, "url": "u", "updated": "t"});
+        let v = json!({"apiVersion": "v2", "command": "jira.workitem.get", "data": [
+            {"key": "A-1", "summary": "s", "status": {"name": "Done", "id": "3"},
+             "issuetype": {"name": "Bug"}, "assignee": null, "url": "u", "updated": "t"}
+        ]});
         assert_eq!(
-            select(v.clone(), &f.for_payload(&v)),
+            select(v, &f.paths),
             Selected::Matched(
-                json!({"key": "A-1", "summary": "s", "status": "Done", "assignee": null, "url": "u"})
+                json!({"apiVersion": "v2", "command": "jira.workitem.get", "data": [
+                    {"key": "A-1", "summary": "s", "status": {"name": "Done"}, "assignee": null, "url": "u"}
+                ]})
             )
         );
         // Mixed presets and paths.

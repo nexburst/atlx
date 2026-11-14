@@ -783,6 +783,8 @@ fn hint(code: u16) -> Option<&'static str> {
 pub mod exit {
     pub const OK: i32 = 0;
     pub const FAILURE: i32 = 1;
+    /// A twg command atlx doesn't support (Teamwork Graph, Rovo, ...).
+    pub const UNSUPPORTED: i32 = 2;
     /// A batch read (`get A B ...`) where some, but not all, inputs failed.
     pub const PARTIAL: i32 = 3;
 }
@@ -812,6 +814,8 @@ pub enum ErrorKind {
     Config,
     /// Invalid arguments caught after parsing (missing `--yes`, no IDs, ...).
     Usage,
+    /// A twg command that needs Teamwork Graph, Rovo or the GraphQL gateway.
+    Unsupported,
     /// Anything else (local I/O, oversized bodies, redirect limits, ...).
     Other,
 }
@@ -844,6 +848,7 @@ impl ErrorKind {
             Self::Timeout => "timeout",
             Self::Config => "config",
             Self::Usage => "usage",
+            Self::Unsupported => "unsupported",
             Self::Other => "other",
         }
     }
@@ -910,6 +915,11 @@ impl ApiError {
         Self::new(ErrorKind::Usage, message)
     }
 
+    /// A twg command outside atlx's public-REST scope.
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Unsupported, message)
+    }
+
     /// The `ApiError` inside an `anyhow` chain (through any `context`).
     pub fn find(err: &anyhow::Error) -> Option<&ApiError> {
         err.downcast_ref::<ApiError>()
@@ -974,7 +984,10 @@ impl ApiError {
 
     /// The process exit code for this error (twg exits 1 for every failure).
     pub fn exit_code(&self) -> i32 {
-        exit::FAILURE
+        match self.kind {
+            ErrorKind::Unsupported => exit::UNSUPPORTED,
+            _ => exit::FAILURE,
+        }
     }
 
     /// The `error` object of the JSON error envelope.

@@ -218,11 +218,15 @@ fn batch_partial_failure_exits_3_and_strict_exits_1() {
     );
     assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["items"][0]["ok"], true);
-    assert_eq!(v["items"][1]["ok"], false);
-    assert_eq!(v["items"][1]["error"]["status"], 404);
-    assert_eq!(v["items"][1]["error"]["category"], "not_found");
-    assert_eq!(v["summary"]["failed"], 1);
+    assert_eq!(v["command"], "jira.workitem.get");
+    let d = &v["data"];
+    assert_eq!(d["items"][0]["ok"], true);
+    assert_eq!(d["items"][1]["ok"], false);
+    assert_eq!(d["items"][1]["error"]["status"], 404);
+    assert_eq!(d["items"][1]["error"]["category"], "not_found");
+    assert_eq!(d["summary"]["failed"], 1);
+    assert_eq!(d["summary"]["returned"], 1);
+    assert_eq!(v["meta"]["acquisition"]["failed"], 1);
 
     let o = atlx(
         Some(&site),
@@ -299,4 +303,33 @@ fn usage_errors_exit_1() {
 
     let o = atlx(None, None, &["--version"]);
     assert_eq!(o.status.code(), Some(0));
+}
+
+#[test]
+fn teamwork_graph_commands_fail_with_an_envelope_and_exit_2() {
+    let o = atlx(
+        Some("acme"),
+        Some(TOKEN),
+        &["rovo", "search", "launch", "-o", "json"],
+    );
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["category"], "unsupported");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("not supported by atlx (requires Teamwork Graph"),
+        "{msg}"
+    );
+    assert!(stderr(&o).contains("not supported by atlx"));
+
+    // A planned command says so and exits 1, like other usage errors.
+    let o = atlx(
+        Some("acme"),
+        Some(TOKEN),
+        &["jira", "dashboard", "query", "-o", "json"],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert!(v["error"]["message"].as_str().unwrap().contains("planned"));
 }

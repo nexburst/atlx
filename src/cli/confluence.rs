@@ -5,8 +5,10 @@ use super::util::{batch, body_arg, deprecated};
 use crate::client::{self, ApiError};
 use crate::confluence;
 use crate::markup::TextFormat;
+use crate::output::envelope::envelope;
 use anyhow::{Result, bail};
 use clap::{Subcommand, ValueEnum};
+use serde_json::{Value, json};
 
 #[derive(Subcommand)]
 pub(crate) enum ConfCmd {
@@ -335,7 +337,11 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             let Some(cql) = cql else {
                 bail!("pass --cql or a CQL argument")
             };
-            confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
+            let data = confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?;
+            envelope("confluence.search.query", "confluence.search-result")
+                .request(json!({"cql": cql, "limit": limit, "cursor": cursor}))
+                .next_cursor(data["nextCursor"].as_str())
+                .data(data)
         }
         ConfCmd::Search {
             cmd:
@@ -355,7 +361,11 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             };
             let cql =
                 confluence::text_cql(&text, updated_since.as_deref(), created_since.as_deref())?;
-            confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
+            let data = confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?;
+            envelope("confluence.search.text", "confluence.search-result")
+                .request(json!({"query": text, "cql": cql, "limit": limit, "cursor": cursor}))
+                .next_cursor(data["nextCursor"].as_str())
+                .data(data)
         }
         ConfCmd::Content { cmd } => match cmd {
             ContentCmd::Get {
@@ -381,15 +391,23 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     draft,
                     reference_space: reference_space.as_deref(),
                 };
+                let get = envelope("confluence.content.get", "confluence.content").request(json!({
+                    "ids": if inputs.len() == 1 { json!(inputs[0]) } else { json!(inputs) },
+                    "detail": format!("{:?}", opts.detail).to_lowercase(),
+                    "format": format!("{:?}", opts.format).to_lowercase(),
+                }));
                 if body_only {
                     let [one] = inputs.as_slice() else {
                         bail!("--body-only takes exactly one ID")
                     };
                     let v = confluence::get(c, one, &opts)?;
-                    let body = v["body"].as_str().unwrap_or_default().to_string();
-                    return Ok(Out::Body { body, full: v });
+                    let body = v["body"]["value"].as_str().unwrap_or_default().to_string();
+                    return Ok(Out::Body {
+                        body,
+                        full: get.data(v),
+                    });
                 }
-                batch(inputs, strict, 1, |r| confluence::get(c, r, &opts))?
+                get.data(batch(inputs, strict, 1, |r| confluence::get(c, r, &opts))?)
             }
             ContentCmd::Create {
                 space_id,
@@ -403,7 +421,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 ..
             } => {
                 let body = body_arg(body, body_file)?.unwrap_or_default();
-                confluence::create(
+                let data = confluence::create(
                     c,
                     confluence::NewContent {
                         space: &space_id,
@@ -414,7 +432,10 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         parent: parent_id.as_deref(),
                         draft,
                     },
-                )?
+                )?;
+                envelope("confluence.content.create", "confluence.content")
+                    .request(json!({"spaceId": space_id, "title": title, "parentId": parent_id}))
+                    .data(data)
             }
             ContentCmd::Update {
                 reference,
@@ -434,7 +455,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     bail!("pass a content ID/URL or --id")
                 };
                 let body = body_arg(body, body_file)?;
-                confluence::update(
+                let data = confluence::update(
                     c,
                     &reference,
                     confluence::Edit {
@@ -446,7 +467,10 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         dry_run,
                         draft,
                     },
-                )?
+                )?;
+                envelope("confluence.content.update", "confluence.content")
+                    .request(json!({"id": reference, "snapshotToken": snapshot_token, "dryRun": dry_run}))
+                    .data(data)
             }
             ContentCmd::List {
                 space,
@@ -454,7 +478,16 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 status,
                 limit,
                 cursor,
-            } => confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?,
+            } => {
+                let data =
+                    confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?;
+                envelope("confluence.content.list", "confluence.content")
+                    .request(
+                        json!({"space": space, "status": status, "limit": limit, "cursor": cursor}),
+                    )
+                    .next_cursor(data["nextCursor"].as_str())
+                    .data(data)
+            }
             ContentCmd::Comments { cmd } => match cmd {
                 ConfCommentCmd::List {
                     reference,
@@ -480,14 +513,23 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     }
                     let inline = inline || comment_type == Some(CommentType::Inline);
                     let format = body_format.or(format).unwrap_or(confluence::ReadFormat::Md);
-                    confluence::comments_list(
+                    let data = confluence::comments_list(
                         c,
                         &reference,
                         inline,
                         format,
                         limit,
                         cursor.as_deref(),
-                    )?
+                    )?;
+                    envelope("confluence.content.comments.list", "confluence.comment")
+                        .request(json!({
+                            "id": reference,
+                            "commentType": if inline { "inline" } else { "footer" },
+                            "limit": limit,
+                            "cursor": cursor,
+                        }))
+                        .next_cursor(data["nextCursor"].as_str())
+                        .data(data)
                 }
                 ConfCommentCmd::Create {
                     reference,
@@ -526,18 +568,26 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         TextFormat::Markdown
                     };
                     let format = body_format.or(format).unwrap_or(default);
-                    confluence::comment_create(c, &reference, &body, format)?
+                    envelope("confluence.content.comments.create", "confluence.comment")
+                        .request(json!({"id": reference, "commentType": "footer"}))
+                        .data(confluence::comment_create(c, &reference, &body, format)?)
                 }
             },
             ContentCmd::Children {
                 reference,
                 limit,
                 cursor,
-            } => confluence::children(c, &reference, limit, cursor.as_deref())?,
+            } => {
+                let data = confluence::children(c, &reference, limit, cursor.as_deref())?;
+                envelope("confluence.content.children", "confluence.content")
+                    .request(json!({"id": reference, "limit": limit, "cursor": cursor}))
+                    .next_cursor(data["nextCursor"].as_str())
+                    .data(data)
+            }
             ContentCmd::Labels {
                 cmd: Some(LabelsCmd::List { id }),
                 ..
-            } => confluence::labels(c, &id, 250)?,
+            } => labels(c, &id, 250)?,
             ContentCmd::Labels {
                 reference: Some(reference),
                 limit,
@@ -547,7 +597,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     "confluence content labels <ref>",
                     "confluence content labels list --id <ref>",
                 );
-                confluence::labels(c, &reference, limit)?
+                labels(c, &reference, limit)?
             }
             ContentCmd::Labels {
                 reference: None, ..
@@ -561,7 +611,9 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 reference,
                 yes: _,
                 purge,
-            } => confluence::delete(c, &reference, purge)?,
+            } => envelope("confluence.content.delete", "confluence.content")
+                .request(json!({"id": reference, "purge": purge}))
+                .data(confluence::delete(c, &reference, purge)?),
         },
         ConfCmd::Space {
             cmd:
@@ -585,7 +637,10 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             if labels {
                 confluence::add_space_labels(c, &mut v)?;
             }
-            v
+            envelope("confluence.space.list", "confluence.space")
+                .request(json!({"type": kind, "status": status, "keys": keys, "limit": limit, "cursor": cursor}))
+                .next_cursor(v["nextCursor"].as_str())
+                .data(v)
         }
         ConfCmd::Space {
             cmd:
@@ -602,9 +657,13 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             if labels {
                 confluence::add_space_labels(c, &mut v)?;
             }
-            v
+            envelope("confluence.space.get", "confluence.space")
+                .request(json!({"id": identifier, "labels": labels}))
+                .data(v)
         }
-        ConfCmd::Space { cmd: SpaceCmd::Me } => confluence::space_me(c)?,
+        ConfCmd::Space { cmd: SpaceCmd::Me } => envelope("confluence.space.me", "confluence.space")
+            .request(json!({}))
+            .data(confluence::space_me(c)?),
         ConfCmd::Tree {
             reference,
             target,
@@ -613,10 +672,22 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             let Some(reference) = target.or(reference) else {
                 return Err(ApiError::usage("pass a page ID or URL, or --target").into());
             };
-            confluence::tree(c, &reference, depth)?
+            envelope("confluence.tree", "confluence.tree")
+                .request(json!({"target": reference, "depth": depth}))
+                .data(confluence::tree(c, &reference, depth)?)
         }
     };
     Ok(Out::Data(data))
+}
+
+fn labels(c: &client::Client, id: &str, limit: usize) -> Result<Value> {
+    let data = confluence::labels(c, id, limit)?;
+    Ok(
+        envelope("confluence.content.labels.list", "confluence.label")
+            .request(json!({"id": id}))
+            .next_cursor(data["nextCursor"].as_str())
+            .data(data),
+    )
 }
 
 /// `--id`, or the old positional reference (with a deprecation note).
