@@ -25,8 +25,21 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 - Typed errors: `client::ApiError` carries the error class, HTTP status,
   request and hint, and `client::Bytes` reports its HTTP status (#17).
+- Named profiles: global `-p/--profile` and `ATLX_PROFILE`, `login
+  --new-profile`, per-profile `setup bitbucket` and `setup default-site`, and
+  `auth profile list|default|rename|migrate`. v1 config files load unchanged as
+  the `default` profile (#20).
+- Credential helpers: `token_cmd` / `bitbucket.token_cmd`, `ATLX_TOKEN_CMD`,
+  `ATLX_BB_TOKEN_CMD` and `--token-cmd` on `login` and `setup bitbucket`,
+  run lazily with a 10 s timeout. `whoami` and `doctor` report the active
+  profile and token source (#20).
 
 ### Changed
+
+- `atlx logout` removes only the selected profile (the whole file only when
+  nothing else is left), as twg does (#20).
+- `login` and `setup bitbucket` accept `-f` for `--force`, and `setup bb` is an
+  alias of `setup bitbucket`, matching twg (#20).
 
 - Errors follow twg: in JSON modes an `{"ok": false, "error": {...}}` envelope
   goes to stdout and a readable report to stderr. Every failure exits 1

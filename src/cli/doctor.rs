@@ -1,4 +1,4 @@
-//! `atlx doctor`: config, permission and connectivity checks.
+//! `atlx doctor`: config, profile, permission and connectivity checks.
 
 use super::{Globals, Out};
 use crate::config::{self, Config};
@@ -139,6 +139,26 @@ fn check_bitbucket(cfg: &Config) -> (config::CheckStatus, Value) {
     }
 }
 
+/// Which profile is active and where its tokens come from (never the values).
+fn check_profile(cfg: &Config) -> Value {
+    let (src, bb_src) = (cfg.token_source(), cfg.bitbucket_token_source());
+    let status = if src == "none" {
+        config::CheckStatus::NotConfigured
+    } else {
+        config::CheckStatus::Ok
+    };
+    check_entry(
+        status,
+        format!("profile `{}`, token from {src}", cfg.profile),
+        &[
+            ("name", json!(cfg.profile)),
+            ("token_source", json!(src)),
+            ("bitbucket_token_source", json!(bb_src)),
+        ],
+    )
+    .1
+}
+
 pub(crate) fn doctor_passed(statuses: &[config::CheckStatus], strict: bool) -> bool {
     statuses.iter().all(|s| match s {
         config::CheckStatus::Ok => true,
@@ -205,6 +225,18 @@ pub(crate) fn doctor(g: &Globals, strict: bool) -> Out {
         ),
     };
 
+    let profile_val = match cfg.as_ref() {
+        Some(cfg) => check_profile(cfg),
+        None => {
+            check_entry(
+                config::CheckStatus::Error,
+                "skipped: config failed to load",
+                &[],
+            )
+            .1
+        }
+    };
+
     let ok = doctor_passed(
         &[cfg_inspection.status, j_status, cf_status, bb_status],
         strict,
@@ -214,6 +246,7 @@ pub(crate) fn doctor(g: &Globals, strict: bool) -> Out {
         "strict": strict,
         "checks": {
             "config": cfg_inspection,
+            "profile": profile_val,
             "jira": j_val,
             "confluence": cf_val,
             "bitbucket": bb_val,

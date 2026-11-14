@@ -100,14 +100,61 @@ atlx setup bitbucket --workspace acme --token -
 ```
 
 Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
-`ATLX_SITE`, `ATLX_EMAIL`, `ATLX_TOKEN`, `ATLX_BB_WORKSPACE`, `ATLX_BB_EMAIL`,
-`ATLX_BB_TOKEN`, `ATLX_CONFIG`, `ATLX_OUTPUT`.
+`ATLX_SITE`, `ATLX_EMAIL`, `ATLX_TOKEN`, `ATLX_TOKEN_CMD`, `ATLX_BB_WORKSPACE`,
+`ATLX_BB_EMAIL`, `ATLX_BB_TOKEN`, `ATLX_BB_TOKEN_CMD`, `ATLX_PROFILE`,
+`ATLX_CONFIG`, `ATLX_OUTPUT`.
+
+### Profiles
+
+Several sites or workspaces can live side by side as named profiles, chosen
+with `-p/--profile <name>` or `ATLX_PROFILE` (as with twg, `-p default` means
+the saved default):
+
+```sh
+atlx login --new-profile sandbox -s acme-sandbox -u you@acme.com --token -
+atlx setup bitbucket -p sandbox --workspace acme-sandbox --token -
+atlx -p sandbox jira workitem get SBX-1
+atlx auth profile list                  # name, site, email, workspace, token source
+atlx auth profile default sandbox       # use it when -p is not given
+atlx auth profile rename sandbox sbx
+atlx logout -p sbx                      # remove one profile
+```
+
+Precedence, highest first: `-s`/`-u` flags, `ATLX_*` env vars, the selected
+profile. A v1 config (top-level `site`, `email`, `token`, `[bitbucket]`) keeps
+working as the profile named `default`; `atlx auth profile migrate --yes` moves
+it into a named profile.
+
+```toml
+default_profile = "work"
+
+[profiles.work]
+site = "work.atlassian.net"
+email = "you@work.com"
+token_cmd = "op read op://Private/atlassian/credential"
+
+[profiles.work.bitbucket]
+workspace = "work"
+token_cmd = "pass show bitbucket/work"
+```
+
+### Credential helpers
+
+Instead of storing a token, save a command that prints it: `token_cmd` (and
+`bitbucket.token_cmd`) in the config, `atlx login --token-cmd '<cmd>'`,
+`atlx setup bitbucket --token-cmd '<cmd>'`, or the `ATLX_TOKEN_CMD` /
+`ATLX_BB_TOKEN_CMD` env vars. The command runs through `sh -c` (`cmd /C` on
+Windows) only when a request is about to be made, at most once per run, with
+a 10 second timeout; its stdout is trimmed and never shown in errors.
+`atlx whoami`, `atlx doctor` and `atlx auth profile list` report where the token
+comes from (`config`, `env` or `token_cmd`), never its value.
 
 ## Commands
 
 | twg-compatible command | Notes |
 | --- | --- |
-| `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth |
+| `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth; `-p/--profile`, `login --new-profile`, `--token-cmd` (atlx extra) |
+| `auth profile list`, `auth profile default`, `auth profile rename`, `auth profile migrate` | Profiles in `config.toml`; `list` never shows tokens |
 | `user search <query>` | `--limit`; returns `account_id`, `display_name`, `email`, `active`, `account_type` |
 | `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches |
 | `jira workitem search <text...>` | `text ~ "…" ORDER BY updated DESC`; `--limit`, `--after` |

@@ -42,6 +42,9 @@ pub struct Cli {
     /// Per-request HTTP timeout in milliseconds
     #[arg(long, global = true)]
     timeout_ms: Option<u64>,
+    /// Saved profile to use; `default` means the saved default [env: ATLX_PROFILE]
+    #[arg(short, long, global = true, value_name = "NAME")]
+    profile: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -51,7 +54,7 @@ pub struct Cli {
 enum Cmd {
     /// Save credentials (site, email, API token)
     Login(auth::LoginArgs),
-    /// Delete saved credentials
+    /// Remove the selected profile and its saved credentials
     Logout,
     /// Show the authenticated user
     Whoami,
@@ -60,6 +63,11 @@ enum Cmd {
         /// Fail on warnings or unconfigured checks
         #[arg(long)]
         strict: bool,
+    },
+    /// Saved credentials and login profiles
+    Auth {
+        #[command(subcommand)]
+        cmd: auth::AuthCmd,
     },
     /// Optional setup: Bitbucket token, default site
     Setup {
@@ -137,6 +145,7 @@ pub fn main() {
         site: cli.site,
         user: cli.user,
         timeout_ms: cli.timeout_ms,
+        profile: cli.profile,
     };
     let code = match run(&globals, cli.cmd) {
         Ok(Out::Data(v)) => {
@@ -203,6 +212,8 @@ pub(crate) struct Globals {
     pub(crate) site: Option<String>,
     pub(crate) user: Option<String>,
     pub(crate) timeout_ms: Option<u64>,
+    /// `-p/--profile`; `ATLX_PROFILE` is read by the config loader.
+    pub(crate) profile: Option<String>,
 }
 
 impl Globals {
@@ -218,14 +229,15 @@ impl Globals {
     }
 
     pub(crate) fn config(&self) -> Result<Config> {
-        Ok(self.apply(Config::load()?))
+        Ok(self.apply(Config::load(self.profile.as_deref())?))
     }
 }
 
 fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
     let data = match cmd {
         Cmd::Login(a) => auth::login(g, a)?,
-        Cmd::Logout => auth::logout()?,
+        Cmd::Logout => auth::logout(g)?,
+        Cmd::Auth { cmd } => auth::auth_cmd(g, cmd)?,
         Cmd::Whoami => auth::whoami(g)?,
         Cmd::Doctor { strict } => return Ok(doctor::doctor(g, strict)),
         Cmd::Setup { cmd } => auth::setup(g, cmd)?,
@@ -319,6 +331,18 @@ mod tests {
             "atlx doctor",
             "atlx doctor --strict -o json",
             "atlx setup bitbucket --workspace acme",
+            "atlx setup bitbucket --workspace acme --token-cmd 'pass show bb' -p work",
+            "atlx setup default-site acme --profile work",
+            "atlx -p work jira workitem get PROJ-1",
+            "atlx jira workitem get PROJ-1 --profile default",
+            "atlx login --new-profile",
+            "atlx login --new-profile work -s acme -u me@acme.com --token-cmd 'op read op://x/y' --no-verify",
+            "atlx login -p work --force",
+            "atlx logout -p work",
+            "atlx auth profile list",
+            "atlx auth profile default work",
+            "atlx auth profile rename default work",
+            "atlx auth profile migrate --yes",
         ] {
             let argv: Vec<String> = shell_words(args);
             if let Err(e) = Cli::try_parse_from(&argv) {

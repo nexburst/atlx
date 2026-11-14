@@ -2,10 +2,16 @@ global: [-o/--output <OUTPUT> {text|json|jsonl} [env: ATLX_OUTPUT]]
 global: [-s/--site <SITE>]
 global: [-u/--user <USER>]
 global: [--timeout-ms <TIMEOUT_MS>]
+global: [-p/--profile <NAME>]
 alias: atlx bb -> atlx bitbucket
 alias: atlx bitbucket prs -> atlx bitbucket pull-requests
 alias: atlx confluence content comment -> atlx confluence content comments
+alias: atlx setup bb -> atlx setup bitbucket
 atlx api <PRODUCT> {jira|confluence|bitbucket} (required) <PATH> (required) [-X/--method <METHOD> [default: GET]] [-d/--data <DATA>] [-q/--query <KEY=VALUE>...]
+atlx auth profile default <NAME> (required)
+atlx auth profile list
+atlx auth profile migrate -y/--yes
+atlx auth profile rename <NAME> (required) <NEW_NAME> (required)
 atlx bitbucket pipeline get --pipeline <PIPELINE> (required) --logs --failed-steps [--lines <LINES> [default: 100]] [--step <STEP>] [--workspace <WORKSPACE>] [--repo <REPO>]
 atlx bitbucket pipeline query [--state <STATE>] [--status <STATUS>] [--branch <BRANCH>] [--trigger <TRIGGER>] [--limit <LIMIT> [default: 15]] [--workspace <WORKSPACE>] [--repo <REPO>]
 atlx bitbucket pull-requests activity <ID> (required) [--type <EVENT_TYPE>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--repo <REPO>]
@@ -60,11 +66,11 @@ atlx jira workitem search <TEXT>... (required) [--limit <LIMIT>] [--first <FIRST
 atlx jira workitem transition --id <ID> (required) [--transition-id <TRANSITION_ID>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]]
 atlx jira workitem transitions query --id <ID> (required)
 atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
-atlx login [--token <TOKEN>] --no-verify --force
+atlx login [--token <TOKEN>] [--token-cmd <CMD>] --no-verify -f/--force [--new-profile <NAME>]
 atlx logout
 atlx man (hidden) [--dir <DIR>]
 atlx search <QUERY> (required) [--limit <LIMIT> [default: 10]] [--only <ONLY>,... {jira|confluence|bitbucket}]
-atlx setup bitbucket [--workspace <WORKSPACE>] [--token <TOKEN>] [--email <EMAIL>] --force --no-verify
+atlx setup bitbucket [--workspace <WORKSPACE>] [--token <TOKEN>] [--token-cmd <CMD>] [--email <EMAIL>] -f/--force --no-verify
 atlx setup default-site [<SITE>]
 atlx user search <QUERY>... (required) [--limit <LIMIT> [default: 25]]
 atlx whoami
