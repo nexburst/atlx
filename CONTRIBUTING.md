@@ -34,6 +34,8 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
 | `tests/cli_tree.rs` + `tests/snapshots/cli-tree.txt` | Snapshot of the full command tree |
 | `tests/live_smoke.rs` | Opt-in live checks (`#[ignore]`) |
+| `tests/twg_compat.rs` | Checks `compat/corpus.txt`, `COMPAT.md` and `compat/coverage.txt` against the parser |
+| `compat/twg-<version>.txt` | twg's command tree (paths, positionals, flag names), made by `scripts/twg-inventory.sh` |
 
 The split is deliberate: clap code never calls `ureq` directly, and API
 functions never parse arguments. That keeps API functions testable against
@@ -55,7 +57,11 @@ the mock server and keeps product PRs out of each other's files.
 6. **Regenerate the CLI snapshot** and review the diff:
    `UPDATE_SNAPSHOTS=1 cargo test --test cli_tree`.
 7. **README**: update the command table.
-8. **`COMPAT.md`**: add or update the row for the command (once #15 lands).
+8. **`COMPAT.md` and the corpus**: set the command's row in `COMPAT.md`, flip
+   the matching `gap #N` lines in `compat/corpus.txt` to `ok`, add a corpus
+   line for any new invocation, and record the new coverage with
+   `UPDATE_COVERAGE=1 cargo test --test twg_compat`. See "twg compatibility"
+   below.
 
 ## Conventions
 
@@ -76,6 +82,33 @@ the mock server and keeps product PRs out of each other's files.
 - **Public REST only**: Jira REST v3 and Agile 1.0, Confluence v2 (v1 where v2
   lacks an endpoint), Bitbucket 2.0. Features that need Teamwork Graph, the
   GraphQL gateway or Rovo are out of scope.
+
+## twg compatibility
+
+The goal is for atlx to behave exactly like twg for Jira, Confluence and
+Bitbucket: same command paths, flags, `{"data": ...}` output envelope, and no
+confirmation gates twg doesn't have. Three files keep this measurable, and
+`tests/twg_compat.rs` checks all three offline:
+
+- **`COMPAT.md`** has one row per twg leaf command in the inventory. Statuses:
+  ✅ supported, 🟡 partial, 🔁 accepted through an alias, ➕ atlx-only, 📋
+  planned, ⛔ out of scope. The test checks each status against the CLI tree
+  snapshot: ✅/🟡 paths must exist, 🔁 paths must exist only through an alias,
+  📋/⛔ paths must not parse. 🟡 and 📋 rows must link an issue.
+- **`compat/corpus.txt`** has twg-style invocations, each tagged `ok` (must
+  parse) or `gap #<issue>` (must fail to parse). When your change makes a gap
+  line parse, the test fails until you flip it to `ok`. Every flag on a
+  line must exist for that command in the twg inventory. Write lines yourself
+  with placeholders (`PROJ-1`, `12345`, `ENG`, `acme`, `api`); never copy
+  examples from twg's help or skills. Tag a gap with the issue that will
+  close it; use `#13` for public-REST work that has no issue yet.
+- **`compat/coverage.txt`** is the share of twg commands atlx accepts. The
+  test fails if it drops; `UPDATE_COVERAGE=1 cargo test --test twg_compat`
+  records a rise.
+
+After a twg upgrade, run `scripts/twg-inventory.sh` (CI has no twg), commit
+the new `compat/twg-<version>.txt` and point `INVENTORY` in
+`tests/twg_compat.rs` at it.
 
 ## Parallel work
 
