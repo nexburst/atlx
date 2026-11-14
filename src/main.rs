@@ -789,6 +789,27 @@ enum BbCmd {
         #[command(subcommand)]
         cmd: PipelineCmd,
     },
+    /// Search code in a workspace
+    Search {
+        #[command(subcommand)]
+        cmd: BbSearchCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum BbSearchCmd {
+    /// Search code across repositories in a workspace
+    Code {
+        #[arg(required = true)]
+        query: Vec<String>,
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Restrict search to a repository slug
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -815,6 +836,26 @@ enum RepoCmd {
     /// Repository details
     Get {
         slug: Option<String>,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Read a file or list a directory from the repository
+    File {
+        /// File or directory path within the repository
+        path: String,
+        /// Branch name, tag, or commit hash (defaults to the main branch)
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// List branches in a repository
+    Branches {
+        /// Filter branch names
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
         #[command(flatten)]
         repo: RepoArgs,
     },
@@ -899,6 +940,79 @@ enum PrCmd {
     Comment {
         #[command(subcommand)]
         cmd: PrCommentCmd,
+    },
+    /// Raw unified diff for a pull request
+    Diff {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Activity feed for a pull request
+    Activity {
+        /// Pull request number or URL
+        id: String,
+        /// Filter by event type (e.g. comment, approval, update)
+        #[arg(long = "type")]
+        event_type: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Tasks on a pull request
+    Tasks {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Approve a pull request
+    Approve {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Remove your approval from a pull request
+    Unapprove {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Request changes on a pull request
+    RequestChanges {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Merge a pull request (requires --yes)
+    Merge {
+        /// Pull request number or URL
+        id: String,
+        #[arg(long, value_enum)]
+        strategy: Option<bitbucket::MergeStrategy>,
+        #[arg(long)]
+        close_source_branch: bool,
+        #[arg(long)]
+        message: Option<String>,
+        /// Confirm merge
+        #[arg(long, short)]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Decline a pull request (requires --yes)
+    Decline {
+        /// Pull request number or URL
+        id: String,
+        /// Confirm decline
+        #[arg(long, short)]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArgs,
     },
 }
 
@@ -1042,7 +1156,7 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
             cmd: UserCmd::Search { query, limit },
         } => jira::user_search(&g.config()?.jira()?, &query.join(" "), limit)?,
         Cmd::Confluence { cmd } => return confluence_cmd(&g.config()?.confluence()?, cmd),
-        Cmd::Bitbucket { cmd } => bb_cmd(&g.config()?, cmd)?,
+        Cmd::Bitbucket { cmd } => return bb_cmd(&g.config()?, cmd),
         Cmd::Search { query, limit, only } => search::run(&g.config()?, &query, limit, &only),
         Cmd::Api {
             product,
@@ -1676,25 +1790,21 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
     Ok(Out::Data(data))
 }
 
-fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
+fn require_yes(yes: bool, action: &str) -> Result<()> {
+    if !yes {
+        bail!("pass --yes to confirm {action}");
+    }
+    Ok(())
+}
+
+fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
     let (c, default_ws) = cfg.bitbucket()?;
     let dws = default_ws.as_deref();
     let path = |r: &RepoArgs, slug: Option<&str>| {
         bitbucket::repo_path(slug.or(r.repo.as_deref()), r.workspace.as_deref(), dws)
     };
-    match cmd {
-        BbCmd::Repo {
-            cmd:
-                RepoCmd::Query {
-                    query,
-                    limit,
-                    workspace,
-                    project,
-                    language,
-                    sort,
-                    role,
-                },
-        } => {
+    let data = match cmd {
+        BbCmd::Repo { cmd: RepoCmd::Query { query, limit, workspace, project, language, sort, role } } => {
             let q = bitbucket::RepoQuery {
                 query: query.as_deref(),
                 project: project.as_deref(),
@@ -1703,11 +1813,18 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                 role: role.as_deref(),
                 limit,
             };
-            bitbucket::repo_query(&c, bitbucket::workspace_or(workspace.as_deref(), dws)?, &q)
+            bitbucket::repo_query(&c, bitbucket::workspace_or(workspace.as_deref(), dws)?, &q)?
         }
-        BbCmd::Repo {
-            cmd: RepoCmd::Get { slug, repo },
-        } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?),
+        BbCmd::Repo { cmd: RepoCmd::Get { slug, repo } } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?)?,
+        BbCmd::Repo { cmd: RepoCmd::File { path: file_path, git_ref, repo } } => {
+            return Ok(match bitbucket::repo_file(&c, &path(&repo, None)?, &file_path, git_ref.as_deref())? {
+                bitbucket::RepoFile::Dir(v) => Out::Data(v),
+                bitbucket::RepoFile::Raw(s) => Out::Raw(s),
+            });
+        }
+        BbCmd::Repo { cmd: RepoCmd::Branches { query, limit, repo } } => {
+            bitbucket::repo_branches(&c, &path(&repo, None)?, query.as_deref(), limit)?
+        }
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
                 text,
@@ -1736,7 +1853,7 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                     updated_before: updated_before.as_deref(),
                     limit,
                 };
-                bitbucket::pr_query(&c, &path(&repo, None)?, &q)
+                bitbucket::pr_query(&c, &path(&repo, None)?, &q)?
             }
             PrCmd::Get {
                 ids,
@@ -1748,14 +1865,8 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                 repo,
             } => {
                 let p = path(&repo, None)?;
-                let o = bitbucket::PrGet {
-                    comments: comments || full,
-                    diff: diff || full,
-                    statuses: statuses || full,
-                };
-                batch(ids, strict, |id| {
-                    bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
-                })
+                let o = bitbucket::PrGet { comments: comments || full, diff: diff || full, statuses: statuses || full };
+                batch(ids, strict, |id| bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o))?
             }
             PrCmd::Create {
                 title,
@@ -1786,7 +1897,7 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                         close_source_branch,
                         draft,
                     },
-                )
+                )?
             }
             PrCmd::Comment {
                 cmd:
@@ -1804,13 +1915,39 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                     &c,
                     &path(&repo, None)?,
                     bitbucket::pr_number(&pull_request)?,
-                    bitbucket::NewComment {
-                        text: &text,
-                        reply_to,
-                        path: file.as_deref(),
-                        line,
-                    },
-                )
+                    bitbucket::NewComment { text: &text, reply_to, path: file.as_deref(), line },
+                )?
+            }
+            PrCmd::Diff { id, repo } => {
+                return Ok(Out::Raw(bitbucket::pr_diff(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?));
+            }
+            PrCmd::Activity { id, event_type, limit, repo } => bitbucket::pr_activity(
+                &c,
+                &path(&repo, None)?,
+                bitbucket::pr_number(&id)?,
+                event_type.as_deref(),
+                limit,
+            )?,
+            PrCmd::Tasks { id, repo } => bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?,
+            PrCmd::Approve { id, repo } => {
+                bitbucket::pr_approve(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
+            }
+            PrCmd::Unapprove { id, repo } => {
+                bitbucket::pr_unapprove(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
+            }
+            PrCmd::RequestChanges { id, repo } => {
+                bitbucket::pr_request_changes(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
+            }
+            PrCmd::Merge { id, strategy, close_source_branch, message, yes, repo } => {
+                let pr_id = bitbucket::pr_number(&id)?;
+                require_yes(yes, &format!("merging pull request #{pr_id}"))?;
+                let o = bitbucket::PrMerge { strategy, close_source_branch, message: message.as_deref() };
+                bitbucket::pr_merge(&c, &path(&repo, None)?, pr_id, &o)?
+            }
+            PrCmd::Decline { id, yes, repo } => {
+                let pr_id = bitbucket::pr_number(&id)?;
+                require_yes(yes, &format!("declining pull request #{pr_id}"))?;
+                bitbucket::pr_decline(&c, &path(&repo, None)?, pr_id)?
             }
         },
         BbCmd::Pipeline {
@@ -1831,28 +1968,18 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                 trigger: trigger.as_deref(),
                 limit,
             };
-            bitbucket::pipeline_query(&c, &path(&repo, None)?, &q)
+            bitbucket::pipeline_query(&c, &path(&repo, None)?, &q)?
         }
-        BbCmd::Pipeline {
-            cmd:
-                PipelineCmd::Get {
-                    pipeline,
-                    logs,
-                    failed_steps,
-                    lines,
-                    step,
-                    repo,
-                },
-        } => {
-            let o = bitbucket::PipelineGet {
-                logs,
-                failed_steps,
-                lines,
-                step: step.as_deref(),
-            };
-            bitbucket::pipeline_get(&c, &path(&repo, None)?, &pipeline, &o)
+        BbCmd::Pipeline { cmd: PipelineCmd::Get { pipeline, logs, failed_steps, lines, step, repo } } => {
+            let o = bitbucket::PipelineGet { logs, failed_steps, lines, step: step.as_deref() };
+            bitbucket::pipeline_get(&c, &path(&repo, None)?, &pipeline, &o)?
         }
-    }
+        BbCmd::Search { cmd: BbSearchCmd::Code { query, workspace, repo, limit } } => {
+            let ws = bitbucket::workspace_or(workspace.as_deref(), dws)?;
+            bitbucket::search_code(&c, ws, &query.join(" "), repo.as_deref(), limit)?
+        }
+    };
+    Ok(Out::Data(data))
 }
 
 fn api(
@@ -1951,12 +2078,29 @@ mod tests {
             "atlx confluence space me",
             "atlx bb repo query --workspace acme",
             "atlx bitbucket repo get --workspace acme --repo api",
+            "atlx bb repo file src/main.rs --repo acme/api --ref main",
+            "atlx bitbucket repo file src --repo api",
+            "atlx bb repo branches --repo acme/api --query feat --limit 10",
+            "atlx bitbucket repo branches --repo api",
             "atlx bb pull-requests query --workspace acme --repo api --state MERGED",
             "atlx bb prs get 930 931 --statuses --comments --repo acme/api",
             "atlx bb pull-requests create --title t --source feat --dest main --repo api",
             "atlx bb pull-requests comment create --pull-request 930 --text LGTM --repo api",
+            "atlx bb pull-requests diff 930 --repo acme/api",
+            "atlx bitbucket pull-requests diff https://bitbucket.org/acme/api/pull-requests/930 --repo acme/api",
+            "atlx bb pull-requests activity 930 --repo api --type comment --limit 10",
+            "atlx bitbucket pull-requests tasks 930 --repo api",
+            "atlx bb pull-requests approve 930 --repo api",
+            "atlx bitbucket pull-requests unapprove 930 --repo api",
+            "atlx bb pull-requests request-changes 930 --repo api",
+            "atlx bb pull-requests merge 930 --repo api --strategy squash --close-source-branch --message 'Ship it' --yes",
+            "atlx bitbucket pull-requests merge 930 --repo api --strategy fast_forward -y",
+            "atlx bb pull-requests decline 930 --repo api --yes",
+            "atlx bitbucket pull-requests decline 930 --repo api -y",
             "atlx bb pipeline query --repo api --status FAILED",
             "atlx bb pipeline get --pipeline 1234 --logs --failed-steps --repo api",
+            "atlx bb search code 'AuthService' --workspace acme --repo api --limit 10",
+            "atlx bitbucket search code AuthService --repo api",
             "atlx whoami -o text",
             "atlx setup bitbucket --workspace acme",
         ] {
@@ -2075,5 +2219,13 @@ mod tests {
             panic!("unexpected parsed command");
         };
         assert_eq!(format, confluence::ReadFormat::Md);
+    }
+
+    #[test]
+    fn bb_confirmation_and_args() {
+        assert!(require_yes(false, "merging pull request #1").is_err());
+        assert!(require_yes(true, "merging pull request #1").is_ok());
+        assert!(Cli::try_parse_from(["atlx", "bb", "pull-requests", "merge", "1", "--repo", "acme/api", "--strategy", "merge_commit", "--yes"]).is_ok());
+        assert!(Cli::try_parse_from(["atlx", "bb", "pull-requests", "merge", "1", "--repo", "acme/api", "--strategy", "invalid"]).is_err());
     }
 }

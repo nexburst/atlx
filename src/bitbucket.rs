@@ -1,9 +1,10 @@
-//! Bitbucket Cloud REST 2.0, shaped after twg's `bitbucket repo|pull-requests|pipeline`.
+//! Bitbucket Cloud REST 2.0, shaped after twg's `bitbucket repo|pull-requests|pipeline|search`.
 
 use crate::client::Client;
 use crate::markup::quote;
 use crate::time;
 use anyhow::{Result, anyhow, bail};
+use clap::ValueEnum;
 use serde_json::{Value, json};
 
 fn enc(s: &str) -> String {
@@ -121,6 +122,96 @@ pub fn repo_get(c: &Client, path: &str) -> Result<Value> {
         .map(|l| json!({"name": l["name"], "href": l["href"]}))
         .collect();
     Ok(o)
+}
+
+pub enum RepoFile {
+    Dir(Value),
+    Raw(String),
+}
+
+fn repo_src_path(repo_path: &str, git_ref: &str, file_path: &str) -> String {
+    let clean = file_path.trim().trim_start_matches('/');
+    let clean = if clean == "." { "" } else { clean };
+    let rel: Vec<String> = clean.split('/').filter(|s| !s.is_empty()).map(enc).collect();
+    if rel.is_empty() {
+        format!("{repo_path}/src/{}/", enc(git_ref))
+    } else {
+        format!("{repo_path}/src/{}/{}", enc(git_ref), rel.join("/"))
+    }
+}
+
+fn dir_entry_summary(e: &Value) -> Value {
+    let kind = match e["type"].as_str() {
+        Some("commit_directory") => "dir",
+        Some("commit_file") => "file",
+        Some(other) => other,
+        None => "",
+    };
+    json!({
+        "path": e["path"],
+        "type": kind,
+        "size": e["size"],
+    })
+}
+
+/// `bitbucket repo file`
+pub fn repo_file(c: &Client, path: &str, file_path: &str, ref_name: Option<&str>) -> Result<RepoFile> {
+    let git_ref = match ref_name {
+        Some(r) => r.to_string(),
+        None => {
+            let meta = c.get(path, &[])?;
+            meta["mainbranch"]["name"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("HEAD")
+                .to_string()
+        }
+    };
+    let mut v = c.get(&repo_src_path(path, &git_ref, file_path), &[])?;
+    if v["values"].is_array() {
+        let mut items = Vec::new();
+        loop {
+            items.extend(v["values"].as_array().into_iter().flatten().cloned());
+            match v["next"].as_str() {
+                Some(next) if items.len() < 500 => v = c.get(next, &[])?,
+                _ => break,
+            }
+        }
+        items.truncate(500);
+        return Ok(RepoFile::Dir(items.iter().map(dir_entry_summary).collect()));
+    }
+    let text = match v {
+        Value::String(s) => s,
+        Value::Null => String::new(),
+        other => serde_json::to_string_pretty(&other)?,
+    };
+    Ok(RepoFile::Raw(text))
+}
+
+fn branch_summary(b: &Value) -> Value {
+    let hash = b["target"]["hash"].as_str().unwrap_or_default();
+    let short: String = hash.chars().take(12).collect();
+    json!({
+        "name": b["name"],
+        "commit": short,
+        "date": b["target"]["date"],
+        "author": b["target"]["author"]["user"]["display_name"]
+            .as_str()
+            .or(b["target"]["author"]["raw"].as_str()),
+        "message": b["target"]["message"].as_str().map(|m| m.lines().next().unwrap_or_default()),
+        "url": b["links"]["html"]["href"],
+    })
+}
+
+/// `bitbucket repo branches`
+pub fn repo_branches(c: &Client, path: &str, query: Option<&str>, limit: usize) -> Result<Value> {
+    let filter = query.map(|q| format!("name ~ {}", quote(q)));
+    let mut params = Vec::new();
+    if let Some(f) = &filter {
+        params.push(("q", f.as_str()));
+    }
+    let items = paginate(c, &format!("{path}/refs/branches"), &params, limit)?;
+    Ok(items.iter().map(branch_summary).collect())
 }
 
 // --- pull requests -----------------------------------------------------------
@@ -330,6 +421,256 @@ pub fn pr_comment(c: &Client, path: &str, id: u64, n: NewComment) -> Result<Valu
     Ok(json!({"id": v["id"], "pull_request": id, "url": v["links"]["html"]["href"]}))
 }
 
+/// `bitbucket pull-requests diff`
+pub fn pr_diff(c: &Client, path: &str, id: u64) -> Result<String> {
+    match c.get(&format!("{path}/pullrequests/{id}/diff"), &[])? {
+        Value::String(s) => Ok(s),
+        Value::Null => Ok(String::new()),
+        other => Ok(other.to_string()),
+    }
+}
+
+fn activity_event(item: &Value) -> (&str, &Value) {
+    for kind in ["comment", "approval", "update", "changes_requested"] {
+        if item[kind].is_object() {
+            return (kind, &item[kind]);
+        }
+    }
+    if let Some(obj) = item.as_object() {
+        for (k, v) in obj {
+            if k != "pull_request" && v.is_object() {
+                return (k.as_str(), v);
+            }
+        }
+    }
+    ("unknown", item)
+}
+
+fn activity_summary(item: &Value) -> Value {
+    let (kind, ev) = activity_event(item);
+    let actor = match kind {
+        "update" => ev["author"]["display_name"].as_str().or(ev["user"]["display_name"].as_str()),
+        _ => ev["user"]["display_name"].as_str().or(ev["author"]["display_name"].as_str()),
+    };
+    let timestamp = ev["created_on"].as_str().or(ev["date"].as_str());
+    let details = match kind {
+        "comment" => {
+            let body = if ev["deleted"] == true {
+                "(deleted)"
+            } else {
+                ev["content"]["raw"].as_str().unwrap_or_default()
+            };
+            let loc = ev["inline"]["path"]
+                .as_str()
+                .map(|p| match ev["inline"]["to"].as_u64() {
+                    Some(line) => format!("[{p}:{line}] "),
+                    None => format!("[{p}] "),
+                })
+                .unwrap_or_default();
+            match ev["id"].as_u64() {
+                Some(id) => format!("#{id} {loc}{body}"),
+                None => format!("{loc}{body}"),
+            }
+        }
+        "approval" => "approved".to_string(),
+        "changes_requested" => "requested changes".to_string(),
+        "update" => {
+            let state = ev["state"].as_str().unwrap_or_default();
+            let mut parts = Vec::new();
+            if !state.is_empty() {
+                parts.push(state.to_string());
+            }
+            if let Some(changes) = ev["changes"].as_object().filter(|m| !m.is_empty()) {
+                let keys: Vec<&str> = changes.keys().map(String::as_str).collect();
+                parts.push(format!("changed: {}", keys.join(", ")));
+            }
+            if let Some(reason) = ev["reason"].as_str().filter(|s| !s.is_empty()) {
+                parts.push(format!("reason: {reason}"));
+            }
+            if parts.is_empty() {
+                ev["title"].as_str().unwrap_or("updated").to_string()
+            } else {
+                parts.join("; ")
+            }
+        }
+        _ => ev.to_string(),
+    };
+    json!({
+        "type": kind,
+        "actor": actor,
+        "timestamp": timestamp,
+        "details": details,
+    })
+}
+
+/// `bitbucket pull-requests activity`
+pub fn pr_activity(c: &Client, path: &str, id: u64, event_type: Option<&str>, limit: usize) -> Result<Value> {
+    let fetch = if event_type.is_some() { limit.max(100) } else { limit };
+    let items = paginate(c, &format!("{path}/pullrequests/{id}/activity"), &[], fetch)?;
+    Ok(items
+        .iter()
+        .filter(|item| {
+            let (kind, _) = activity_event(item);
+            event_type.is_none_or(|want| want.eq_ignore_ascii_case(kind))
+        })
+        .take(limit)
+        .map(activity_summary)
+        .collect())
+}
+
+fn task_summary(t: &Value) -> Value {
+    json!({
+        "id": t["id"],
+        "state": t["state"],
+        "body": t["content"]["raw"],
+        "creator": t["creator"]["display_name"],
+        "comment_id": t["comment"]["id"],
+        "created": t["created_on"],
+        "updated": t["updated_on"],
+    })
+}
+
+/// `bitbucket pull-requests tasks`
+pub fn pr_tasks(c: &Client, path: &str, id: u64) -> Result<Value> {
+    let items = paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], 500)?;
+    Ok(items.iter().map(task_summary).collect())
+}
+
+fn participant_summary(id: u64, v: &Value) -> Value {
+    json!({
+        "pull_request": id,
+        "approved": v["approved"],
+        "state": v["state"],
+        "user": v["user"]["display_name"],
+    })
+}
+
+/// `bitbucket pull-requests approve`
+pub fn pr_approve(c: &Client, path: &str, id: u64) -> Result<Value> {
+    let v = c.request("POST", &format!("{path}/pullrequests/{id}/approve"), &[], None)?;
+    Ok(participant_summary(id, &v))
+}
+
+/// `bitbucket pull-requests unapprove`
+pub fn pr_unapprove(c: &Client, path: &str, id: u64) -> Result<Value> {
+    c.delete(&format!("{path}/pullrequests/{id}/approve"), &[])?;
+    Ok(json!({
+        "pull_request": id,
+        "approved": false,
+    }))
+}
+
+/// `bitbucket pull-requests request-changes`
+pub fn pr_request_changes(c: &Client, path: &str, id: u64) -> Result<Value> {
+    let v = c.request("POST", &format!("{path}/pullrequests/{id}/request-changes"), &[], None)?;
+    Ok(participant_summary(id, &v))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum MergeStrategy {
+    #[value(name = "merge_commit")]
+    MergeCommit,
+    #[value(name = "squash")]
+    Squash,
+    #[value(name = "fast_forward")]
+    FastForward,
+}
+
+impl MergeStrategy {
+    fn as_api(self) -> &'static str {
+        match self {
+            MergeStrategy::MergeCommit => "merge_commit",
+            MergeStrategy::Squash => "squash",
+            MergeStrategy::FastForward => "fast_forward",
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct PrMerge<'a> {
+    pub strategy: Option<MergeStrategy>,
+    pub close_source_branch: bool,
+    pub message: Option<&'a str>,
+}
+
+fn pr_merge_body(o: &PrMerge) -> Value {
+    let mut req = json!({});
+    if let Some(s) = o.strategy {
+        req["merge_strategy"] = s.as_api().into();
+    }
+    if o.close_source_branch {
+        req["close_source_branch"] = true.into();
+    }
+    if let Some(m) = o.message {
+        req["message"] = m.into();
+    }
+    req
+}
+
+/// `bitbucket pull-requests merge`
+pub fn pr_merge(c: &Client, path: &str, id: u64, o: &PrMerge) -> Result<Value> {
+    let req = pr_merge_body(o);
+    Ok(pr_summary(&c.post(&format!("{path}/pullrequests/{id}/merge"), &req)?))
+}
+
+/// `bitbucket pull-requests decline`
+pub fn pr_decline(c: &Client, path: &str, id: u64) -> Result<Value> {
+    let v = c.request("POST", &format!("{path}/pullrequests/{id}/decline"), &[], None)?;
+    Ok(pr_summary(&v))
+}
+
+// --- search ------------------------------------------------------------------
+
+fn code_search_query(query: &str, repo: Option<&str>) -> String {
+    match repo.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(r) => {
+            let slug = r.trim_end_matches('/').rsplit('/').next().unwrap_or(r).trim_end_matches(".git");
+            format!("{query} repo:{slug}")
+        }
+        None => query.to_string(),
+    }
+}
+
+fn code_search_summary(r: &Value) -> Value {
+    let self_href = r["file"]["links"]["self"]["href"].as_str();
+    let repo = self_href.and_then(|u| {
+        let rest = u.split("/repositories/").nth(1)?;
+        let mut parts = rest.split('/');
+        Some(format!("{}/{}", parts.next()?, parts.next()?))
+    });
+    let snippet = r["content_matches"]
+        .as_array()
+        .and_then(|ms| ms.first())
+        .and_then(|m| m["lines"].as_array())
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|l| {
+                    let text: String = l["segments"].as_array()?.iter().filter_map(|s| s["text"].as_str()).collect();
+                    Some(match l["line"].as_u64() {
+                        Some(n) => format!("{n}: {}", text.trim_end()),
+                        None => text.trim_end().to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+    json!({
+        "repo": repo,
+        "path": r["file"]["path"],
+        "matches": r["content_match_count"],
+        "snippet": snippet,
+        "url": self_href,
+    })
+}
+
+/// `bitbucket search code`
+pub fn search_code(c: &Client, ws: &str, query: &str, repo: Option<&str>, limit: usize) -> Result<Value> {
+    let q = code_search_query(query, repo);
+    let items = paginate(c, &format!("/workspaces/{}/search/code", enc(ws)), &[("search_query", &q)], limit)?;
+    Ok(items.iter().map(code_search_summary).collect())
+}
+
 // --- pipelines ---------------------------------------------------------------
 
 fn state_of(p: &Value) -> (String, Option<String>) {
@@ -480,5 +821,294 @@ mod tests {
             r#"(author.nickname = "jane" OR author.display_name ~ "jane") AND source.branch.name = "feat/x" AND created_on >= 2026-01-01"#
         );
         assert_eq!(pr_filter(&PrQuery::default()).unwrap(), None);
+    }
+
+    #[test]
+    fn src_paths_and_summaries() {
+        assert_eq!(repo_src_path("/repositories/acme/api", "main", "src/lib.rs"), "/repositories/acme/api/src/main/src/lib.rs");
+        assert_eq!(repo_src_path("/repositories/acme/api", "feat/x", "/README.md"), "/repositories/acme/api/src/feat%2Fx/README.md");
+        assert_eq!(repo_src_path("/repositories/acme/api", "HEAD", "."), "/repositories/acme/api/src/HEAD/");
+
+        let dir = dir_entry_summary(&json!({"path": "src", "type": "commit_directory"}));
+        assert_eq!(dir["type"], "dir");
+        let file = dir_entry_summary(&json!({"path": "src/main.rs", "type": "commit_file", "size": 42}));
+        assert_eq!(file["type"], "file");
+        assert_eq!(file["size"], 42);
+
+        let br = branch_summary(&json!({
+            "name": "main",
+            "target": {
+                "hash": "0123456789abcdef",
+                "date": "2026-01-01T00:00:00Z",
+                "author": {"user": {"display_name": "Jane"}},
+                "message": "Initial commit\n\nBody"
+            },
+            "links": {"html": {"href": "https://bitbucket.org/acme/api/branch/main"}}
+        }));
+        assert_eq!(br["name"], "main");
+        assert_eq!(br["commit"], "0123456789ab");
+        assert_eq!(br["author"], "Jane");
+        assert_eq!(br["message"], "Initial commit");
+    }
+
+    #[test]
+    fn activity_and_task_summaries() {
+        let c = activity_summary(&json!({
+            "comment": {
+                "id": 7,
+                "created_on": "2026-01-02T00:00:00Z",
+                "user": {"display_name": "Alice"},
+                "content": {"raw": "Nit here"},
+                "inline": {"path": "src/lib.rs", "to": 14}
+            }
+        }));
+        assert_eq!(c["type"], "comment");
+        assert_eq!(c["actor"], "Alice");
+        assert_eq!(c["details"], "#7 [src/lib.rs:14] Nit here");
+
+        let a = activity_summary(&json!({
+            "approval": {"date": "2026-01-03T00:00:00Z", "user": {"display_name": "Bob"}}
+        }));
+        assert_eq!(a["type"], "approval");
+        assert_eq!(a["actor"], "Bob");
+        assert_eq!(a["details"], "approved");
+
+        let u = activity_summary(&json!({
+            "update": {
+                "date": "2026-01-04T00:00:00Z",
+                "state": "MERGED",
+                "author": {"display_name": "Carol"},
+                "changes": {"status": {"old": "OPEN", "new": "MERGED"}}
+            }
+        }));
+        assert_eq!(u["type"], "update");
+        assert_eq!(u["actor"], "Carol");
+        assert_eq!(u["details"], "MERGED; changed: status");
+
+        let t = task_summary(&json!({
+            "id": 9,
+            "state": "UNRESOLVED",
+            "content": {"raw": "Add test"},
+            "creator": {"display_name": "Alice"},
+            "comment": {"id": 7},
+            "created_on": "2026-01-02T00:00:00Z",
+            "updated_on": "2026-01-02T01:00:00Z"
+        }));
+        assert_eq!(t["id"], 9);
+        assert_eq!(t["state"], "UNRESOLVED");
+        assert_eq!(t["body"], "Add test");
+        assert_eq!(t["comment_id"], 7);
+    }
+
+    #[test]
+    fn merge_body_and_code_search_helpers() {
+        let body = pr_merge_body(&PrMerge {
+            strategy: Some(MergeStrategy::Squash),
+            close_source_branch: true,
+            message: Some("Squash merge"),
+        });
+        assert_eq!(body, json!({"merge_strategy": "squash", "close_source_branch": true, "message": "Squash merge"}));
+        assert_eq!(pr_merge_body(&PrMerge::default()), json!({}));
+
+        assert_eq!(code_search_query("foo bar", None), "foo bar");
+        assert_eq!(code_search_query("foo", Some("api")), "foo repo:api");
+        assert_eq!(code_search_query("foo", Some("acme/api")), "foo repo:api");
+
+        let cs = code_search_summary(&json!({
+            "content_match_count": 1,
+            "content_matches": [{
+                "lines": [{"line": 12, "segments": [{"text": "fn ", "match": false}, {"text": "foo", "match": true}]}]
+            }],
+            "file": {
+                "path": "src/main.rs",
+                "links": {"self": {"href": "https://api.bitbucket.org/2.0/repositories/acme/api/src/abc/src/main.rs"}}
+            }
+        }));
+        assert_eq!(cs["repo"], "acme/api");
+        assert_eq!(cs["path"], "src/main.rs");
+        assert_eq!(cs["matches"], 1);
+        assert_eq!(cs["snippet"], "12: fn foo");
+    }
+
+    fn mock_server(
+        routes: Vec<(&'static str, &'static str, &'static str, u16, &'static str)>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for (want_method, want_path, want_body_substr, status, resp_body) in routes {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut raw = Vec::new();
+                let mut buf = [0u8; 4096];
+                let header_end = loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0, "unexpected EOF reading headers");
+                    raw.extend_from_slice(&buf[..n]);
+                    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break pos + 4;
+                    }
+                };
+                let headers = String::from_utf8_lossy(&raw[..header_end]);
+                let content_len = headers
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                while raw.len() < header_end + content_len {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0, "unexpected EOF reading body");
+                    raw.extend_from_slice(&buf[..n]);
+                }
+                let req = String::from_utf8_lossy(&raw);
+                let first_line = req.lines().next().unwrap_or_default();
+                let mut parts = first_line.split_whitespace();
+                let method = parts.next().unwrap_or_default();
+                let path = parts.next().unwrap_or_default();
+                assert_eq!(method, want_method, "unexpected method in request: {first_line}");
+                assert_eq!(path, want_path, "unexpected path in request: {first_line}");
+                if !want_body_substr.is_empty() {
+                    let body = &req[header_end..];
+                    assert!(body.contains(want_body_substr), "expected body containing {want_body_substr:?} in {body}");
+                }
+                let reason = match status {
+                    200 => "OK",
+                    204 => "No Content",
+                    _ => "Error",
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{resp_body}",
+                    resp_body.len()
+                );
+                stream.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[test]
+    fn pr_endpoints_roundtrip() {
+        let (base, h) = mock_server(vec![
+            ("GET", "/repositories/acme/api/pullrequests/5/diff", "", 200, "diff --git a/a b/a\n+hi\n"),
+            (
+                "GET",
+                "/repositories/acme/api/pullrequests/5/activity?pagelen=50",
+                "",
+                200,
+                r#"{"values":[{"approval":{"date":"2026-01-01","user":{"display_name":"Bob"}}},{"comment":{"id":1,"created_on":"2026-01-02","user":{"display_name":"Alice"},"content":{"raw":"hi"}}}]}"#,
+            ),
+            (
+                "GET",
+                "/repositories/acme/api/pullrequests/5/tasks?pagelen=50",
+                "",
+                200,
+                r#"{"values":[{"id":3,"state":"UNRESOLVED","content":{"raw":"Fix it"},"creator":{"display_name":"Alice"}}]}"#,
+            ),
+            (
+                "POST",
+                "/repositories/acme/api/pullrequests/5/approve",
+                "",
+                200,
+                r#"{"approved":true,"state":"approved","user":{"display_name":"Bob"}}"#,
+            ),
+            ("DELETE", "/repositories/acme/api/pullrequests/5/approve", "", 204, ""),
+            (
+                "POST",
+                "/repositories/acme/api/pullrequests/5/request-changes",
+                "",
+                200,
+                r#"{"approved":false,"state":"changes_requested","user":{"display_name":"Bob"}}"#,
+            ),
+            (
+                "POST",
+                "/repositories/acme/api/pullrequests/5/merge",
+                r#""merge_strategy":"fast_forward""#,
+                200,
+                r#"{"id":5,"title":"T","state":"MERGED"}"#,
+            ),
+            (
+                "POST",
+                "/repositories/acme/api/pullrequests/5/decline",
+                "",
+                200,
+                r#"{"id":5,"title":"T","state":"DECLINED"}"#,
+            ),
+        ]);
+        let c = Client::new(base, "u@e.com", "tok", Some(5000));
+        let p = "/repositories/acme/api";
+
+        assert_eq!(pr_diff(&c, p, 5).unwrap(), "diff --git a/a b/a\n+hi\n");
+        let act = pr_activity(&c, p, 5, Some("comment"), 10).unwrap();
+        assert_eq!(act.as_array().unwrap().len(), 1);
+        assert_eq!(act[0]["type"], "comment");
+
+        let tasks = pr_tasks(&c, p, 5).unwrap();
+        assert_eq!(tasks[0]["id"], 3);
+        assert_eq!(tasks[0]["state"], "UNRESOLVED");
+
+        assert_eq!(pr_approve(&c, p, 5).unwrap()["approved"], true);
+        assert_eq!(pr_unapprove(&c, p, 5).unwrap()["approved"], false);
+        assert_eq!(pr_request_changes(&c, p, 5).unwrap()["state"], "changes_requested");
+
+        let merged = pr_merge(&c, p, 5, &PrMerge { strategy: Some(MergeStrategy::FastForward), ..Default::default() }).unwrap();
+        assert_eq!(merged["state"], "MERGED");
+        assert_eq!(pr_decline(&c, p, 5).unwrap()["state"], "DECLINED");
+        h.join().unwrap();
+    }
+
+    #[test]
+    fn repo_and_search_endpoints_roundtrip() {
+        let (base, h) = mock_server(vec![
+            ("GET", "/repositories/acme/api", "", 200, r#"{"mainbranch":{"name":"develop"}}"#),
+            ("GET", "/repositories/acme/api/src/develop/README.md", "", 200, "# Hello\n"),
+            ("GET", "/repositories/acme/api", "", 200, r#"{"mainbranch":null}"#),
+            (
+                "GET",
+                "/repositories/acme/api/src/HEAD/src",
+                "",
+                200,
+                r#"{"values":[{"path":"src/main.rs","type":"commit_file","size":10}]}"#,
+            ),
+            (
+                "GET",
+                "/repositories/acme/api/refs/branches?q=name+%7E+%22feat%22&pagelen=10",
+                "",
+                200,
+                r#"{"values":[{"name":"feat/x","target":{"hash":"abcdef1234567890"}}]}"#,
+            ),
+            (
+                "GET",
+                "/workspaces/acme/search/code?search_query=needle+repo%3Aapi&pagelen=10",
+                "",
+                200,
+                r#"{"values":[{"content_match_count":2,"file":{"path":"lib.rs"}}]}"#,
+            ),
+        ]);
+        let c = Client::new(base, "u@e.com", "tok", Some(5000));
+        let p = "/repositories/acme/api";
+
+        match repo_file(&c, p, "README.md", None).unwrap() {
+            RepoFile::Raw(s) => assert_eq!(s, "# Hello\n"),
+            RepoFile::Dir(_) => panic!("expected raw file"),
+        }
+        match repo_file(&c, p, "src", None).unwrap() {
+            RepoFile::Dir(v) => {
+                assert_eq!(v[0]["path"], "src/main.rs");
+                assert_eq!(v[0]["type"], "file");
+            }
+            RepoFile::Raw(_) => panic!("expected directory listing"),
+        }
+        let branches = repo_branches(&c, p, Some("feat"), 10).unwrap();
+        assert_eq!(branches[0]["name"], "feat/x");
+        assert_eq!(branches[0]["commit"], "abcdef123456");
+
+        let hits = search_code(&c, "acme", "needle", Some("api"), 10).unwrap();
+        assert_eq!(hits[0]["path"], "lib.rs");
+        assert_eq!(hits[0]["matches"], 2);
+        h.join().unwrap();
     }
 }
