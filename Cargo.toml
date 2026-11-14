@@ -1,0 +1,20 @@
+[package]
+name = "atlx"
+version = "0.1.0"
+edition = "2024"
+description = "Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud, compatible with twg's command syntax"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pedrosanzmtz/atlx"
+readme = "README.md"
+keywords = ["jira", "confluence", "bitbucket", "atlassian", "cli"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+toml = "1.2.1"
+ureq = { version = "2", features = ["json"] }
+urlencoding = "2.1.3"
