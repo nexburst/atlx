@@ -12,12 +12,13 @@ mod confluence;
 mod doctor;
 mod jira;
 mod search;
+mod shape;
 mod user;
 mod util;
 
 use crate::client::{ApiError, exit};
 use crate::config::{self, Config};
-use crate::output::{self, Format};
+use crate::output::Format;
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use serde_json::Value;
@@ -45,6 +46,8 @@ pub struct Cli {
     /// Saved profile to use; `default` means the saved default [env: ATLX_PROFILE]
     #[arg(short, long, global = true, value_name = "NAME")]
     profile: Option<String>,
+    #[command(flatten)]
+    shaping: shape::OutputArgs,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -117,8 +120,14 @@ enum Cmd {
 
 pub(crate) enum Out {
     Data(Value),
-    /// Printed verbatim regardless of format (`--body-only`).
+    /// Printed verbatim regardless of format.
     Raw(String),
+    /// `--body-only`: `body` is printed verbatim, or with `--output-file`
+    /// written to the file while the rest of `full` is printed.
+    Body {
+        body: String,
+        full: Value,
+    },
     /// Print structured output, then exit with a non-zero status code.
     Exit(Value, i32),
 }
@@ -141,6 +150,14 @@ pub fn main() {
     } else {
         Format::Json
     });
+    let path = command_path(&matches);
+    let shaping = match shape::Shaping::new(cli.shaping, fmt, &path) {
+        Ok(s) => s,
+        Err(e) => {
+            let plain = shape::Shaping::plain(fmt, &path);
+            std::process::exit(report_error(&e, fmt, &path, &plain));
+        }
+    };
     let globals = Globals {
         site: cli.site,
         user: cli.user,
@@ -148,23 +165,16 @@ pub fn main() {
         profile: cli.profile,
     };
     let code = match run(&globals, cli.cmd) {
-        Ok(Out::Data(v)) => {
-            output::print(&v, fmt);
-            if util::take_partial() {
+        Ok(Out::Exit(v, code)) => shaping.emit(Out::Exit(v, code), code),
+        Ok(out) => {
+            let code = if util::take_partial() {
                 exit::PARTIAL
             } else {
                 exit::OK
-            }
+            };
+            shaping.emit(out, code)
         }
-        Ok(Out::Raw(s)) => {
-            println!("{s}");
-            exit::OK
-        }
-        Ok(Out::Exit(v, code)) => {
-            output::print(&v, fmt);
-            code
-        }
-        Err(e) => report_error(&e, fmt, &command_path(&matches)),
+        Err(e) => report_error(&e, fmt, &path, &shaping),
     };
     std::process::exit(code);
 }
@@ -194,16 +204,12 @@ fn command_path(m: &clap::ArgMatches) -> String {
 /// Print an error the way twg does: in JSON modes the `{"ok": false,
 /// "error": ...}` envelope goes to stdout, and a readable report always goes
 /// to stderr. Returns the exit code.
-fn report_error(e: &anyhow::Error, fmt: Format, path: &str) -> i32 {
+fn report_error(e: &anyhow::Error, fmt: Format, path: &str, shaping: &shape::Shaping) -> i32 {
     let api = ApiError::from_anyhow(e);
-    match fmt {
-        Format::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&api.envelope()).unwrap_or_default()
-        ),
-        Format::Jsonl => println!("{}", api.envelope()),
-        Format::Text => eprintln!("✗ Failed {path}."),
+    if fmt == Format::Text {
+        eprintln!("✗ Failed {path}.");
     }
+    shaping.emit_error(&api.envelope());
     eprint!("{}", api.report());
     api.exit_code()
 }
@@ -331,6 +337,13 @@ mod tests {
             "atlx doctor",
             "atlx doctor --strict -o json",
             "atlx setup bitbucket --workspace acme",
+            "atlx jira workitem get PROJ-1 -o json --select data.key,data.status.name --output-file /tmp/x.json",
+            "atlx jira workitem query --jql 'project = X' -o json --select @compact",
+            "atlx jira workitem query --jql 'project = X' -o json --output-summary --agent-fields @compact",
+            "atlx jira workitem get PROJ-1 -o json --output-summary stats --output-file out.json",
+            "atlx jira workitem get PROJ-1 -o jsonl --output-summary inline --api-version v2",
+            "atlx confluence content get 12345 --detail full --format html --body-only --output-file ./page.html -o json",
+            "atlx --select key --output-summary none jira workitem get PROJ-1",
             "atlx setup bitbucket --workspace acme --token-cmd 'pass show bb' -p work",
             "atlx setup default-site acme --profile work",
             "atlx -p work jira workitem get PROJ-1",

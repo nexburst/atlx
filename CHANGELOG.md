@@ -11,6 +11,12 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- twg's global output controls: `--select` (dot-path projection with
+  `@compact`, `@evidence` and `@rows` presets), `--output-file`,
+  `--output-summary [none|stats|auto|inline]` with its YAML envelope,
+  `--agent-fields`, and `--api-version v2`. `confluence content get
+  --body-only --output-file` keeps the snapshot token on stdout (#19).
+
 - `atlx completion script <bash|zsh|fish|powershell|elvish>` prints a shell
   completion script, using the same command shape as twg (#35).
 - Man pages generated from the command tree, shipped in release archives (#35).

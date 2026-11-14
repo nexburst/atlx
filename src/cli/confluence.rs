@@ -317,7 +317,8 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         bail!("--body-only takes exactly one ID")
                     };
                     let v = confluence::get(c, one, &opts)?;
-                    return Ok(Out::Raw(v["body"].as_str().unwrap_or_default().to_string()));
+                    let body = v["body"].as_str().unwrap_or_default().to_string();
+                    return Ok(Out::Body { body, full: v });
                 }
                 batch(inputs, strict, |r| confluence::get(c, r, &opts))?
             }
