@@ -1,0 +1,80 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "codeBlock",
+      "content": [
+        {
+          "type": "text",
+          "text": "fn main() {\n    println!(\"hi\");\n}"
+        }
+      ],
+      "attrs": {
+        "language": "rust"
+      }
+    },
+    {
+      "type": "codeBlock",
+      "content": [
+        {
+          "type": "text",
+          "text": "```\nnested fence\n```"
+        }
+      ],
+      "attrs": {
+        "language": "md"
+      }
+    },
+    {
+      "type": "codeBlock",
+      "content": [
+        {
+          "type": "text",
+          "text": "no language"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Inline "
+        },
+        {
+          "type": "text",
+          "text": "code with ` tick",
+          "marks": [
+            {
+              "type": "code"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": " and a "
+        },
+        {
+          "type": "text",
+          "text": "code link",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": {
+                "href": "https://example.com"
+              }
+            },
+            {
+              "type": "code"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    }
+  ]
+}

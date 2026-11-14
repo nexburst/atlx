@@ -1,0 +1,11 @@
+<h1>Runbook</h1>
+<p>Owner: <ac:link><ri:user ri:account-id="557058:abc"/></ac:link> &mdash; see <ac:link><ri:page ri:content-title="On-call guide"/></ac:link>.</p>
+<ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>Read this <strong>first</strong>.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">bash</ac:parameter><ac:plain-text-body><![CDATA[kubectl get pods
+echo "a < b"]]></ac:plain-text-body></ac:structured-macro>
+<ac:task-list>
+<ac:task><ac:task-id>1</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>Page the owner</ac:task-body></ac:task>
+<ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Write the <em>postmortem</em></ac:task-body></ac:task>
+</ac:task-list>
+<p><ac:image ac:alt="graph"><ri:url ri:value="https://example.com/graph.png"/></ac:image></p>
+<p>Status: <ac:structured-macro ac:name="status"><ac:parameter ac:name="title">Green</ac:parameter><ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro> tracked in <ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">OPS-12</ac:parameter></ac:structured-macro></p>

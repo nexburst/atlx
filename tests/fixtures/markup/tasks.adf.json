@@ -1,0 +1,83 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "taskList",
+      "content": [
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "task-2",
+            "state": "TODO"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "write the parser"
+            }
+          ]
+        },
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "task-3",
+            "state": "DONE"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "add "
+            },
+            {
+              "type": "text",
+              "text": "tests",
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "taskList",
+          "content": [
+            {
+              "type": "taskItem",
+              "attrs": {
+                "localId": "task-5",
+                "state": "TODO"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "nested task"
+                }
+              ]
+            }
+          ],
+          "attrs": {
+            "localId": "task-4"
+          }
+        },
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "task-6",
+            "state": "TODO"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "ship it"
+            }
+          ]
+        }
+      ],
+      "attrs": {
+        "localId": "task-1"
+      }
+    }
+  ]
+}
