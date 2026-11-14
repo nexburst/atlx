@@ -59,12 +59,13 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `-u, --user` | ✅ | |
 | `--timeout-ms` | ✅ | |
 | `-p, --profile` | ✅ | named profiles ([#20](https://github.com/pedrosanzmtz/atlx/issues/20)) |
-| `--select`, `--agent-fields`, `--output-summary` | 📋 | [#19](https://github.com/pedrosanzmtz/atlx/issues/19) |
-| `--api-version` | 📋 | [#21](https://github.com/pedrosanzmtz/atlx/issues/21) |
+| `--select`, `--agent-fields`, `--output-summary` | ✅ | output controls ([#19](https://github.com/pedrosanzmtz/atlx/issues/19)); see the README |
+| `--api-version` | ✅ | `v2` is accepted and other versions are rejected ([#19](https://github.com/pedrosanzmtz/atlx/issues/19)) |
+| `--output-file` | ➕ | twg 1.4.4 lists no such global flag; atlx writes stdout to a file |
 | `--usage-counts` | ⛔ | usage counts come from the GraphQL gateway |
 | `--output-shape` | ⛔ | the shapes reshape Teamwork Graph relationships |
 | `{"data": ...}` JSON envelope and key names | 📋 | atlx prints unwrapped payloads today ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
-| Exit codes and JSON errors on stderr | ✅ | [#17](https://github.com/pedrosanzmtz/atlx/issues/17) |
+| Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/pedrosanzmtz/atlx/issues/17) |
 | No `--yes` on merge, decline and content delete | 📋 | atlx still requires `--yes` ([#18](https://github.com/pedrosanzmtz/atlx/issues/18)) |
 | API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
 

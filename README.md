@@ -248,9 +248,9 @@ confirmation behavior. [COMPAT.md](COMPAT.md) tracks how far along that is,
 command by command. Today these differences remain:
 
 - **JSON payloads are not wrapped yet**: `atlx` emits unwrapped JSON
-  objects/arrays (and `{"items": [...], "summary": {...}}` for multi-ID batches). Switching to
-  `twg`'s `{"data": ...}` envelope and key names is planned in
-  [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
+  objects/arrays (and `{"items": [...], "summary": {...}}` for multi-ID
+  batches). Switching to `twg`'s `{"data": ...}` envelope and key names is
+  planned in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 - **Destructive commands still need `--yes`**: `twg` has no such flag on
   merge, decline or content delete.
   [#18](https://github.com/pedrosanzmtz/atlx/issues/18) removes the

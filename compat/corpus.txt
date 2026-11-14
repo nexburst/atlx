@@ -14,10 +14,12 @@ ok jira workitem get PROJ-1 --output jsonl --site acme
 ok jira workitem get PROJ-1 -s acme.atlassian.net -u someone@example.com --timeout-ms 20000
 ok jira workitem get PROJ-1 -p work
 ok jira workitem query --jql 'project = PROJ' --profile default -o json
-gap #19 jira workitem get PROJ-1 -o json --select data.key,data.status
-gap #19 jira workitem query --jql 'project = PROJ' -o json --agent-fields data.items.key
-gap #19 jira workitem query --jql 'project = PROJ' -o json --output-summary stats
-gap #21 jira workitem get PROJ-1 -o json --api-version v2
+ok jira workitem get PROJ-1 -o json --select data.key,data.status
+ok jira workitem query --jql 'project = PROJ' -o json --agent-fields data.items.key
+ok jira workitem query --jql 'project = PROJ' -o json --output-summary stats
+ok jira workitem query --jql 'project = PROJ' -o json --output-summary --agent-fields data.items.key,data.items.status
+ok confluence content get 12345 -o json --select @compact
+ok jira workitem get PROJ-1 -o json --api-version v2
 
 # --- accounts and setup ---
 ok whoami
