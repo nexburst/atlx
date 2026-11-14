@@ -1473,14 +1473,15 @@ fn read_prompt_line(label: &str, secret: bool) -> Result<String> {
     }
     eprint!("{label}: ");
     std::io::stderr().flush()?;
-    let _guard = if secret {
-        Some(EchoGuard::disable()?)
-    } else {
-        None
-    };
     let mut line = String::new();
-    std::io::stdin().read_line(&mut line)?;
-    drop(_guard);
+    {
+        let _guard = if secret {
+            Some(EchoGuard::disable()?)
+        } else {
+            None
+        };
+        std::io::stdin().read_line(&mut line)?;
+    }
     let line = line.trim().to_string();
     if line.is_empty() {
         bail!("{label} is required");
