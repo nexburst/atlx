@@ -11,6 +11,14 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Bitbucket pull request review loop (#31): `comment create --reply-to
+  --pending` and inline anchors (`--path` with `--line`, `--from-line` or a
+  `--start-line/--end-line` or `--start-from-line/--end-from-line` range);
+  `comment query|get|update|delete|resolve|reopen`; `task
+  create|get|update|delete|resolve|reopen`; `diffstat`, `commits`, `patch`;
+  and `diff-line`, which finds diff lines by text and gives the line numbers
+  an inline comment needs. Comment and task `delete` need `--yes`, as in twg.
+
 - twg's global output controls: `--select` (dot-path projection with
   `@compact`, `@evidence` and `@rows` presets), `--output-file`,
   `--output-summary [none|stats|auto|inline]` with its YAML envelope,

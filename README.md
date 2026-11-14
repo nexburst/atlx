@@ -187,6 +187,7 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
 | `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |
 | `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |
+| `bb pull-requests comment create\|query\|get\|update\|delete\|resolve\|reopen`, `task create\|get\|update\|delete\|resolve\|reopen`, `diffstat\|commits\|patch\|diff-line` | `--reply-to`, `--pending`, inline `--path` with `--line`/`--from-line` or `--start-line --end-line`/`--start-from-line --end-from-line`; `diff-line --text [--path]` finds the line numbers to comment on; comment and task `delete` need `--yes`, as in twg |
 | `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `merge --pull-request`, `--merge-strategy merge_commit\|squash\|fast_forward`, `--merge-message`, `--close-source-branch`/`--keep-source-branch`; no confirmation prompt |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
 | `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
@@ -292,7 +293,8 @@ print an envelope:
   get --comments --diff --statuses` adds `_comments`, `_diffstat` and
   `_statuses`, `pipeline query` adds `_repo`, and `pipeline get --logs`
   adds `log`, `log_total_lines` and `log_truncated` to each step. Batches are
-  `{workspace, repository, items, summary, partial}`.
+  `{workspace, repository, items, summary, partial}`. `pull-requests
+  diff-line` lists `{path, type, line, fromLine, text, hunk}` for each match.
 - `-o jsonl` prints one line per element of the main collection
   (`data.issues`, `data.items`, a list `data`, ...), each with a `_twg`
   locator `{command, resourceType, collection, index}`.
