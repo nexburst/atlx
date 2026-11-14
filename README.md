@@ -5,16 +5,20 @@ A community alternative to Atlassian's [`twg`](https://github.com/atlassian/twg-
 built only on the public REST APIs: no Teamwork Graph, Rovo credits or early-access
 program needed, just an API token.
 
-**Same commands and flags as twg.** Anything you (or your agent's skills) run with
-`twg` for Jira, Confluence or Bitbucket works the same way with `atlx`:
+**Follows twg's command tree.** atlx uses twg's command paths and flag names for
+Jira, Confluence and Bitbucket, and the goal is that any twg invocation for those
+products works unchanged with `atlx`:
 
 ```sh
 twg  jira workitem get PROJ-1 --comments -o json
 atlx jira workitem get PROJ-1 --comments -o json
 ```
 
+Coverage is not complete yet. [COMPAT.md](COMPAT.md) lists every twg 1.4.4
+command with its status in atlx, and CI checks it against the parser.
+
 Global flags match too: `-o/--output text|json|jsonl`, `-s/--site` (prefix like
-`acme` or a hostname), `-u/--user`, `--timeout-ms`. When stdout is piped, atlx
+`acme` or a hostname), `-u/--user`, `-p/--profile`, `--timeout-ms`. When stdout is piped, atlx
 defaults to JSON.
 
 ## Install
@@ -200,19 +204,26 @@ reported inline (`{"error": ...}`) so the other results still come through.
 
 ## Compatibility with twg
 
-`atlx` mirrors `twg`'s command tree, flags and `-o text|json|jsonl` output modes
-for Jira, Confluence and Bitbucket Cloud, with three intentional differences:
+The target is for `atlx` to behave exactly like `twg` for Jira, Confluence and
+Bitbucket Cloud: the same command names, flags, output envelope and
+confirmation behavior. [COMPAT.md](COMPAT.md) tracks how far along that is,
+command by command. Today these differences remain:
 
-- **Direct JSON payloads**: `atlx` emits unwrapped JSON objects/arrays (and
-  `{"items": [...], "summary": {...}}` for multi-ID batches) rather than `twg`'s
-  `{"data": ...}` response envelope.
+- **JSON payloads are not wrapped yet**: `atlx` emits unwrapped JSON
+  objects/arrays (and `{"items": [...], "summary": {...}}` for multi-ID batches). Switching to
+  `twg`'s `{"data": ...}` envelope and key names is planned in
+  [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
+- **Destructive commands still need `--yes`**: `twg` has no such flag on
+  merge, decline or content delete.
+  [#18](https://github.com/pedrosanzmtz/atlx/issues/18) removes the
+  requirement (`--yes` stays accepted).
 - **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
   with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
   environment variables) instead of `twg`'s OAuth flow.
 - **No Teamwork Graph / Rovo commands**: `twg` commands backed by Atlassian's
   private graph/Rovo APIs (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
   are intentionally excluded; `atlx` uses only the public REST APIs (with
-  `atlx search` as a cross-product alternative).
+  `atlx search` as a cross-product alternative). COMPAT.md marks these ⛔.
 
 ## Errors and exit codes
 

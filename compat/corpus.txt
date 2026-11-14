@@ -1,0 +1,213 @@
+# twg-style invocations, checked by tests/twg_compat.rs against atlx's parser.
+#
+# Format: one invocation per line, without the leading program name.
+#   ok <args>             must parse in atlx today
+#   gap #<issue> <args>   must fail to parse until that issue lands; the PR
+#                         that fixes it flips the tag to ok
+# Every flag on a line must exist for that command in compat/twg-1.4.4.txt.
+# Lines are written for this repo with placeholders (PROJ-1, 12345, ENG, acme,
+# api); never copy examples from twg's help or skills. Quotes: '...' or "...".
+
+# --- global flags ---
+ok jira workitem get PROJ-1 -o json
+ok jira workitem get PROJ-1 --output jsonl --site acme
+ok jira workitem get PROJ-1 -s acme.atlassian.net -u someone@example.com --timeout-ms 20000
+ok jira workitem get PROJ-1 -p work
+ok jira workitem query --jql 'project = PROJ' --profile default -o json
+gap #19 jira workitem get PROJ-1 -o json --select data.key,data.status
+gap #19 jira workitem query --jql 'project = PROJ' -o json --agent-fields data.items.key
+gap #19 jira workitem query --jql 'project = PROJ' -o json --output-summary stats
+gap #21 jira workitem get PROJ-1 -o json --api-version v2
+
+# --- accounts and setup ---
+ok whoami
+ok logout
+ok doctor
+ok login --no-verify
+ok login --new-profile work --force
+ok auth profile list
+ok auth profile default work
+ok auth profile rename work acme-work
+ok auth profile migrate --yes
+ok setup bitbucket --force
+ok setup bb
+ok setup default-site
+
+# --- jira workitem ---
+ok jira workitem get PROJ-1
+ok jira workitem get PROJ-1 PROJ-2 PROJ-3 --strict
+ok jira workitem get --id PROJ-1 --id PROJ-2
+ok jira workitem get --issue-id PROJ-1 --comments
+ok jira workitem get --key PROJ-1 --remote-links
+ok jira workitem get PROJ-1 --full
+ok jira workitem get PROJ-1 --fields summary,status,assignee
+ok jira workitem get PROJ-1 --field customfield_10010 --field customfield_10020
+gap #18 jira workitem get PROJ-1 PROJ-2 --batch-concurrency 4
+ok jira workitem search 'login timeout'
+ok jira workitem search crash on startup --limit 20
+ok jira workitem search 'slow page' --first 10 --after cursor1 --fields summary
+ok jira workitem query 'project = PROJ ORDER BY updated DESC'
+ok jira workitem query --jql 'assignee = currentUser() AND resolution = Unresolved' --limit 50
+ok jira workitem query --jql 'project = PROJ' --first 10 --after cursor1
+ok jira workitem query --jql 'project = PROJ' --fields summary,status
+gap #18 jira workitem query --jql 'project = PROJ' --last 10 --before cursor9
+ok jira workitem create --space PROJ --type Task --summary 'Write docs'
+ok jira workitem create --space PROJ --type Bug --summary 'Crash on save' --description '<p>Steps</p>' --priority High --labels backend,cli --assignee me
+ok jira workitem create --space PROJ --type Story --summary 'New flow' --description '# Goal' --description-format markdown --parent PROJ-10
+ok jira workitem create --space PROJ --type Task --summary S --field customfield_10016=5
+ok jira workitem create --space PROJ --type Task --summary S --fields-json '{"customfield_10016": 3}'
+ok jira workitem update --id PROJ-1 --summary 'Better title'
+ok jira workitem update --id PROJ-1 --assignee me --add-labels urgent --remove-labels stale
+ok jira workitem update --id PROJ-1 --status 'In Progress' --transition-comment 'Starting now'
+ok jira workitem update --id PROJ-1 --due-date 2026-12-01 --add-fix-versions 1.2.0 --components api
+ok jira workitem update --id PROJ-1 --comment 'Updated the estimate' --comment-format plain
+gap #25 jira workitem update --id PROJ-1 --story-points 5
+gap #25 jira workitem update --id PROJ-1 --sprint 42
+gap #25 jira workitem update --id PROJ-1 --original-estimate 2d --remaining-estimate 1d
+ok jira workitem transition --id PROJ-1 --transition-id 31
+ok jira workitem transition --id PROJ-1
+ok jira workitem transitions query --id PROJ-1
+ok jira workitem comment create --issue-id PROJ-1 --body 'Looks good'
+ok jira workitem comment create --issue-id PROJ-1 --body '**done**' --body-format markdown --visibility-role Developers
+gap #23 jira workitem comment create --issue-id PROJ-1 --body 'Agreed' --parent-id 10001
+gap #23 jira workitem comment query --issue-id PROJ-1
+gap #23 jira workitem comment update --issue-id PROJ-1 --id 10001 --body 'Edited'
+gap #23 jira workitem comment delete --issue-id PROJ-1 --id 10001
+gap #23 jira workitem changelog query --issue-id PROJ-1 --first 20
+gap #23 jira workitem field update-metadata --id PROJ-1
+gap #23 jira workitem delete PROJ-1
+gap #23 jira workitem link query --issue-id PROJ-1
+gap #23 jira workitem types query
+gap #23 jira workitem statuses query
+gap #23 jira workitem priorities query
+gap #23 jira workitem unlink workitem --link-id 10500
+gap #24 jira workitem attachment query --issue-id PROJ-1
+gap #24 jira workitem attachment upload --issue-id PROJ-1 --file report.pdf
+gap #24 jira workitem worklog add --issue-id PROJ-1 --time-spent 2h --comment 'Pairing'
+gap #24 jira workitem worklog query --issue-id PROJ-1
+gap #24 jira workitem watcher add --id PROJ-1 --watcher-id 5b10ac8d82e05b22cc7d4ef5
+gap #24 jira workitem vote add --issue-id PROJ-1
+
+# --- jira renames (#18) ---
+gap #18 jira space query --query PROJ --limit 10
+gap #18 jira space list
+gap #18 jira space get PROJ
+gap #18 jira board query --project PROJ --type scrum
+gap #18 jira board sprints query --board-id 12 --state active
+gap #18 jira board sprints query --id 12 --current
+gap #18 jira sprint workitems query --sprint-id 99 --jql 'status != Done'
+gap #18 jira workitem link-types query
+gap #18 jira workitem link workitem --id PROJ-1 --target-id PROJ-2 --link-type-id Blocks
+gap #18 jira workitem link weblink --id PROJ-1 --url https://example.com/spec --title Spec
+gap #18 jira workitem field create-metadata --space PROJ --type Task
+gap #18 jira workitem custom-fields create-metadata --space PROJ
+
+# --- jira agile and project admin ---
+gap #25 jira sprint get 99
+gap #25 jira sprint start --board-id 12 --id 99 --start-date 2026-12-01 --end-date 2026-12-14
+gap #25 jira board get --id 12
+gap #25 jira board backlog query --board-id 12
+gap #26 jira space versions query --key PROJ
+gap #26 jira space component query --key PROJ
+gap #26 jira filter query --filter-name 'My open'
+
+# --- confluence ---
+ok confluence content get 12345
+ok confluence content get 12345 67890
+ok confluence content get --id 12345 --detail full
+ok confluence content get 12345 --format md --body-only
+ok confluence content get 'Release Runbook' --reference-space ENG
+ok confluence content get 12345 --include-metadata
+gap #27 confluence content get 12345 --section 'Rollback'
+ok confluence content create --space-id 98765 --content-type page --title 'Team notes' --body '<p>Hello</p>'
+ok confluence content create --space-id 98765 --parent-id 12345 --content-type page --title Notes --body-file notes.html
+ok confluence content create --space-id 98765 --content-type blogpost --title 'Weekly update' --body hi --format plain
+ok confluence content update 12345 --title 'New title' --body '<p>v2</p>' --version-message 'Fix typos'
+ok confluence content update --id 12345 --body-file page.html --minor-edit
+ok confluence content update 12345 --body '# Heading' --format markdown --dry-run
+gap #27 confluence content update 12345 --edits-file edits.json
+ok confluence content list --space ENG
+ok confluence content list --space ENG --content-type blogpost --limit 10
+ok confluence search query --cql 'type = page AND space = ENG'
+ok confluence search query 'title ~ "runbook"' --limit 5 --excerpt
+ok confluence search text onboarding checklist
+ok confluence search text --query 'incident review' --updated-since 7d
+ok confluence space get ENG
+ok confluence space list
+ok confluence space list --type global --limit 50
+ok confluence space me
+ok confluence tree 12345 --depth 3
+gap #18 confluence tree --target 12345
+gap #18 confluence space get ENG --labels
+gap #18 confluence space list --labels
+gap #18 confluence content labels list --id 12345
+gap #18 confluence content comments list --id 12345 --comment-type inline
+gap #18 confluence content comments create --id 12345 --body 'Nice' --body-format markdown
+gap #28 confluence content labels add --id 12345 --label runbook
+gap #28 confluence content versions list --id 12345
+gap #28 confluence content attachments list --id 12345
+gap #28 confluence content body-formats
+gap #29 confluence content comments reply --comment-id 777 --body 'Thanks'
+gap #29 confluence content comments resolve --comment-id 777
+gap #30 confluence content move 12345 --parent-id 67890
+gap #30 confluence content trash 12345
+gap #30 confluence content purge 12345
+
+# --- bitbucket ---
+ok bitbucket repo query --workspace acme
+ok bb repo query --workspace acme --query service --limit 10
+ok bb repo get --workspace acme --repo api
+ok bb repo get --repo acme/api
+ok bb repo file README.md --repo acme/api --ref main
+ok bb pull-requests query --repo acme/api
+ok bb pull-requests query --repo acme/api --state OPEN --author me
+ok bb prs query --repo acme/api --state MERGED --updated-since 30d --limit 50
+ok bb pull-requests get 42 --repo acme/api
+ok bb prs get 42 43 --repo acme/api --comments --statuses
+ok bb pull-requests get 42 --repo acme/api --full
+ok bb pull-requests diff 42 --repo acme/api
+ok bb pull-requests create --repo acme/api --title 'Add retries' --source feature/retries --dest main
+ok bb pull-requests create --repo acme/api --title 'Draft work' --source wip --draft --close-source-branch
+ok bb pull-requests comment create --pull-request 42 --text 'Please add a test' --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text Nit --path src/lib.rs --line 10 --repo acme/api
+ok bb pull-requests approve 42 --repo acme/api
+ok bb pull-requests unapprove 42 --repo acme/api
+ok bb pull-requests request-changes 42 --repo acme/api
+ok bb pull-requests decline 42 --repo acme/api
+ok bb pull-requests activity 42 --repo acme/api
+ok bb pipeline query --repo acme/api
+ok bb pipeline query --repo acme/api --branch main --status FAILED
+ok bb pipeline get --pipeline 101 --repo acme/api
+ok bb pipeline get --pipeline 101 --repo acme/api --logs --failed-steps --lines 200
+gap #18 bb repo get -r acme/api
+gap #18 bb repo query --repo api --workspace acme
+gap #18 bb branch query --repo acme/api --query feature
+gap #18 bb pull-requests task query 42 --repo acme/api
+gap #18 bb pull-requests merge --pull-request 42 --repo acme/api --merge-strategy squash
+gap #18 bb pull-requests activity 42 43 --repo acme/api
+gap #18 bb pull-requests get 42 43 --repo acme/api --batch-concurrency 2
+gap #31 bb pull-requests diffstat 42 --repo acme/api
+gap #31 bb pull-requests commits 42 --repo acme/api
+gap #31 bb pull-requests patch 42 --repo acme/api
+gap #31 bb pull-requests comment create --pull-request 42 --text 'Pending note' --pending --repo acme/api
+gap #32 bb pull-requests update --pull-request 42 --title 'Better title' --repo acme/api
+gap #32 bb pull-requests mergeability 42 --repo acme/api
+gap #32 bb pull-requests merge --pull-request 42 --wait --repo acme/api
+gap #32 bb inbox
+gap #33 bb commit query --repo acme/api --branch main
+gap #33 bb workspace get --workspace acme
+gap #34 bb pipeline latest-failure --repo acme/api --branch main
+gap #34 bb pipeline run --repo acme/api --branch main
+gap #34 bb pipeline tail --pipeline 101 --repo acme/api
+
+# --- users ---
+ok user search alice
+ok user search 'Alice Example' --limit 5
+gap #18 user search --email alice@example.com
+gap #18 user search --name 'Alice Example'
+
+# --- jira service management ---
+gap #37 jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop request'
+gap #37 jsm request comment list --request SD-1
+gap #37 jsm request-type query --portal-id 1
+gap #37 jsm approval list --request SD-1

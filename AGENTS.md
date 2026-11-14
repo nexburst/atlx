@@ -26,7 +26,8 @@ UPDATE_SNAPSHOTS=1 cargo test --test cli_tree   # after any CLI change
 - Commands and flags use twg's names when twg has them.
 - New API functions have a mock-HTTP test; new commands have a parse test.
 - `tests/snapshots/cli-tree.txt` is regenerated and the diff is intended.
-- README command table updated (and `COMPAT.md` once it exists).
+- README command table and `COMPAT.md` row updated; matching `gap` lines in
+  `compat/corpus.txt` flipped to `ok` (`cargo test --test twg_compat`).
 - fmt, clippy with `-D warnings`, and tests all pass.
 - No new dependency without a stated reason. Sync `ureq` 2, no async.
 - Destructive commands require `--yes` (`util::require_yes`). Return errors
