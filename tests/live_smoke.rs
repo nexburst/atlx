@@ -33,8 +33,10 @@ fn atlassian_config() -> Config {
             workspace: env_opt("ATLX_BB_WORKSPACE"),
             email: env_opt("ATLX_BB_EMAIL"),
             token: env_opt("ATLX_BB_TOKEN"),
+            ..Default::default()
         },
         timeout_ms: Some(30_000),
+        ..Default::default()
     }
 }
 
@@ -118,6 +120,7 @@ fn live_bitbucket_repo_query() {
             workspace: Some(ws.clone()),
             email: env_opt("ATLX_BB_EMAIL"),
             token: env_opt("ATLX_BB_TOKEN"),
+            ..Default::default()
         },
         timeout_ms: Some(30_000),
         ..Default::default()
