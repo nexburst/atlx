@@ -68,9 +68,10 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 | `confluence content comments list\|create` | `--inline`, `--format md\|html`, `--limit`, `--cursor`; `--body`, `--format` |
 | `confluence content list\|children\|labels`, `confluence tree` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
 | `confluence space list\|get\|me` | `me` resolves current user's personal space |
-| `bitbucket\|bb repo query\|get` | `--workspace`, `--repo` (slug, `ws/slug` or URL) |
-| `bb pull-requests query\|get\|create`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses` |
-| `bb pipeline query\|get` | `--logs --failed-steps --lines` |
+| `bitbucket\|bb repo query\|get\|file\|branches` | `--workspace`, `--repo` (slug, `ws/slug` or URL), `--ref`, `--query` |
+| `bb pull-requests query\|get\|create\|diff\|activity\|tasks`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type` |
+| `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `--strategy merge_commit\|squash\|fast_forward`, `--close-source-branch`, `--yes` |
+| `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
 
 atlx extras: `atlx search "<text>"` (Jira + Confluence + Bitbucket in parallel)
 and `atlx api <jira|confluence|bitbucket> <path>` for any REST endpoint not
