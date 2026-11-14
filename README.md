@@ -48,14 +48,20 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 | twg-compatible command | Notes |
 | --- | --- |
 | `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth |
+| `user search <query>` | `--limit`; returns `account_id`, `display_name`, `email`, `active`, `account_type` |
 | `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches |
 | `jira workitem search <text...>` | `text ~ "…" ORDER BY updated DESC`; `--limit`, `--after` |
 | `jira workitem query --jql` | `--limit`, `--after` (cursor), `--fields` |
 | `jira workitem create` | `--space --type --summary --description[-format] --assignee --reporter --priority --labels --parent --field --fields-json` |
+| `jira workitem create-meta --space` | `--type` to inspect required/allowed fields for an issue type |
 | `jira workitem update --id` | fields, `--add-/--remove-labels`, components, fix versions, `--status`, `--comment` |
 | `jira workitem comment create` | `--issue-id --body --body-format`, visibility, `--internal` |
 | `jira workitem transition --id` | omit `--transition-id` to list; `--field`, `--transition-comment` |
 | `jira workitem transitions query --id` | includes required screen fields |
+| `jira workitem link types\|create\|remote` | `--inward/--outward/--type` or `--id/--url/--title/--relationship` |
+| `jira field list` | `--query`, `--custom-only` |
+| `jira project list\|get` | `--query`, `--limit`, or `<key-or-id>` |
+| `jira board list`, `jira sprint list\|issues` | Agile boards (`--project`, `--type`) and sprints (`--board`, `--state`, `--sprint`, `--jql`) |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <id-or-url...>` | `--detail summary\|full`, `--format html\|md`, `--body-only` |
 | `confluence content create` / `update` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run` |
