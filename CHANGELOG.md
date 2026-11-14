@@ -11,6 +11,12 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira triage commands with twg's names and output (#23): `jira workitem
+  comment query|update|delete`, `comment create --parent-id`, `changelog
+  query`, `field update-metadata`, `link query`, `unlink workitem|weblink`,
+  `delete`, `types query|get`, `statuses query` and `priorities query`.
+  Comment and changelog pages print `pageInfo` with the next `--after`
+  cursor. Deletes ask for no confirmation, as in twg.
 - twg's global output controls: `--select` (dot-path projection with
   `@compact`, `@evidence` and `@rows` presets), `--output-file`,
   `--output-summary [none|stats|auto|inline]` with its YAML envelope,
