@@ -1,0 +1,215 @@
+name: Release
+
+# A pushed tag vX.Y.Z builds every target, creates the GitHub release and
+# publishes to crates.io. workflow_dispatch (and a PR that edits this file)
+# runs the same build as a dry run: archives and SHA256SUMS are uploaded as
+# workflow artifacts and nothing is released or published.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      release: ${{ steps.meta.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Read version
+        id: meta
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "atlx") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+              exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Runs before any step writes untracked files into the checkout.
+      - name: Check the crates.io package
+        run: cargo publish --dry-run --locked
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          version='${{ steps.meta.outputs.version }}'
+          awk -v v="$version" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            /^\[[^]]+\]: http/ { next }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section"
+            exit 1
+          fi
+          cat release-notes.md
+      - name: Generate completions and man pages
+        shell: bash
+        run: |
+          cargo build --release --locked
+          bin=target/release/atlx
+          mkdir -p extras/completions extras/man
+          "$bin" completion script bash > extras/completions/atlx.bash
+          "$bin" completion script zsh > extras/completions/_atlx
+          "$bin" completion script fish > extras/completions/atlx.fish
+          "$bin" completion script powershell > extras/completions/_atlx.ps1
+          "$bin" completion script elvish > extras/completions/atlx.elv
+          "$bin" man --dir extras/man -o json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extras
+          path: |
+            extras/
+            release-notes.md
+          if-no-files-found: error
+
+  build:
+    name: ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, musl: true }
+          - { target: x86_64-apple-darwin, os: macos-latest, cross: true }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl tools
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: target/${{ matrix.target }}/release/atlx --version
+      - uses: actions/download-artifact@v4
+        with:
+          name: extras
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          # Must match pkg-url in [package.metadata.binstall] of Cargo.toml:
+          # { name }-v{ version }-{ target }{ archive-suffix }
+          name="atlx-v${{ needs.prepare.outputs.version }}-${{ matrix.target }}"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then ext=.exe; suffix=.zip; else ext=; suffix=.tgz; fi
+          stage="stage/$name"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/atlx$ext" "$stage/"
+          cp LICENSE-MIT LICENSE-APACHE README.md CHANGELOG.md "$stage/"
+          cp -R extras/completions extras/man "$stage/"
+          mkdir -p dist
+          out="$(pwd)/dist/$name$suffix"
+          if [[ "$suffix" == .zip ]]; then
+            pwsh -NoProfile -Command "Compress-Archive -Path '$stage/*' -DestinationPath 'dist/$name$suffix'"
+          else
+            # Entries at the archive root, without a leading ./
+            (cd "$stage" && tar -czf "$out" *)
+          fi
+          echo "archive=dist/$name$suffix" >> "$GITHUB_OUTPUT"
+      - name: List archive
+        shell: bash
+        run: |
+          f='${{ steps.package.outputs.archive }}'
+          if [[ "$f" == *.zip ]]; then unzip -l "$f"; else tar -tzf "$f"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  checksums:
+    name: Checksums
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum atlx-v* > SHA256SUMS
+          cat SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.prepare.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: [prepare, checksums]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.prepare.outputs.version }}
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: extras
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "atlx $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --verify-tag
+
+  publish:
+    name: crates.io
+    needs: [prepare, release]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        if: env.CARGO_REGISTRY_TOKEN != ''
+        run: cargo publish --locked
+      - name: Skip without token
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        run: echo "::warning::CARGO_REGISTRY_TOKEN is not set; skipped cargo publish"
