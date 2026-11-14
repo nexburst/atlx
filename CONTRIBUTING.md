@@ -63,8 +63,11 @@ the mock server and keeps product PRs out of each other's files.
   spelling. atlx-only commands are labelled "(atlx extra)" in their help.
 - **Output.** Summary keys are `snake_case`. Text on a terminal, JSON when
   piped, and always overridable with `-o text|json|jsonl`.
-- **Errors** go to stderr with a non-zero exit code. Never print errors to
-  stdout.
+- **Errors.** Return them as `anyhow::Error`. For a classified failure, return
+  a `client::ApiError` (`ApiError::usage(..)` for bad arguments,
+  `ApiError::config(..)` for missing setup; the client produces HTTP and network
+  errors itself). `main` prints them as described in the README's "Errors and
+  exit codes" section. Commands never print errors themselves.
 - **Destructive operations** (delete, merge, decline, ...) require `--yes`.
   Add `--dry-run` where it is feasible to show the request without sending it.
 - **Dependencies.** Don't add a crate without a justification in the PR. HTTP

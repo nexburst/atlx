@@ -15,10 +15,11 @@ mod search;
 mod user;
 mod util;
 
+use crate::client::{ApiError, exit};
 use crate::config::{self, Config};
 use crate::output::{self, Format};
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use serde_json::Value;
 use std::io::IsTerminal;
 
@@ -115,8 +116,18 @@ pub(crate) enum Out {
 }
 
 /// Parse the command line, run the command, print the result and exit.
+///
+/// Exit codes follow twg (see [`exit`]): 0 on success, 1 on any failure
+/// (including argument errors), 3 when a batch read partially failed.
 pub fn main() {
-    let cli = Cli::parse();
+    let matches = match Cli::command().try_get_matches() {
+        Ok(m) => m,
+        Err(e) => exit_clap(e),
+    };
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => exit_clap(e),
+    };
     let fmt = cli.output.unwrap_or(if std::io::stdout().is_terminal() {
         Format::Text
     } else {
@@ -127,18 +138,65 @@ pub fn main() {
         user: cli.user,
         timeout_ms: cli.timeout_ms,
     };
-    match run(&globals, cli.cmd) {
-        Ok(Out::Data(v)) => output::print(&v, fmt),
-        Ok(Out::Raw(s)) => println!("{s}"),
+    let code = match run(&globals, cli.cmd) {
+        Ok(Out::Data(v)) => {
+            output::print(&v, fmt);
+            if util::take_partial() {
+                exit::PARTIAL
+            } else {
+                exit::OK
+            }
+        }
+        Ok(Out::Raw(s)) => {
+            println!("{s}");
+            exit::OK
+        }
         Ok(Out::Exit(v, code)) => {
             output::print(&v, fmt);
-            std::process::exit(code);
+            code
         }
-        Err(e) => {
-            eprintln!("error: {e:#}");
-            std::process::exit(1);
-        }
+        Err(e) => report_error(&e, fmt, &command_path(&matches)),
+    };
+    std::process::exit(code);
+}
+
+/// clap errors: help and version go to stdout with exit 0; argument errors go
+/// to stderr with exit 1, as in twg.
+fn exit_clap(e: clap::Error) -> ! {
+    let _ = e.print();
+    std::process::exit(if e.use_stderr() {
+        exit::FAILURE
+    } else {
+        exit::OK
+    })
+}
+
+/// `jira.workitem.get` for `atlx jira workitem get ...`.
+fn command_path(m: &clap::ArgMatches) -> String {
+    let mut parts = Vec::new();
+    let mut cur = m;
+    while let Some((name, sub)) = cur.subcommand() {
+        parts.push(name);
+        cur = sub;
     }
+    parts.join(".")
+}
+
+/// Print an error the way twg does: in JSON modes the `{"ok": false,
+/// "error": ...}` envelope goes to stdout, and a readable report always goes
+/// to stderr. Returns the exit code.
+fn report_error(e: &anyhow::Error, fmt: Format, path: &str) -> i32 {
+    let api = ApiError::from_anyhow(e);
+    match fmt {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&api.envelope()).unwrap_or_default()
+        ),
+        Format::Jsonl => println!("{}", api.envelope()),
+        Format::Text => eprintln!("✗ Failed {path}."),
+    }
+    eprint!("{}", api.report());
+    api.exit_code()
 }
 
 pub(crate) struct Globals {
@@ -188,7 +246,6 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
 
     #[test]
     fn cli_is_consistent() {

@@ -157,7 +157,7 @@ reported inline (`{"error": ...}`) so the other results still come through.
 for Jira, Confluence and Bitbucket Cloud, with three intentional differences:
 
 - **Direct JSON payloads**: `atlx` emits unwrapped JSON objects/arrays (and
-  `{"items": [...]}` for multi-ID batches) rather than `twg`'s
+  `{"items": [...], "summary": {...}}` for multi-ID batches) rather than `twg`'s
   `{"data": ...}` response envelope.
 - **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
   with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
@@ -166,6 +166,70 @@ for Jira, Confluence and Bitbucket Cloud, with three intentional differences:
   private graph/Rovo APIs (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
   are intentionally excluded; `atlx` uses only the public REST APIs (with
   `atlx search` as a cross-product alternative).
+
+## Errors and exit codes
+
+Errors follow `twg`. In `json` and `jsonl` mode (set with `-o`, or the default
+when stdout is piped), a failed command prints an error envelope on **stdout**
+(on one line for `jsonl`). A readable report always goes to **stderr**.
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "TWG_TOOL_EXECUTION_FAILED",
+    "kind": "twg_tool_execution_failed",
+    "message": "Issue does not exist or you do not have permission to see it.",
+    "statusCode": 404,
+    "requestId": "8c1f6a5a9eae434c",
+    "downstreamError": {"message": "Issue does not exist ...", "statusCode": 404, "service": "backend"},
+    "category": "not_found",
+    "method": "GET",
+    "url": "https://acme.atlassian.net/rest/api/3/issue/NOPE-1?fields=...",
+    "retry": {"recommended": false, "guidance": "do_not_retry_unchanged"}
+  }
+}
+```
+
+- `code` uses twg's codes. `TWG_RATE_LIMITED` (429) and
+  `TWG_UPSTREAM_UNAVAILABLE` (502, 503, 504) come with `retry_with_backoff`.
+  `TWG_NETWORK_ERROR` and `TWG_REQUEST_TIMEOUT` come with `retry_later`. The
+  other codes are `TWG_UPSTREAM_FAILURE` (other 5xx),
+  `TWG_TOOL_EXECUTION_FAILED` (other HTTP errors) and `TWG_COMMAND_FAILED`
+  (local failures). `kind` is `code` in lower case.
+- `statusCode` is the HTTP status. As in twg, local failures report 400
+  (invalid arguments) or 401 (missing credentials). `downstreamError` appears
+  only when a server actually answered.
+- `category` (atlx extra) is a stable class: `auth` (401), `forbidden` (403),
+  `not_found` (404, 410), `conflict` (409, 412), `validation` (400, 422 and
+  other 4xx), `rate_limited` (429), `server` (5xx), `network`, `timeout`,
+  `config` (missing site, email or token), `usage` (for example a missing
+  `--yes`) or `other`.
+- `hint`, `method`, `url`, `traceId` and `requestId` appear when they are known.
+  URLs never include credentials, and request headers are never printed.
+
+In text mode, stdout stays empty and stderr shows `✗ Failed <command>.`
+followed by the same report (`Error:`, `Code:`, `HTTP status:`, ...).
+
+Multi-ID reads (`jira workitem get A B`, `confluence content get`,
+`bb pull-requests get`) carry on past failures. Each failed item looks like
+`{"input": "B", "ok": false, "error": {"message", "status", "code",
+"category"}}`, and `summary` counts the requested, succeeded and failed inputs.
+With `--strict`, any failure makes the whole command fail.
+
+`atlx search` reports a failed product as `{"error": {...}}`, using the same
+`error` object.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Any failure: API, network, configuration or argument errors (unknown flags included), a `--strict` batch with a failed input, or a batch where every input failed |
+| `3` | Partial batch: some, but not all, inputs of a multi-ID read failed. The output is still printed |
+
+`atlx doctor --strict` keeps its own non-zero exit when checks fail. To tell
+failures apart, use the envelope's `category`, `statusCode` and `retry`.
 
 ## Contributing
 
