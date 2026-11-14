@@ -93,11 +93,55 @@ repositories, so:
 | Jira `workitem comment query`, `changelog query` (default, `--first`, `--after`, `--order-by`), `field update-metadata` (with and without `--include-system-fields`), `types query` (`--project`, `--issue --level -n`, `--id`), `types get`, `statuses query`, `priorities query` (all, and by `--id`) | Live side by side ([#23](https://github.com/pedrosanzmtz/atlx/issues/23)) | Same key paths, and the same `data` values once the `self` host is normalised. Comment and changelog pages print `pageInfo` on the last page too (`hasNextPage: false`, `nextCursor: null`); `types query` adds top-level `warnings` when `--limit` cut the list or `--id` was used |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
-| Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary`, `outline` and `body.lossyConversion` are not produced |
+| Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
+| Confluence `content update --edits` | Inferred from twg's help: the dry run's `data.body.value` holds the resulting HTML | Not verified; atlx's dry run also has `fromVersion`, `request` and a unified `diff` |
 | Other Confluence commands | Inferred: REST v2 objects with `externalUrl` and `snapshotToken`, lists as `{results, nextCursor}` | Not verified |
 | Bitbucket | Partly live: twg printed `repo query` as a bare list and a failed batch `pull-requests get` as `{workspace, repository, items, summary, partial}`, both without an envelope. The rest is inferred from the presets: REST 2.0 objects plus `_comments`, `_statuses`, `_repo` and the step log fields | Not verified with data. One known difference: when every ID of a Bitbucket batch fails, twg still prints the batch object (exit 1) while atlx prints the error envelope (exit 1) |
 | Account commands (`login`, `logout`, `auth profile ...`, `setup ...`, `doctor`) and `atlx search` | Envelope only. twg's data here describes its OAuth token store, which atlx doesn't have, so the data keeps atlx's own keys | Intentional |
 | Errors | The error envelope from #17; JSONL error lines get `_twg: {collection: "root", index: 0}` as in twg | Live |
+
+### Confluence targeted edits
+
+`content update --edits <json>` and `--edits-file <path>` (`-` reads stdin)
+take a JSON array of operations in twg's format: each has a `name`, the
+target node's ADF `localId` and, where it adds content, an HTML `value`.
+atlx reads the page with `body-format=atlas_doc_format`, applies every
+operation to a copy of the ADF document, and sends the result back as
+`atlas_doc_format` with the version number plus one. Nodes the operations
+don't touch are sent back unchanged. If any operation fails (unknown
+`localId`, two nodes with the same ID, a bad argument) the command exits
+with a usage error and writes nothing. `--snapshot-token` is checked as for
+full-body updates, and `--dry-run` prints the resulting HTML and a unified
+diff without a PUT.
+
+| Operation | Fields | Notes |
+| --- | --- | --- |
+| replaceNode | `localId`, `value` | The new nodes take the target's shape: inline content for an inline node, list items for a list item, rows for a row |
+| insertNodeBefore, insertNodeAfter | `localId`, `value` | Same shaping as `replaceNode` |
+| deleteNode | `localId` | |
+| removeNodes | `arguments.localIds` | All IDs must exist |
+| moveNode | `arguments.{localId, targetLocalId, position}` | `position` is `before` or `after` (default); twg's other positions, if any, are unknown |
+| appendNodeToEnd | `value` | Appended to the end of the document |
+| setAttrs | `localId`, `arguments.attrs` | Merged into the node's `attrs` |
+
+Fields may sit at the top level or under `arguments`. Node `localId`s come
+from `content get --detail outline` (headings) or the atlx extra
+`content get --detail full --format adf` (every node). In twg the IDs come
+from a full read; atlx's `--format html` is the storage format, which doesn't
+carry ADF IDs, hence `adf`. The operation list is taken from twg's help and
+has not been checked against a live site.
+
+atlx extras, for pages whose nodes lack `localId`s, use `op` (or `name`) and
+work on top-level headings. A heading query matches case-insensitively,
+exact text first, and must select one heading:
+
+| Operation | Fields |
+| --- | --- |
+| replaceText | `find`, `replace`, `count` (a number, default 1, or `"all"`). The match must sit inside one text run; no match, or more than `count`, is an error |
+| replaceSection | `heading`, `value`, `format` (`html`, default, or `md`). Keeps the heading |
+| appendToSection, prependToSection | `heading`, `value`, `format` |
+| deleteSection | `heading`. Removes the heading too |
+| insertSectionAfter | `heading`, `newHeading`, `level` (default: the anchor heading's), `value`, `format` |
 
 `tests/twg_shapes.rs` replays the live-verified commands against synthetic
 fixtures (`tests/fixtures/twg/`, made by `scripts/twg-fixtures.sh`, values
@@ -285,7 +329,7 @@ inferred rows.
 
 ## Confluence
 
-121 twg commands: ✅ 6, 🟡 7, 📋 72, ⛔ 36.
+121 twg commands: ✅ 7, 🟡 6, 📋 72, ⛔ 36.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -330,7 +374,7 @@ inferred rows.
 | `confluence content enable-public-link` | ⛔ | public links are only in the GraphQL gateway |
 | `confluence content export` | ⛔ | no public PDF/Word export endpoint |
 | `confluence content export-status` | ⛔ | no public PDF/Word export endpoint |
-| `confluence content get` | 🟡 | missing `--section` (#27) |
+| `confluence content get` | ✅ | `--detail ai_summary` is not offered (Atlassian AI); `--format adf` is an atlx extra that shows node `localId`s for `--edits` |
 | `confluence content get-public-link` | ⛔ | public links are only in the GraphQL gateway |
 | `confluence content history diff` | 📋 | #28 |
 | `confluence content history get` | 📋 | #28 |
@@ -371,7 +415,7 @@ inferred rows.
 | `confluence content unstar` | ⛔ | starring is only in the GraphQL gateway |
 | `confluence content untrash` | 📋 | #30 |
 | `confluence content unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
-| `confluence content update` | 🟡 | missing `--content-width`, `--context-content`, `--context-content-file`, `--edits`, `--edits-file`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#27, #30); `--edits*` and `--context-content*` are #27; header image and width flags are #30 |
+| `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#30). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
 | `confluence content versions diff` | 📋 | #28 |
 | `confluence content versions get` | 📋 | #28 |
 | `confluence content versions list` | 📋 | #28 |

@@ -47,11 +47,11 @@ atlx confluence content comments create [<REFERENCE> (hidden)] [--id <ID>] [--bo
 atlx confluence content comments list [<REFERENCE> (hidden)] [--id <ID>] [--comment-type <COMMENT_TYPE> {footer|inline}] [--body-format <BODY_FORMAT> {html|md}] --inline (hidden) [--format <FORMAT> {html|md} (hidden)] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
 atlx confluence content create --space-id <SPACE_ID> (required) [--parent-id <PARENT_ID>] --content-type <CONTENT_TYPE> {page|blogpost} (required) --title <TITLE> (required) [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --draft -y/--yes --ack-body-formats
 atlx confluence content delete <REFERENCE> (required) -y/--yes (hidden) --purge
-atlx confluence content get [<REFS>...] [--id <ID_FLAGS>...] [--detail <DETAIL> {summary|full}] [--format <FORMAT> {html|md} [default: html]] --body-only --draft [--reference-space <REFERENCE_SPACE>] --include-metadata --strict
+atlx confluence content get [<REFS>...] [--id <ID_FLAGS>...] [--detail <DETAIL> {summary|outline|full}] [--format <FORMAT> {html|md}] [--section <heading>...] --body-only --draft [--reference-space <REFERENCE_SPACE>] --include-metadata --strict
 atlx confluence content labels [<REFERENCE> (hidden)] [--limit <LIMIT> [default: 25] (hidden)]
 atlx confluence content labels list --id <ID> (required)
 atlx confluence content list --space <SPACE> (required) [--content-type <CONTENT_TYPE> {page|blogpost} [default: page]] [--status <STATUS> [default: current]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
-atlx confluence content update [<REFERENCE>] [--id <ID>] [--snapshot-token <SNAPSHOT_TOKEN>] [--title <TITLE>] [--version-message <VERSION_MESSAGE>] --minor-edit [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --dry-run --draft -y/--yes --ack-body-formats
+atlx confluence content update [<REFERENCE>] [--id <ID>] [--snapshot-token <SNAPSHOT_TOKEN>] [--title <TITLE>] [--version-message <VERSION_MESSAGE>] --minor-edit [--body <BODY>] [--body-file <BODY_FILE>] [--edits <EDITS>] [--edits-file <EDITS_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --dry-run --draft -y/--yes --ack-body-formats
 atlx confluence search query [<CQL_ARG>...] [--cql <CQL>] [--limit <LIMIT> [default: 25]] --excerpt [--cursor <CURSOR>]
 atlx confluence search text [<TEXT>...] [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--updated-since/--since <UPDATED_SINCE>] [--created-since <CREATED_SINCE>] --excerpt [--cursor <CURSOR>]
 atlx confluence space get [<IDENTIFIER>] [--key <KEY> (hidden)] --labels

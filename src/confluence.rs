@@ -2,11 +2,16 @@
 //! `confluence search|content|space` commands.
 
 use crate::client::Client;
-use crate::markup::{TextFormat, quote, storage_to_text, strip_highlight, to_storage};
+use crate::markup::{
+    TextFormat, adf_to_storage, quote, storage_to_text, strip_highlight, to_storage,
+};
 use crate::time;
 use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
+
+pub mod edits;
+pub mod sections;
 
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
@@ -33,6 +38,8 @@ impl ContentType {
 pub enum Detail {
     #[default]
     Summary,
+    /// Headings only, with their ADF `localId`s and word counts
+    Outline,
     Full,
 }
 
@@ -43,6 +50,39 @@ pub enum ReadFormat {
     Html,
     #[value(alias = "markdown")]
     Md,
+    /// The ADF document as JSON, with node `localId`s for `--edits`
+    /// (atlx extra; hidden from the value list because only page and blog
+    /// post reads have it)
+    #[value(hide = true)]
+    Adf,
+}
+
+/// The `body-format` a read asks Confluence v2 for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BodyFormat {
+    Storage,
+    Adf,
+}
+
+impl BodyFormat {
+    fn param(self) -> &'static str {
+        match self {
+            BodyFormat::Storage => "storage",
+            BodyFormat::Adf => "atlas_doc_format",
+        }
+    }
+}
+
+/// The ADF document in a v2 response fetched with `atlas_doc_format`.
+fn adf_body(v: &Value) -> Value {
+    let raw = &v["body"]["atlas_doc_format"]["value"];
+    let doc = match raw {
+        Value::String(s) => serde_json::from_str(s).ok(),
+        Value::Object(_) => Some(raw.clone()),
+        _ => None,
+    };
+    doc.filter(Value::is_object)
+        .unwrap_or_else(|| json!({"type": "doc", "version": 1, "content": []}))
 }
 
 /// A content ID, or a Confluence URL containing one.
@@ -153,8 +193,8 @@ fn try_content<T>(mut f: impl FnMut(ContentType) -> Result<T>) -> Result<(Conten
 }
 
 /// Fetch a page, falling back to blog posts. Returns the content type too.
-fn fetch(c: &Client, id: &str, draft: bool) -> Result<(ContentType, Value)> {
-    let mut q = vec![("body-format", "storage")];
+fn fetch(c: &Client, id: &str, draft: bool, bf: BodyFormat) -> Result<(ContentType, Value)> {
+    let mut q = vec![("body-format", bf.param())];
     if draft {
         q.push(("get-draft", "true"));
     }
@@ -203,7 +243,8 @@ fn optional_content_url(c: &Client, v: &Value) -> Value {
 
 fn format_body(storage: &str, format: ReadFormat) -> Value {
     match format {
-        ReadFormat::Html => storage.into(),
+        // Storage-only bodies (comments) have no ADF; `adf` gives the HTML.
+        ReadFormat::Html | ReadFormat::Adf => storage.into(),
         ReadFormat::Md => storage_to_text(storage).into(),
     }
 }
@@ -220,11 +261,24 @@ pub struct GetOpts<'a> {
     pub format: ReadFormat,
     pub draft: bool,
     pub reference_space: Option<&'a str>,
+    /// `--section` headings; when non-empty only those sections are returned.
+    pub sections: &'a [String],
+}
+
+impl GetOpts<'_> {
+    fn body_format(&self) -> BodyFormat {
+        match (self.detail, self.format) {
+            (Detail::Outline, _) => BodyFormat::Adf,
+            (Detail::Full, ReadFormat::Adf) if self.sections.is_empty() => BodyFormat::Adf,
+            _ => BodyFormat::Storage,
+        }
+    }
 }
 
 fn resolve_and_fetch(c: &Client, reference: &str, o: &GetOpts) -> Result<(ContentType, Value)> {
+    let bf = o.body_format();
     if let Ok(id) = content_id(reference) {
-        return fetch(c, &id, o.draft);
+        return fetch(c, &id, o.draft, bf);
     }
     let Some(ref_space) = o.reference_space else {
         bail!(
@@ -235,7 +289,7 @@ fn resolve_and_fetch(c: &Client, reference: &str, o: &GetOpts) -> Result<(Conten
     let mut q = vec![
         ("space-id", sid.as_str()),
         ("title", reference),
-        ("body-format", "storage"),
+        ("body-format", bf.param()),
     ];
     if o.draft {
         q.push(("status", "draft"));
@@ -278,6 +332,44 @@ pub fn get(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
                 "excerpt": excerpt,
                 "wordCount": text.split_whitespace().count(),
                 "sectionCount": section_count(storage),
+            });
+        }
+        Detail::Outline => {
+            out["outline"] = sections::outline(&adf_body(&v)).into();
+        }
+        Detail::Full if !o.sections.is_empty() => {
+            let picked = sections::select_storage(storage, o.sections)?;
+            let (format, value) = match o.format {
+                ReadFormat::Md => (
+                    "md",
+                    picked
+                        .iter()
+                        .map(|s| storage_to_text(&storage[s.start..s.end]))
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                ),
+                _ => (
+                    "html",
+                    picked.iter().map(|s| &storage[s.start..s.end]).collect(),
+                ),
+            };
+            let picked: Vec<Value> = picked
+                .iter()
+                .map(|s| {
+                    json!({
+                        "level": s.heading.level,
+                        "text": s.heading.text,
+                        "anchor": sections::anchor(&s.heading.text),
+                    })
+                })
+                .collect();
+            out["body"] = json!({"format": format, "value": value, "sections": picked});
+        }
+        Detail::Full if o.format == ReadFormat::Adf => {
+            let doc = adf_body(&v);
+            out["body"] = json!({
+                "format": "adf",
+                "value": serde_json::to_string_pretty(&doc).unwrap_or_default(),
             });
         }
         Detail::Full => {
@@ -362,16 +454,26 @@ pub struct Edit<'a> {
     pub snapshot_token: Option<&'a str>,
     pub dry_run: bool,
     pub draft: bool,
+    /// `--edits`/`--edits-file` operations, applied to the page's ADF body.
+    pub edits: Option<&'a [edits::Op]>,
 }
 
 /// `confluence content update`: bumps the version, keeping whatever isn't given.
 /// A `--snapshot-token` that doesn't match the current version is rejected.
 pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
-    if e.title.is_none() && e.body.is_none() {
-        bail!("nothing to update; pass --title and/or --body/--body-file");
+    if e.title.is_none() && e.body.is_none() && e.edits.is_none() {
+        bail!("nothing to update; pass --title, --body/--body-file or --edits/--edits-file");
+    }
+    if e.body.is_some() && e.edits.is_some() {
+        bail!("pass either a full body or --edits, not both");
     }
     let id = content_id(reference)?;
-    let (kind, cur) = fetch(c, &id, e.draft)?;
+    let bf = if e.edits.is_some() {
+        BodyFormat::Adf
+    } else {
+        BodyFormat::Storage
+    };
+    let (kind, cur) = fetch(c, &id, e.draft, bf)?;
     let version = cur["version"]["number"]
         .as_u64()
         .ok_or_else(|| anyhow!("content {id} has no version"))?;
@@ -382,22 +484,44 @@ pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
             "content {id} changed since your snapshot (token {tok}, current {version}); re-read it and retry"
         );
     }
-    let body = match e.body {
-        Some((b, f)) => to_storage(b, f),
-        None => cur["body"]["storage"]["value"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+    // Targeted edits: apply them to the current ADF, all or nothing.
+    let mut preview = None;
+    let body = match (e.body, e.edits) {
+        (Some((b, f)), _) => json!({"representation": "storage", "value": to_storage(b, f)}),
+        (None, Some(ops)) => {
+            let before = adf_body(&cur);
+            let after = edits::apply(&before, ops)?;
+            preview = Some((before, after.clone()));
+            json!({
+                "representation": "atlas_doc_format",
+                "value": serde_json::to_string(&after)?,
+            })
+        }
+        (None, None) => json!({
+            "representation": "storage",
+            "value": cur["body"]["storage"]["value"].as_str().unwrap_or_default(),
+        }),
     };
     let req = json!({
         "id": id,
         "status": if e.draft { "draft" } else { "current" },
         "title": e.title.unwrap_or(cur["title"].as_str().unwrap_or_default()),
-        "body": {"representation": "storage", "value": body},
+        "body": body,
         "version": {"number": version + 1, "message": e.version_message.unwrap_or(""), "minorEdit": e.minor_edit},
     });
     if e.dry_run {
-        return Ok(json!({"dryRun": true, "id": id, "fromVersion": version, "request": req}));
+        let mut out = json!({"dryRun": true, "id": id, "fromVersion": version, "request": req});
+        if let Some((before, after)) = preview {
+            out["body"] = json!({"format": "html", "value": adf_to_storage(&after)});
+            out["diff"] = edits::unified_diff(
+                &edits::render_lines(&before),
+                &edits::render_lines(&after),
+                &format!("{id} version {version}"),
+                &format!("{id} after edits"),
+            )
+            .into();
+        }
+        return Ok(out);
     }
     let v = c.put(&format!("/api/v2/{}/{}", kind.collection(), enc(&id)), &req)?;
     Ok(with_links(c, v))
@@ -1126,6 +1250,7 @@ mod tests {
                 format: ReadFormat::Md,
                 draft: false,
                 reference_space: Some("ENG"),
+                sections: &[],
             },
         )
         .unwrap();

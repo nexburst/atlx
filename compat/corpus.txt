@@ -137,14 +137,18 @@ ok confluence content get --id 12345 --detail full
 ok confluence content get 12345 --format md --body-only
 ok confluence content get 'Release Runbook' --reference-space ENG
 ok confluence content get 12345 --include-metadata
-gap #27 confluence content get 12345 --section 'Rollback'
+ok confluence content get 12345 --section 'Rollback'
+ok confluence content get 12345 --detail outline
+ok confluence content get 12345 --section Rollback --section 'Known issues' --format html -o json
 ok confluence content create --space-id 98765 --content-type page --title 'Team notes' --body '<p>Hello</p>'
 ok confluence content create --space-id 98765 --parent-id 12345 --content-type page --title Notes --body-file notes.html
 ok confluence content create --space-id 98765 --content-type blogpost --title 'Weekly update' --body hi --format plain
 ok confluence content update 12345 --title 'New title' --body '<p>v2</p>' --version-message 'Fix typos'
 ok confluence content update --id 12345 --body-file page.html --minor-edit
 ok confluence content update 12345 --body '# Heading' --format markdown --dry-run
-gap #27 confluence content update 12345 --edits-file edits.json
+ok confluence content update 12345 --edits-file edits.json
+ok confluence content update 12345 --snapshot-token 7 --edits '[{"name":"deleteNode","localId":"n1"}]' --ack-body-formats -y
+ok confluence content update 12345 --snapshot-token 7 --edits-file edits.json --ack-body-formats --dry-run
 ok confluence content list --space ENG
 ok confluence content list --space ENG --content-type blogpost --limit 10
 ok confluence search query --cql 'type = page AND space = ENG'

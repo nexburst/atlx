@@ -89,12 +89,18 @@ pub(crate) enum ContentCmd {
         refs: Vec<String>,
         #[arg(long = "id")]
         id_flags: Vec<String>,
-        /// summary (excerpt) or full (body)
+        /// summary (excerpt), outline (headings) or full (body)
         #[arg(long, value_enum)]
         detail: Option<confluence::Detail>,
-        /// Body format for --detail full: html (storage) or md
-        #[arg(long, value_enum, default_value_t)]
-        format: confluence::ReadFormat,
+        /// Body format for --detail full: html (storage, the default), md,
+        /// or adf (atlx extra)
+        #[arg(long, value_enum)]
+        format: Option<confluence::ReadFormat>,
+        /// Only the section under this heading, subsections included;
+        /// repeatable. Case-insensitive: an exact heading wins, else any
+        /// heading containing the text. Defaults to Markdown.
+        #[arg(long = "section", value_name = "heading")]
+        sections: Vec<String>,
         /// Print only the body
         #[arg(long)]
         body_only: bool,
@@ -152,13 +158,20 @@ pub(crate) enum ContentCmd {
         version_message: Option<String>,
         #[arg(long)]
         minor_edit: bool,
-        #[arg(long, conflicts_with = "body_file")]
+        #[arg(long, conflicts_with_all = ["body_file", "edits", "edits_file"])]
         body: Option<String>,
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["edits", "edits_file"])]
         body_file: Option<String>,
+        /// JSON array of targeted edit operations (`-` reads stdin)
+        #[arg(long, conflicts_with = "edits_file")]
+        edits: Option<String>,
+        /// Read the edit operations from a JSON file
+        #[arg(long)]
+        edits_file: Option<String>,
         #[arg(long, value_enum, default_value_t)]
         format: TextFormat,
-        /// Validate and show the request without writing
+        /// Validate and show the request without writing; with --edits, also
+        /// the resulting body and a diff
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -373,6 +386,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 id_flags,
                 detail,
                 format,
+                sections,
                 body_only,
                 draft,
                 reference_space,
@@ -380,22 +394,39 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 strict,
             } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
-                let detail = if body_only {
+                // --section implies --detail full, in Markdown unless asked.
+                let detail = if body_only || !sections.is_empty() {
+                    if detail.is_some_and(|d| d != confluence::Detail::Full) {
+                        return Err(ApiError::usage(
+                            "--section and --body-only return a body; use them without --detail or with --detail full",
+                        )
+                        .into());
+                    }
                     confluence::Detail::Full
                 } else {
                     detail.unwrap_or_default()
                 };
+                let format = format.unwrap_or(if sections.is_empty() {
+                    confluence::ReadFormat::Html
+                } else {
+                    confluence::ReadFormat::Md
+                });
                 let opts = confluence::GetOpts {
                     detail,
                     format,
                     draft,
                     reference_space: reference_space.as_deref(),
+                    sections: &sections,
                 };
-                let get = envelope("confluence.content.get", "confluence.content").request(json!({
+                let mut request = json!({
                     "ids": if inputs.len() == 1 { json!(inputs[0]) } else { json!(inputs) },
                     "detail": format!("{:?}", opts.detail).to_lowercase(),
                     "format": format!("{:?}", opts.format).to_lowercase(),
-                }));
+                });
+                if !sections.is_empty() {
+                    request["sections"] = json!(sections);
+                }
+                let get = envelope("confluence.content.get", "confluence.content").request(request);
                 if body_only {
                     let [one] = inputs.as_slice() else {
                         bail!("--body-only takes exactly one ID")
@@ -446,6 +477,8 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 minor_edit,
                 body,
                 body_file,
+                edits,
+                edits_file,
                 format,
                 dry_run,
                 draft,
@@ -453,6 +486,10 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             } => {
                 let Some(reference) = reference.or(id) else {
                     bail!("pass a content ID/URL or --id")
+                };
+                let ops = match body_arg(edits, edits_file)? {
+                    Some(json) => Some(confluence::edits::parse(&json)?),
+                    None => None,
                 };
                 let body = body_arg(body, body_file)?;
                 let data = confluence::update(
@@ -466,10 +503,16 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         snapshot_token: snapshot_token.as_deref(),
                         dry_run,
                         draft,
+                        edits: ops.as_deref(),
                     },
                 )?;
+                let mut request =
+                    json!({"id": reference, "snapshotToken": snapshot_token, "dryRun": dry_run});
+                if let Some(ops) = &ops {
+                    request["edits"] = ops.len().into();
+                }
                 envelope("confluence.content.update", "confluence.content")
-                    .request(json!({"id": reference, "snapshotToken": snapshot_token, "dryRun": dry_run}))
+                    .request(request)
                     .data(data)
             }
             ContentCmd::List {
@@ -747,6 +790,50 @@ mod tests {
             }
             _ => panic!("unexpected parsed command"),
         }
+    }
+
+    #[test]
+    fn parses_outline_section_and_edits() {
+        for ok in [
+            "atlx confluence content get 12345 --detail outline",
+            "atlx confluence content get 12345 --section Rollback --section 'Deploy plan'",
+            "atlx confluence content get 12345 --section Rollback --format html --body-only",
+            "atlx confluence content get 12345 --detail full --format adf",
+            "atlx confluence content update 12345 --snapshot-token 7 --edits '[]' --ack-body-formats -y",
+            "atlx confluence content update 12345 --edits-file edits.json --dry-run --title T",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx confluence content update 12345 --edits '[]' --edits-file e.json",
+            "atlx confluence content update 12345 --edits '[]' --body x",
+            "atlx confluence content update 12345 --edits-file e.json --body-file b.html",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+        let cli = Cli::try_parse_from(shell_words(
+            "atlx confluence content get 12345 --section A --section B",
+        ))
+        .unwrap();
+        let Cmd::Confluence {
+            cmd:
+                ConfCmd::Content {
+                    cmd:
+                        ContentCmd::Get {
+                            sections, format, ..
+                        },
+                },
+        } = cli.cmd
+        else {
+            panic!("unexpected parsed command");
+        };
+        assert_eq!(sections, ["A", "B"]);
+        assert_eq!(format, None);
     }
 
     #[test]
