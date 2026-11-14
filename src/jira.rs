@@ -253,6 +253,14 @@ fn none_or(s: &str) -> Option<&str> {
 
 /// `jira workitem update`: field edits, then optional transition and comment.
 pub fn update(c: &Client, key: &str, u: Update) -> Result<Value> {
+    for (name, edit) in [("labels", &u.labels), ("components", &u.components), ("fixVersions", &u.fix_versions)] {
+        if let Some(edit) = edit
+            && edit.set.is_some()
+            && (!edit.add.is_empty() || !edit.remove.is_empty())
+        {
+            bail!("cannot both set and add/remove '{name}' in the same update");
+        }
+    }
     let mut fields = Map::new();
     let mut ops = Map::new();
     let mut changed: Vec<&str> = Vec::new();
@@ -461,5 +469,42 @@ mod tests {
         assert_eq!(id_or_name("10001", "key"), json!({"id": "10001"}));
         assert_eq!(id_or_name("PROJ", "key"), json!({"key": "PROJ"}));
         assert_eq!(field_list(&["a", "b"], &["b".into(), "c".into()]), "a,b,c");
+    }
+
+    #[test]
+    fn update_rejects_conflicting_list_edits() {
+        let c = Client::new("https://example.atlassian.net".into(), "a@b.c", "tok", None);
+        let err = update(
+            &c,
+            "PROJ-1",
+            Update {
+                labels: Some(ListEdit { set: Some(vec!["a".into()]), add: vec!["b".into()], remove: vec![] }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("labels"), "{err}");
+
+        let err = update(
+            &c,
+            "PROJ-1",
+            Update {
+                components: Some(ListEdit { set: Some(vec![]), add: vec![], remove: vec!["api".into()] }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("components"), "{err}");
+
+        let err = update(
+            &c,
+            "PROJ-1",
+            Update {
+                fix_versions: Some(ListEdit { set: Some(vec!["1.0".into()]), add: vec!["2.0".into()], remove: vec![] }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("fixVersions"), "{err}");
     }
 }

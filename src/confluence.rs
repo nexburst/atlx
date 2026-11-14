@@ -188,11 +188,18 @@ pub fn get(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
 
 /// Space key or numeric ID -> numeric ID.
 fn space_id(c: &Client, space: &str) -> Result<String> {
-    if space.bytes().all(|b| b.is_ascii_digit()) {
+    if !space.is_empty() && space.bytes().all(|b| b.is_ascii_digit()) {
         return Ok(space.to_string());
     }
     let v = c.get("/api/v2/spaces", &[("keys", space)])?;
-    v["results"][0]["id"].as_str().map(String::from).ok_or_else(|| anyhow!("no Confluence space with key '{space}'"))
+    let results = v["results"].as_array().into_iter().flatten();
+    results
+        .clone()
+        .find(|s| s["key"].as_str() == Some(space))
+        .or_else(|| results.clone().find(|s| s["key"].as_str().is_some_and(|k| k.eq_ignore_ascii_case(space))))
+        .and_then(|s| s["id"].as_str())
+        .map(String::from)
+        .ok_or_else(|| anyhow!("no Confluence space with key '{space}'"))
 }
 
 pub struct NewContent<'a> {
@@ -306,16 +313,24 @@ fn space_summary(c: &Client, s: &Value) -> Value {
 }
 
 /// `confluence space list`
-pub fn spaces(c: &Client, kind: Option<&str>, status: Option<&str>, keys: Option<&str>, limit: usize) -> Result<Value> {
+pub fn spaces(
+    c: &Client,
+    kind: Option<&str>,
+    status: Option<&str>,
+    keys: Option<&str>,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Value> {
     let limit = limit.clamp(1, 250).to_string();
     let mut q = vec![("limit", limit.as_str())];
-    for (k, v) in [("type", kind), ("status", status), ("keys", keys)] {
+    for (k, v) in [("type", kind), ("status", status), ("keys", keys), ("cursor", cursor)] {
         if let Some(v) = v {
             q.push((k, v));
         }
     }
     let v = c.get("/api/v2/spaces", &q)?;
-    Ok(v["results"].as_array().into_iter().flatten().map(|s| space_summary(c, s)).collect())
+    let results: Vec<Value> = v["results"].as_array().into_iter().flatten().map(|s| space_summary(c, s)).collect();
+    Ok(json!({"results": results, "next_cursor": next_cursor(&v)}))
 }
 
 /// `confluence space get <key-or-id>`
@@ -350,5 +365,50 @@ mod tests {
             text_cql("launch \"plan\"", Some("2026-01-01"), None).unwrap(),
             r#"siteSearch ~ "launch \"plan\"" AND type in (page, blogpost) AND lastmodified >= "2026-01-01" ORDER BY lastmodified DESC"#
         );
+    }
+
+    #[test]
+    fn spaces_supports_cursor_pagination() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let n = stream.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = json!({
+                "results": [{
+                    "id": "101",
+                    "key": "ENG",
+                    "name": "Engineering",
+                    "type": "global",
+                    "status": "current",
+                    "homepageId": "202",
+                    "_links": {"webui": "/spaces/ENG"}
+                }],
+                "_links": {"next": "/wiki/api/v2/spaces?limit=10&cursor=page2%3D"}
+            })
+            .to_string();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
+            req
+        });
+
+        let c = Client::new(format!("http://{addr}/wiki"), "a@b.c", "tok", None);
+        let out = spaces(&c, Some("global"), Some("current"), None, 10, Some("page1=")).unwrap();
+        let req = handle.join().unwrap();
+        let request_line = req.lines().next().unwrap_or_default();
+        assert!(request_line.contains("/wiki/api/v2/spaces?"), "{request_line}");
+        assert!(request_line.contains("limit=10"), "{request_line}");
+        assert!(request_line.contains("cursor=page1%3D"), "{request_line}");
+        assert_eq!(out["results"][0]["key"], "ENG");
+        assert_eq!(out["next_cursor"], "page2=");
     }
 }
