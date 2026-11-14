@@ -213,7 +213,11 @@ fn bitbucket_pr_get_with_comments_diff_and_statuses() {
             text: "Nice",
             reply_to: None,
             path: Some("README.md"),
-            line: Some(5),
+            anchor: bitbucket::Anchor {
+                line: Some(5),
+                ..Default::default()
+            },
+            ..Default::default()
         },
     )
     .unwrap();

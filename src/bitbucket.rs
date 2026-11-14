@@ -1,6 +1,6 @@
 //! Bitbucket Cloud REST 2.0, shaped after twg's `bitbucket repo|pull-requests|pipeline|search`.
 
-use crate::client::Client;
+use crate::client::{ApiError, Client};
 use crate::markup::quote;
 use crate::time;
 use anyhow::{Result, anyhow, bail};
@@ -405,35 +405,376 @@ pub fn pr_number(s: &str) -> Result<u64> {
         .map_err(|_| anyhow!("'{s}' is not a pull request number or URL"))
 }
 
+/// Where an inline comment sits in the diff. `line`/`from_line` pick one
+/// line on the new or old side; the `start_*`/`end_*` pairs pick a range.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Anchor {
+    pub line: Option<u64>,
+    pub from_line: Option<u64>,
+    pub start_line: Option<u64>,
+    pub end_line: Option<u64>,
+    pub start_from_line: Option<u64>,
+    pub end_from_line: Option<u64>,
+}
+
+impl Anchor {
+    fn is_empty(&self) -> bool {
+        *self == Anchor::default()
+    }
+}
+
+fn usage(msg: impl Into<String>) -> anyhow::Error {
+    ApiError::usage(msg).into()
+}
+
+/// One end of a range: both or neither of `start`/`end`, with start <= end.
+fn range(start: Option<u64>, end: Option<u64>, names: (&str, &str)) -> Result<Option<(u64, u64)>> {
+    match (start, end) {
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(usage(format!("{} needs {} as well", names.0, names.1))),
+        (None, Some(_)) => Err(usage(format!("{} needs {} as well", names.1, names.0))),
+        (Some(s), Some(e)) if s > e => Err(usage(format!(
+            "{} ({s}) is after {} ({e})",
+            names.0, names.1
+        ))),
+        (Some(s), Some(e)) => Ok(Some((s, e))),
+    }
+}
+
+/// Bitbucket's `inline` object for a comment, or `None` for a general one.
+///
+/// New-side lines go in `to` (`start_to` for a range start), old-side lines
+/// in `from` (`start_from`). A single line can't be mixed with a range, and
+/// every line flag needs `--path`.
+pub fn inline_anchor(path: Option<&str>, a: &Anchor) -> Result<Option<Value>> {
+    for (v, name) in [
+        (a.line, "--line"),
+        (a.from_line, "--from-line"),
+        (a.start_line, "--start-line"),
+        (a.end_line, "--end-line"),
+        (a.start_from_line, "--start-from-line"),
+        (a.end_from_line, "--end-from-line"),
+    ] {
+        if v == Some(0) {
+            return Err(usage(format!("{name} must be 1 or more")));
+        }
+    }
+    let to_range = range(a.start_line, a.end_line, ("--start-line", "--end-line"))?;
+    let from_range = range(
+        a.start_from_line,
+        a.end_from_line,
+        ("--start-from-line", "--end-from-line"),
+    )?;
+    let single = a.line.is_some() || a.from_line.is_some();
+    if single && (to_range.is_some() || from_range.is_some()) {
+        return Err(usage(
+            "use either --line/--from-line or a --start-*/--end-* range, not both",
+        ));
+    }
+    let Some(file) = path else {
+        if a.is_empty() {
+            return Ok(None);
+        }
+        return Err(usage("inline line and range flags need --path"));
+    };
+    let mut inline = json!({"path": file});
+    if let Some(l) = a.line {
+        inline["to"] = l.into();
+    }
+    if let Some(l) = a.from_line {
+        inline["from"] = l.into();
+    }
+    if let Some((s, e)) = to_range {
+        inline["start_to"] = s.into();
+        inline["to"] = e.into();
+    }
+    if let Some((s, e)) = from_range {
+        inline["start_from"] = s.into();
+        inline["from"] = e.into();
+    }
+    Ok(Some(inline))
+}
+
+#[derive(Default)]
 pub struct NewComment<'a> {
     pub text: &'a str,
     pub reply_to: Option<u64>,
+    /// Save as unpublished review feedback.
+    pub pending: bool,
     pub path: Option<&'a str>,
-    pub line: Option<u64>,
+    pub anchor: Anchor,
 }
 
-/// `bitbucket pull-requests comment create`
-pub fn pr_comment(c: &Client, path: &str, id: u64, n: NewComment) -> Result<Value> {
+/// The request body for `pull-requests comment create`.
+pub fn comment_body(n: &NewComment) -> Result<Value> {
     let mut req = json!({"content": {"raw": n.text}});
     if let Some(p) = n.reply_to {
         req["parent"] = json!({"id": p});
     }
-    if let Some(file) = n.path {
-        req["inline"] = json!({"path": file});
-        if let Some(l) = n.line {
-            req["inline"]["to"] = l.into();
-        }
+    if n.pending {
+        req["pending"] = true.into();
     }
+    if let Some(inline) = inline_anchor(n.path, &n.anchor)? {
+        req["inline"] = inline;
+    }
+    Ok(req)
+}
+
+/// `bitbucket pull-requests comment create`: the REST comment.
+pub fn pr_comment(c: &Client, path: &str, id: u64, n: NewComment) -> Result<Value> {
+    let req = comment_body(&n)?;
     c.post(&format!("{path}/pullrequests/{id}/comments"), &req)
 }
 
-/// `bitbucket pull-requests diff`
-pub fn pr_diff(c: &Client, path: &str, id: u64) -> Result<String> {
-    match c.get(&format!("{path}/pullrequests/{id}/diff"), &[])? {
+fn comment_path(path: &str, id: u64, cid: u64) -> String {
+    format!("{path}/pullrequests/{id}/comments/{cid}")
+}
+
+/// `bitbucket pull-requests comment query`: REST comments as a list, in
+/// creation order, without deleted ones (as `pull-requests get --comments`).
+pub fn pr_comment_query(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
+    let items = paginate(
+        c,
+        &format!("{path}/pullrequests/{id}/comments"),
+        &[("sort", "created_on")],
+        limit,
+    )?;
+    Ok(items
+        .into_iter()
+        .filter(|cm| cm["deleted"] != true)
+        .collect())
+}
+
+/// `bitbucket pull-requests comment get`: the REST comment.
+pub fn pr_comment_get(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
+    c.get(&comment_path(path, id, cid), &[])
+}
+
+/// `bitbucket pull-requests comment update`: replaces the comment text.
+pub fn pr_comment_update(c: &Client, path: &str, id: u64, cid: u64, text: &str) -> Result<Value> {
+    c.put(
+        &comment_path(path, id, cid),
+        &json!({"content": {"raw": text}}),
+    )
+}
+
+/// `bitbucket pull-requests comment delete`. Bitbucket answers 204, so the
+/// result names what was removed.
+pub fn pr_comment_delete(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
+    c.delete(&comment_path(path, id, cid), &[])?;
+    Ok(json!({"id": cid, "pullRequest": id, "deleted": true}))
+}
+
+/// `bitbucket pull-requests comment resolve`: the REST resolution object.
+pub fn pr_comment_resolve(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
+    c.request(
+        "POST",
+        &format!("{}/resolve", comment_path(path, id, cid)),
+        &[],
+        None,
+    )
+}
+
+/// `bitbucket pull-requests comment reopen`. Bitbucket answers 204.
+pub fn pr_comment_reopen(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
+    c.delete(&format!("{}/resolve", comment_path(path, id, cid)), &[])?;
+    Ok(json!({"id": cid, "pullRequest": id, "resolved": false}))
+}
+
+fn task_path(path: &str, id: u64, tid: u64) -> String {
+    format!("{path}/pullrequests/{id}/tasks/{tid}")
+}
+
+/// `bitbucket pull-requests task create`: the REST task.
+pub fn pr_task_create(
+    c: &Client,
+    path: &str,
+    id: u64,
+    text: &str,
+    comment: Option<u64>,
+) -> Result<Value> {
+    let mut req = json!({"content": {"raw": text}});
+    if let Some(cid) = comment {
+        req["comment"] = json!({"id": cid});
+    }
+    c.post(&format!("{path}/pullrequests/{id}/tasks"), &req)
+}
+
+/// `bitbucket pull-requests task get`: the REST task.
+pub fn pr_task_get(c: &Client, path: &str, id: u64, tid: u64) -> Result<Value> {
+    c.get(&task_path(path, id, tid), &[])
+}
+
+/// Changes for `bitbucket pull-requests task update|resolve|reopen`.
+#[derive(Default)]
+pub struct TaskChange<'a> {
+    pub text: Option<&'a str>,
+    /// `Some(true)` resolves, `Some(false)` reopens.
+    pub resolved: Option<bool>,
+}
+
+/// The PUT body for a task change.
+pub fn task_body(t: &TaskChange) -> Result<Value> {
+    let mut req = json!({});
+    if let Some(text) = t.text {
+        req["content"] = json!({"raw": text});
+    }
+    if let Some(r) = t.resolved {
+        req["state"] = if r { "RESOLVED" } else { "UNRESOLVED" }.into();
+    }
+    if req.as_object().is_some_and(|o| o.is_empty()) {
+        return Err(usage("pass --text, --resolve or --reopen"));
+    }
+    Ok(req)
+}
+
+/// `bitbucket pull-requests task update|resolve|reopen`: the REST task.
+pub fn pr_task_update(c: &Client, path: &str, id: u64, tid: u64, t: &TaskChange) -> Result<Value> {
+    let req = task_body(t)?;
+    c.put(&task_path(path, id, tid), &req)
+}
+
+/// `bitbucket pull-requests task delete`. Bitbucket answers 204.
+pub fn pr_task_delete(c: &Client, path: &str, id: u64, tid: u64) -> Result<Value> {
+    c.delete(&task_path(path, id, tid), &[])?;
+    Ok(json!({"id": tid, "pullRequest": id, "deleted": true}))
+}
+
+/// `bitbucket pull-requests diffstat`: REST diffstat entries as a list.
+pub fn pr_diffstat(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
+    Ok(paginate(c, &format!("{path}/pullrequests/{id}/diffstat"), &[], limit)?.into())
+}
+
+/// `bitbucket pull-requests commits`: REST commits as a list.
+pub fn pr_commits(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
+    Ok(paginate(c, &format!("{path}/pullrequests/{id}/commits"), &[], limit)?.into())
+}
+
+fn raw_text(c: &Client, path: &str) -> Result<String> {
+    match c.get(path, &[])? {
         Value::String(s) => Ok(s),
         Value::Null => Ok(String::new()),
         other => Ok(other.to_string()),
     }
+}
+
+/// `bitbucket pull-requests diff`
+pub fn pr_diff(c: &Client, path: &str, id: u64) -> Result<String> {
+    raw_text(c, &format!("{path}/pullrequests/{id}/diff"))
+}
+
+/// `bitbucket pull-requests patch`: the mbox-style patch as text.
+pub fn pr_patch(c: &Client, path: &str, id: u64) -> Result<String> {
+    raw_text(c, &format!("{path}/pullrequests/{id}/patch"))
+}
+
+/// Parse `@@ -a,b +c,d @@` into (old start, old count, new start, new count).
+fn hunk_header(line: &str) -> Option<(u64, u64, u64, u64)> {
+    let mut parts = line.strip_prefix("@@ ")?.split(' ');
+    let side = |s: &str, sign: char| -> Option<(u64, u64)> {
+        let s = s.strip_prefix(sign)?;
+        match s.split_once(',') {
+            Some((a, b)) => Some((a.parse().ok()?, b.parse().ok()?)),
+            None => Some((s.parse().ok()?, 1)),
+        }
+    };
+    let (os, oc) = side(parts.next()?, '-')?;
+    let (ns, nc) = side(parts.next()?, '+')?;
+    Some((os, oc, ns, nc))
+}
+
+/// Strip git's `a/`/`b/` prefix; `/dev/null` is no file.
+fn diff_file(s: &str) -> Option<String> {
+    let s = s.split('\t').next().unwrap_or(s).trim_end();
+    if s == "/dev/null" {
+        return None;
+    }
+    Some(
+        s.strip_prefix("a/")
+            .or_else(|| s.strip_prefix("b/"))
+            .unwrap_or(s)
+            .to_string(),
+    )
+}
+
+/// Lines of a unified diff whose text contains `needle`, optionally in one
+/// file. Each match says which comment flag anchors it: added and context
+/// lines have a new-side `line`, removed and context lines an old-side
+/// `fromLine`.
+pub fn diff_lines(diff: &str, needle: &str, only_path: Option<&str>) -> Vec<Value> {
+    let only_path = only_path.map(|p| p.trim_start_matches("./"));
+    let mut out = Vec::new();
+    let (mut old_path, mut new_path) = (None::<String>, None::<String>);
+    let (mut old, mut new, mut old_left, mut new_left) = (0u64, 0u64, 0u64, 0u64);
+    let mut hunk = String::new();
+    for raw in diff.lines() {
+        if old_left == 0 && new_left == 0 {
+            if raw.starts_with("diff --git ") {
+                old_path = None;
+                new_path = None;
+            } else if let Some(p) = raw.strip_prefix("--- ") {
+                old_path = diff_file(p);
+            } else if let Some(p) = raw.strip_prefix("+++ ") {
+                new_path = diff_file(p);
+            } else if let Some((os, oc, ns, nc)) = hunk_header(raw) {
+                (old, old_left, new, new_left) = (os, oc, ns, nc);
+                hunk = raw.to_string();
+            }
+            continue;
+        }
+        let (kind, from_line, line, text) = if let Some(t) = raw.strip_prefix('+') {
+            new_left = new_left.saturating_sub(1);
+            new += 1;
+            ("added", None, Some(new - 1), t)
+        } else if let Some(t) = raw.strip_prefix('-') {
+            old_left = old_left.saturating_sub(1);
+            old += 1;
+            ("removed", Some(old - 1), None, t)
+        } else if raw.starts_with('\\') {
+            continue;
+        } else {
+            let t = raw.strip_prefix(' ').unwrap_or(raw);
+            old_left = old_left.saturating_sub(1);
+            new_left = new_left.saturating_sub(1);
+            old += 1;
+            new += 1;
+            ("context", Some(old - 1), Some(new - 1), t)
+        };
+        let file = new_path.as_deref().or(old_path.as_deref()).unwrap_or("");
+        let in_scope = only_path
+            .is_none_or(|p| new_path.as_deref() == Some(p) || old_path.as_deref() == Some(p));
+        if in_scope && text.contains(needle) {
+            let mut m = json!({
+                "path": file,
+                "type": kind,
+                "line": line,
+                "fromLine": from_line,
+                "text": text,
+                "hunk": hunk,
+            });
+            if old_path.is_some() && old_path != new_path {
+                m["oldPath"] = old_path.clone().into();
+            }
+            out.push(m);
+        }
+    }
+    out
+}
+
+/// `bitbucket pull-requests diff-line`: matching diff lines with the line
+/// numbers an inline comment needs.
+pub fn pr_diff_line(
+    c: &Client,
+    path: &str,
+    id: u64,
+    needle: &str,
+    only_path: Option<&str>,
+) -> Result<Value> {
+    if needle.is_empty() {
+        return Err(usage("--text must not be empty"));
+    }
+    let diff = pr_diff(c, path, id)?;
+    Ok(diff_lines(&diff, needle, only_path).into())
 }
 
 fn activity_event(item: &Value) -> (&str, &Value) {

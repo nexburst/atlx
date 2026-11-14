@@ -11,6 +11,14 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Bitbucket pull request review loop (#31): `comment create --reply-to
+  --pending` and inline anchors (`--path` with `--line`, `--from-line` or a
+  `--start-line/--end-line` or `--start-from-line/--end-from-line` range);
+  `comment query|get|update|delete|resolve|reopen`; `task
+  create|get|update|delete|resolve|reopen`; `diffstat`, `commits`, `patch`;
+  and `diff-line`, which finds diff lines by text and gives the line numbers
+  an inline comment needs. Comment and task `delete` need `--yes`, as in twg.
+
 - Confluence section reads and targeted edits (#27): `content get --detail
   outline` (headings with level, anchor, ADF `localId` and word count),
   `--section <heading>` (repeatable; Markdown by default, the exact storage

@@ -204,10 +204,31 @@ ok bb pull-requests merge --pull-request 42 --repo acme/api --merge-message 'Shi
 ok bb pull-requests activity 42 43 --repo acme/api --strict --batch-concurrency 2
 ok bb branch query -r acme/api --author 'Alice Example' --sort name -n 5
 ok bb pull-requests task query 42 -r acme/api -n 10
-gap #31 bb pull-requests diffstat 42 --repo acme/api
-gap #31 bb pull-requests commits 42 --repo acme/api
-gap #31 bb pull-requests patch 42 --repo acme/api
-gap #31 bb pull-requests comment create --pull-request 42 --text 'Pending note' --pending --repo acme/api
+ok bb pull-requests diffstat 42 --repo acme/api
+ok bb pull-requests commits 42 --repo acme/api
+ok bb pull-requests patch 42 --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text 'Pending note' --pending --repo acme/api
+ok bb pull-requests diffstat 42 -r acme/api -n 20
+ok bb pull-requests commits 42 -r acme/api --limit 10
+ok bb pull-requests diff-line 42 --text retry_after --path src/lib.rs --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text Agreed --reply-to 12345 --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text 'Was this intended' --path src/lib.rs --from-line 8 --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text 'Split this block' --path src/lib.rs --start-line 10 --end-line 14 --repo acme/api
+ok bb pull-requests comment create --pull-request 42 --text 'Old block' --path src/lib.rs --start-from-line 3 --end-from-line 6 --pending --repo acme/api
+ok bb pull-requests comment query 42 --repo acme/api --limit 100
+ok bb pull-requests comment get 42 --comment 12345 --repo acme/api
+ok bb pull-requests comment update --pull-request 42 --comment 12345 --text 'Fixed wording' --repo acme/api
+ok bb pull-requests comment delete --pull-request 42 --comment 12345 --yes --repo acme/api
+ok bb pull-requests comment resolve --pull-request 42 --comment 12345 --repo acme/api
+ok bb pull-requests comment reopen --pull-request 42 --comment 12345 --repo acme/api
+ok bb pull-requests task create --pull-request 42 --text 'Add a regression test' --comment 12345 --repo acme/api
+ok bb pull-requests task get 42 --task 7 --repo acme/api
+ok bb pull-requests task update --pull-request 42 --task 7 --text 'Add two tests' --repo acme/api
+ok bb pull-requests task update --pull-request 42 --task 7 --resolve --repo acme/api
+ok bb pull-requests task delete --pull-request 42 --task 7 -y --repo acme/api
+ok bb pull-requests task resolve --pull-request 42 --task 7 --repo acme/api
+ok bb pull-requests task reopen --pull-request 42 --task 7 --repo acme/api
+gap #13 bb pull-requests comment create --pull-request 42 --text 'See screenshot' --image shot.png --repo acme/api
 gap #32 bb pull-requests update --pull-request 42 --title 'Better title' --repo acme/api
 gap #32 bb pull-requests mergeability 42 --repo acme/api
 gap #32 bb pull-requests merge --pull-request 42 --wait --repo acme/api
