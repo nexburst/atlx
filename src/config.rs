@@ -1,8 +1,8 @@
 //! Configuration: a TOML file (`~/.config/atlx/config.toml`) overridden by
 //! `ATLX_*` environment variables.
 
-use crate::client::Client;
-use anyhow::{Context, Result, anyhow};
+use crate::client::{ApiError, Client};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -118,37 +118,41 @@ impl Config {
         Ok(p)
     }
 
-    fn site(&self) -> Result<String> {
-        self.site.as_deref().map(normalize_site).ok_or_else(|| {
-            anyhow!("no Atlassian site configured; run `atlx login` or set ATLX_SITE")
-        })
+    /// `https://SITE`, or `http://127.0.0.1:PORT` when the site is an explicit
+    /// `http://` loopback address (used by the offline tests).
+    fn site_url(&self) -> Result<String> {
+        let raw = self.site.as_deref().ok_or_else(|| {
+            ApiError::config("no Atlassian site configured; run `atlx login` or set ATLX_SITE")
+        })?;
+        if let Some(rest) = raw.trim().strip_prefix("http://") {
+            let rest = rest.trim_end_matches('/');
+            let host = rest.rsplit_once(':').map_or(rest, |(h, _)| h);
+            if matches!(host, "127.0.0.1" | "localhost" | "[::1]") {
+                return Ok(format!("http://{rest}"));
+            }
+        }
+        Ok(format!("https://{}", normalize_site(raw)))
     }
 
     fn creds(&self) -> Result<(&str, &str)> {
-        let email = self
-            .email
-            .as_deref()
-            .ok_or_else(|| anyhow!("no email configured; run `atlx login` or set ATLX_EMAIL"))?;
+        let email = self.email.as_deref().ok_or_else(|| {
+            ApiError::config("no email configured; run `atlx login` or set ATLX_EMAIL")
+        })?;
         let token = self.token.as_deref().ok_or_else(|| {
-            anyhow!("no API token configured; run `atlx login` or set ATLX_TOKEN")
+            ApiError::config("no API token configured; run `atlx login` or set ATLX_TOKEN")
         })?;
         Ok((email, token))
     }
 
     pub fn jira(&self) -> Result<Client> {
         let (email, token) = self.creds()?;
-        Ok(Client::new(
-            format!("https://{}", self.site()?),
-            email,
-            token,
-            self.timeout_ms,
-        ))
+        Ok(Client::new(self.site_url()?, email, token, self.timeout_ms))
     }
 
     pub fn confluence(&self) -> Result<Client> {
         let (email, token) = self.creds()?;
         Ok(Client::new(
-            format!("https://{}/wiki", self.site()?),
+            format!("{}/wiki", self.site_url()?),
             email,
             token,
             self.timeout_ms,
@@ -167,12 +171,12 @@ impl Config {
             .as_deref()
             .or(self.email.as_deref())
             .ok_or_else(|| {
-                anyhow!(
-                    "no Bitbucket email configured; run `atlx setup bitbucket` or set ATLX_BB_EMAIL"
+                ApiError::config(
+                    "no Bitbucket email configured; run `atlx setup bitbucket` or set ATLX_BB_EMAIL",
                 )
             })?;
         let token = self.bitbucket.token.as_deref().or(self.token.as_deref()).ok_or_else(|| {
-            anyhow!("no Bitbucket API token configured; run `atlx setup bitbucket` or set ATLX_BB_TOKEN")
+            ApiError::config("no Bitbucket API token configured; run `atlx setup bitbucket` or set ATLX_BB_TOKEN")
         })?;
         Ok((
             Client::new(BITBUCKET_API.into(), email, token, self.timeout_ms),

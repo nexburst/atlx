@@ -64,32 +64,35 @@ fn search_fans_out_in_parallel_and_isolates_product_failures() {
     );
     assert_eq!(partial["jira"][0]["key"], "J-2");
     assert_eq!(partial["bitbucket"][0]["repo"], "acme/infra");
-    let conf_err = partial["confluence"]["error"].as_str().unwrap();
-    assert!(conf_err.contains("HTTP 500"), "{conf_err}");
-    assert!(conf_err.contains("Confluence unavailable"), "{conf_err}");
+    let conf_err = &partial["confluence"]["error"];
+    assert_eq!(conf_err["statusCode"], 500, "{conf_err}");
+    assert_eq!(conf_err["category"], "server", "{conf_err}");
+    assert_eq!(conf_err["code"], "TWG_UPSTREAM_FAILURE", "{conf_err}");
+    assert_eq!(conf_err["message"], "Confluence unavailable", "{conf_err}");
 
     // 3. Direct search::run with unconfigured Config isolates credential error & skips unconfigured Bitbucket
     let empty_cfg = Config::default();
     let cfg_err = search::run(&empty_cfg, "deploy", 5, &[]);
     assert!(
-        cfg_err["jira"]["error"]
+        cfg_err["jira"]["error"]["message"]
             .as_str()
             .unwrap()
             .contains("no email configured")
     );
     assert!(
-        cfg_err["confluence"]["error"]
+        cfg_err["confluence"]["error"]["message"]
             .as_str()
             .unwrap()
             .contains("no email configured")
     );
+    assert_eq!(cfg_err["jira"]["error"]["category"], "config");
     assert!(cfg_err.get("bitbucket").is_none());
 
     // Explicit `--only bitbucket` includes bitbucket error even when unconfigured
     let only_bb = search::run(&empty_cfg, "deploy", 5, &[Product::Bitbucket]);
     assert!(only_bb.get("jira").is_none());
     assert!(
-        only_bb["bitbucket"]["error"]
+        only_bb["bitbucket"]["error"]["message"]
             .as_str()
             .unwrap()
             .contains("no Bitbucket email configured")

@@ -23,8 +23,16 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   than 10 MB (#16).
 - `CONTRIBUTING.md` and `AGENTS.md` contributor guides (#14).
 
+- Typed errors: `client::ApiError` carries the error class, HTTP status,
+  request and hint, and `client::Bytes` reports its HTTP status (#17).
+
 ### Changed
 
+- Errors follow twg: in JSON modes an `{"ok": false, "error": {...}}` envelope
+  goes to stdout and a readable report to stderr. Every failure exits 1
+  (clap argument errors included, previously 2), and a partly failed batch
+  read exits 3. Batch items now carry structured errors plus a `summary`, and
+  `atlx search` reports per-product errors as objects (#17).
 - Rich-text bodies convert with better fidelity: Markdown and HTML to Jira ADF
   and Confluence storage, and ADF back to GitHub-flavoured Markdown (#22).
 - The CLI moved into `src/cli/` and the mock-HTTP tests were split per product,

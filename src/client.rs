@@ -3,10 +3,14 @@
 //! methods), manual redirect handling that never sends `Authorization` to
 //! another origin, capped text/JSON bodies, binary downloads and streamed
 //! `multipart/form-data` uploads.
+//!
+//! Failures are [`ApiError`]s inside `anyhow::Error`, so callers can recover
+//! the HTTP status and error class with [`ApiError::find`] (or
+//! `err.downcast_ref::<ApiError>()`) instead of parsing message text.
 
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use std::collections::hash_map::RandomState;
 use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
@@ -27,6 +31,8 @@ pub struct Client {
 /// A raw (possibly binary) response body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bytes {
+    /// The final HTTP status, e.g. `206` for a satisfied `Range` request.
+    pub status: u16,
     pub data: Vec<u8>,
     /// The raw `Content-Type` header, if the server sent one.
     pub content_type: Option<String>,
@@ -199,9 +205,14 @@ impl Client {
             overall_timeout: false,
         };
         let (resp, desc) = self.execute("GET", path, query, Payload::Empty, &opts)?;
+        let status = resp.status();
         let content_type = resp.header("Content-Type").map(String::from);
         let data = self.read_body(resp, &desc)?;
-        Ok(Bytes { data, content_type })
+        Ok(Bytes {
+            status,
+            data,
+            content_type,
+        })
     }
 
     /// Stream a GET response to `dest` without a size cap. Refuses to replace
@@ -402,16 +413,24 @@ impl Client {
                         std::thread::sleep(wait.min(MAX_WAIT));
                         continue;
                     }
+                    let header = |names: &[&str]| {
+                        names
+                            .iter()
+                            .find_map(|n| r.header(n))
+                            .map(|v| truncate(v.trim(), 200))
+                            .filter(|v| !v.is_empty())
+                    };
+                    let request_id = header(&["X-ARequestId", "X-Request-Id"]);
+                    let trace_id = header(&["Atl-TraceId"]);
                     let text = read_capped(r.into_reader(), ERROR_BODY_CAP)
                         .ok()
                         .flatten()
                         .map(|b| String::from_utf8_lossy(&b).into_owned())
                         .unwrap_or_default();
-                    bail!(
-                        "{method} {url} failed: HTTP {code}: {}{}",
-                        error_message(&text),
-                        hint(code)
-                    );
+                    let mut err = ApiError::http(method, url, code, error_message(&text));
+                    err.request_id = request_id;
+                    err.trace_id = trace_id;
+                    return Err(err.into());
                 }
                 Err(ureq::Error::Transport(t)) => {
                     let transient = matches!(
@@ -424,7 +443,17 @@ impl Client {
                         std::thread::sleep(wait.min(MAX_WAIT));
                         continue;
                     }
-                    bail!("{method} {url} failed: {t}");
+                    let timed_out = t.kind() == ureq::ErrorKind::Io
+                        && t.to_string().to_ascii_lowercase().contains("timed out");
+                    let kind = if timed_out {
+                        ErrorKind::Timeout
+                    } else {
+                        ErrorKind::Network
+                    };
+                    let mut err = ApiError::new(kind, redact_url(&t.to_string()));
+                    err.method = Some(method.to_string());
+                    err.url = Some(redact_url(url));
+                    return Err(err.into());
                 }
             }
         }
@@ -740,12 +769,331 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn hint(code: u16) -> &'static str {
+fn hint(code: u16) -> Option<&'static str> {
     match code {
-        401 => " (check your email and API token: `atlx whoami`)",
-        403 => " (the token may lack the permission or scope this needs)",
-        _ => "",
+        401 => Some("check your email and API token: `atlx whoami`"),
+        403 => Some("the token may lack the permission or scope this needs"),
+        _ => None,
     }
+}
+
+/// Process exit codes. They follow twg: any failure exits 1, and a batch
+/// read where only some inputs failed exits 3. The JSON error envelope (see
+/// [`ApiError::envelope`]) carries the finer-grained classification.
+pub mod exit {
+    pub const OK: i32 = 0;
+    pub const FAILURE: i32 = 1;
+    /// A batch read (`get A B ...`) where some, but not all, inputs failed.
+    pub const PARTIAL: i32 = 3;
+}
+
+/// What went wrong, independent of the message text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorKind {
+    /// HTTP 401.
+    Auth,
+    /// HTTP 403.
+    Forbidden,
+    /// HTTP 404 and 410.
+    NotFound,
+    /// HTTP 409 and 412 (e.g. Confluence version conflicts).
+    Conflict,
+    /// HTTP 400, 422 and any other 4xx not listed above.
+    Validation,
+    /// HTTP 429, after the client's own retries.
+    RateLimited,
+    /// HTTP 5xx.
+    Server,
+    /// No HTTP response at all (DNS, connect, TLS, connection reset).
+    Network,
+    /// The request timed out.
+    Timeout,
+    /// Missing site, email or token.
+    Config,
+    /// Invalid arguments caught after parsing (missing `--yes`, no IDs, ...).
+    Usage,
+    /// Anything else (local I/O, oversized bodies, redirect limits, ...).
+    Other,
+}
+
+impl ErrorKind {
+    pub fn from_status(status: u16) -> Self {
+        match status {
+            401 => Self::Auth,
+            403 => Self::Forbidden,
+            404 | 410 => Self::NotFound,
+            409 | 412 => Self::Conflict,
+            429 => Self::RateLimited,
+            500..=599 => Self::Server,
+            400..=499 => Self::Validation,
+            _ => Self::Other,
+        }
+    }
+
+    /// Stable `snake_case` name, emitted as `category` in JSON errors.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auth => "auth",
+            Self::Forbidden => "forbidden",
+            Self::NotFound => "not_found",
+            Self::Conflict => "conflict",
+            Self::Validation => "validation",
+            Self::RateLimited => "rate_limited",
+            Self::Server => "server",
+            Self::Network => "network",
+            Self::Timeout => "timeout",
+            Self::Config => "config",
+            Self::Usage => "usage",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A classified failure. API functions return it inside `anyhow::Error`;
+/// recover it with [`ApiError::find`] or [`ApiError::from_anyhow`].
+///
+/// `url` never contains userinfo and no request headers are kept, so the
+/// value is safe to print.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiError {
+    pub kind: ErrorKind,
+    /// The HTTP status, when the server answered.
+    pub status: Option<u16>,
+    pub method: Option<String>,
+    pub url: Option<String>,
+    /// Human-readable message (for HTTP errors, extracted from the body).
+    pub message: String,
+    pub hint: Option<String>,
+    /// `X-ARequestId` / `X-Request-Id` response header.
+    pub request_id: Option<String>,
+    /// `Atl-TraceId` response header.
+    pub trace_id: Option<String>,
+}
+
+impl ApiError {
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            status: None,
+            method: None,
+            url: None,
+            message: message.into(),
+            hint: None,
+            request_id: None,
+            trace_id: None,
+        }
+    }
+
+    /// An HTTP error response.
+    pub fn http(method: &str, url: &str, status: u16, message: impl Into<String>) -> Self {
+        let mut e = Self::new(ErrorKind::from_status(status), message);
+        e.status = Some(status);
+        e.method = Some(method.to_string());
+        e.url = Some(redact_url(url));
+        e.hint = hint(status).map(String::from);
+        e
+    }
+
+    /// Missing or unusable site/credential configuration.
+    pub fn config(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Config, message)
+    }
+
+    /// Invalid arguments detected after clap parsing.
+    pub fn usage(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Usage, message)
+    }
+
+    /// The `ApiError` inside an `anyhow` chain (through any `context`).
+    pub fn find(err: &anyhow::Error) -> Option<&ApiError> {
+        err.downcast_ref::<ApiError>()
+    }
+
+    /// Classify any error. An `ApiError` in the chain keeps its fields, with
+    /// outer `context` messages prefixed to `message`; anything else becomes
+    /// [`ErrorKind::Other`] with the whole chain as its message.
+    pub fn from_anyhow(err: &anyhow::Error) -> ApiError {
+        let Some(api) = Self::find(err) else {
+            return Self::new(ErrorKind::Other, format!("{err:#}"));
+        };
+        let mut parts = Vec::new();
+        for cause in err.chain() {
+            match cause.downcast_ref::<ApiError>() {
+                Some(a) => {
+                    parts.push(a.message.clone());
+                    break;
+                }
+                None => parts.push(cause.to_string()),
+            }
+        }
+        let mut out = api.clone();
+        out.message = parts.join(": ");
+        out
+    }
+
+    /// twg-compatible error code (`TWG_*`).
+    pub fn code(&self) -> &'static str {
+        match self.kind {
+            ErrorKind::RateLimited => "TWG_RATE_LIMITED",
+            ErrorKind::Server if matches!(self.status, Some(502..=504)) => {
+                "TWG_UPSTREAM_UNAVAILABLE"
+            }
+            ErrorKind::Server => "TWG_UPSTREAM_FAILURE",
+            ErrorKind::Network => "TWG_NETWORK_ERROR",
+            ErrorKind::Timeout => "TWG_REQUEST_TIMEOUT",
+            _ if self.status.is_some() => "TWG_TOOL_EXECUTION_FAILED",
+            _ => "TWG_COMMAND_FAILED",
+        }
+    }
+
+    /// twg's `statusCode`: the HTTP status, or the status twg reports for
+    /// the equivalent local failure (400 for usage, 401 for missing
+    /// credentials). Only `status` says whether a server actually answered.
+    pub fn status_code(&self) -> Option<u16> {
+        self.status.or(match self.kind {
+            ErrorKind::Usage => Some(400),
+            ErrorKind::Config => Some(401),
+            _ => None,
+        })
+    }
+
+    /// twg's `retry` hint: `(recommended, guidance)`.
+    pub fn retry(&self) -> (bool, &'static str) {
+        match self.code() {
+            "TWG_RATE_LIMITED" | "TWG_UPSTREAM_UNAVAILABLE" => (true, "retry_with_backoff"),
+            "TWG_NETWORK_ERROR" | "TWG_REQUEST_TIMEOUT" => (true, "retry_later"),
+            _ => (false, "do_not_retry_unchanged"),
+        }
+    }
+
+    /// The process exit code for this error (twg exits 1 for every failure).
+    pub fn exit_code(&self) -> i32 {
+        exit::FAILURE
+    }
+
+    /// The `error` object of the JSON error envelope.
+    pub fn to_json(&self) -> Value {
+        let code = self.code();
+        let mut m = Map::new();
+        m.insert("code".into(), code.into());
+        m.insert("kind".into(), code.to_ascii_lowercase().into());
+        m.insert("message".into(), self.message.clone().into());
+        if let Some(s) = self.status_code() {
+            m.insert("statusCode".into(), s.into());
+        }
+        if let Some(t) = &self.trace_id {
+            m.insert("traceId".into(), t.clone().into());
+        }
+        if let Some(r) = &self.request_id {
+            m.insert("requestId".into(), r.clone().into());
+        }
+        if let Some(s) = self.status {
+            let mut d = Map::new();
+            d.insert("message".into(), self.message.clone().into());
+            d.insert("statusCode".into(), s.into());
+            d.insert("service".into(), "backend".into());
+            if let Some(t) = &self.trace_id {
+                d.insert("traceId".into(), t.clone().into());
+            }
+            m.insert("downstreamError".into(), Value::Object(d));
+        }
+        m.insert("category".into(), self.kind.as_str().into());
+        for (k, v) in [
+            ("hint", &self.hint),
+            ("method", &self.method),
+            ("url", &self.url),
+        ] {
+            if let Some(v) = v {
+                m.insert(k.into(), v.clone().into());
+            }
+        }
+        let (recommended, guidance) = self.retry();
+        m.insert(
+            "retry".into(),
+            json!({"recommended": recommended, "guidance": guidance}),
+        );
+        Value::Object(m)
+    }
+
+    /// `{"ok": false, "error": {...}}`, the envelope printed in JSON modes.
+    pub fn envelope(&self) -> Value {
+        json!({"ok": false, "error": self.to_json()})
+    }
+
+    /// The short per-item error used in batch output.
+    pub fn item_json(&self) -> Value {
+        let mut m = Map::new();
+        m.insert("message".into(), self.message.clone().into());
+        if let Some(s) = self.status {
+            m.insert("status".into(), s.into());
+        }
+        m.insert("code".into(), self.code().into());
+        m.insert("category".into(), self.kind.as_str().into());
+        Value::Object(m)
+    }
+
+    /// The multi-line report printed on stderr.
+    pub fn report(&self) -> String {
+        let mut out = format!("Error: {}\n  Code:        {}\n", self.message, self.code());
+        if let Some(s) = self.status_code() {
+            out.push_str(&format!("  HTTP status: {s}\n"));
+        }
+        if let Some(r) = &self.request_id {
+            out.push_str(&format!("  Request ID:  {r}\n"));
+        }
+        if let (Some(m), Some(u)) = (&self.method, &self.url) {
+            out.push_str(&format!("  Request:     {m} {u}\n"));
+        }
+        if let Some(h) = &self.hint {
+            out.push_str(&format!("  Hint:        {h}\n"));
+        }
+        out
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let (Some(m), Some(u)) = (&self.method, &self.url) {
+            write!(f, "{m} {u} failed: ")?;
+            if let Some(s) = self.status {
+                write!(f, "HTTP {s}: ")?;
+            }
+        }
+        f.write_str(&self.message)?;
+        if let Some(h) = &self.hint {
+            write!(f, " ({h})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+/// Drop any `user:password@` from URLs inside `s` before it is shown.
+pub fn redact_url(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail
+            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
+            .unwrap_or(tail.len());
+        let authority = &tail[..end];
+        match authority.rfind('@') {
+            Some(at) => out.push_str(&authority[at + 1..]),
+            None => out.push_str(authority),
+        }
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Pull a human-readable message out of the various Atlassian error shapes.
@@ -805,7 +1153,87 @@ fn truncate(s: &str, n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, error_message, join_location, parse_retry_after};
+    use super::{
+        ApiError, Client, ErrorKind, error_message, exit, join_location, parse_retry_after,
+        redact_url,
+    };
+
+    #[test]
+    fn status_maps_to_kind_code_retry_and_exit() {
+        let cases: &[(u16, ErrorKind, &str, bool)] = &[
+            (
+                400,
+                ErrorKind::Validation,
+                "TWG_TOOL_EXECUTION_FAILED",
+                false,
+            ),
+            (401, ErrorKind::Auth, "TWG_TOOL_EXECUTION_FAILED", false),
+            (
+                403,
+                ErrorKind::Forbidden,
+                "TWG_TOOL_EXECUTION_FAILED",
+                false,
+            ),
+            (404, ErrorKind::NotFound, "TWG_TOOL_EXECUTION_FAILED", false),
+            (409, ErrorKind::Conflict, "TWG_TOOL_EXECUTION_FAILED", false),
+            (412, ErrorKind::Conflict, "TWG_TOOL_EXECUTION_FAILED", false),
+            (
+                422,
+                ErrorKind::Validation,
+                "TWG_TOOL_EXECUTION_FAILED",
+                false,
+            ),
+            (429, ErrorKind::RateLimited, "TWG_RATE_LIMITED", true),
+            (500, ErrorKind::Server, "TWG_UPSTREAM_FAILURE", false),
+            (503, ErrorKind::Server, "TWG_UPSTREAM_UNAVAILABLE", true),
+        ];
+        for &(status, kind, code, retry) in cases {
+            let e = ApiError::http("GET", "https://x.test/a", status, "m");
+            assert_eq!(e.kind, kind, "{status}");
+            assert_eq!(e.code(), code, "{status}");
+            assert_eq!(e.retry().0, retry, "{status}");
+            assert_eq!(e.exit_code(), exit::FAILURE, "{status}");
+            let j = e.to_json();
+            assert_eq!(j["statusCode"], status);
+            assert_eq!(j["kind"], code.to_ascii_lowercase());
+            assert_eq!(j["category"], kind.as_str());
+            assert_eq!(j["downstreamError"]["statusCode"], status);
+        }
+        let cfg = ApiError::config("no token").to_json();
+        assert_eq!(cfg["code"], "TWG_COMMAND_FAILED");
+        assert_eq!(cfg["category"], "config");
+        assert_eq!(cfg["statusCode"], 401);
+        assert!(cfg.get("downstreamError").is_none());
+        let net = ApiError::new(ErrorKind::Network, "refused");
+        assert_eq!(net.code(), "TWG_NETWORK_ERROR");
+        assert_eq!(net.retry(), (true, "retry_later"));
+    }
+
+    #[test]
+    fn from_anyhow_keeps_kind_through_context() {
+        use anyhow::Context;
+        let r: anyhow::Result<()> =
+            Err(ApiError::http("GET", "https://x.test", 404, "gone").into());
+        let e = r.context("loading PROJ-1").unwrap_err();
+        let api = ApiError::from_anyhow(&e);
+        assert_eq!(api.kind, ErrorKind::NotFound);
+        assert_eq!(api.message, "loading PROJ-1: gone");
+        let other = ApiError::from_anyhow(&anyhow::anyhow!("disk full"));
+        assert_eq!(other.kind, ErrorKind::Other);
+    }
+
+    #[test]
+    fn redacts_userinfo() {
+        assert_eq!(
+            redact_url("https://me:tok@x.test/a?b=1"),
+            "https://x.test/a?b=1"
+        );
+        assert_eq!(
+            redact_url("GET http://u:p@127.0.0.1:9/x failed"),
+            "GET http://127.0.0.1:9/x failed"
+        );
+        assert_eq!(redact_url("no url here"), "no url here");
+    }
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]

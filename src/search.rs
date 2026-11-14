@@ -1,14 +1,14 @@
 //! Cross-product search (atlx extra; twg's equivalent `rovo search` needs Rovo):
 //! fan out to Jira, Confluence and Bitbucket in parallel.
 
-use crate::client::Client;
+use crate::client::{ApiError, Client};
 use crate::config::Config;
 use crate::{Product, bitbucket, confluence, jira};
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 fn settle(r: Result<Value>) -> Value {
-    r.unwrap_or_else(|e| json!({"error": format!("{e:#}")}))
+    r.unwrap_or_else(|e| json!({"error": ApiError::from_anyhow(&e).to_json()}))
 }
 
 pub fn run(cfg: &Config, query: &str, limit: usize, only: &[Product]) -> Value {
