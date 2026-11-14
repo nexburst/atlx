@@ -82,8 +82,10 @@ Confluence + Bitbucket in parallel) and `atlx api <jira|confluence|bitbucket>
 
 Like twg, bodies default to `html` and accept `markdown` and `plain`. Confluence
 stores HTML as-is. Jira descriptions/comments are converted to ADF: headings,
-lists, code blocks, quotes, bold, inline code and links survive; other HTML is
-simplified.
+nested lists, task lists, tables, code blocks, quotes, links, images, line
+breaks and bold/italic/underline/strikethrough/code marks survive. Reads
+(`--format md`, Jira descriptions and comments) come back as GitHub-flavoured
+Markdown.
 
 Errors go to stderr with a non-zero exit code. In `search`, a failing product is
 reported inline (`{"error": ...}`) so the other results still come through.
