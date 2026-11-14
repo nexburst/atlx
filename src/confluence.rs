@@ -685,6 +685,39 @@ pub fn space(c: &Client, identifier: &str) -> Result<Value> {
     Ok(o)
 }
 
+/// Labels of one space, as `[{id, name, prefix}]`.
+pub fn space_labels(c: &Client, space_id: &str) -> Result<Value> {
+    let v = c.get(
+        &format!("/api/v2/spaces/{}/labels", enc(space_id)),
+        &[("limit", "250")],
+    )?;
+    Ok(v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|l| json!({"id": l["id"], "name": l["name"], "prefix": l["prefix"]}))
+        .collect())
+}
+
+/// `--labels` on `space get` / `space list`: add a `labels` array to one
+/// space summary, or to each space in a list's `results`.
+pub fn add_space_labels(c: &Client, v: &mut Value) -> Result<()> {
+    if let Some(results) = v["results"].as_array_mut() {
+        for s in results {
+            add_space_labels(c, s)?;
+        }
+        return Ok(());
+    }
+    let id = v["id"]
+        .as_str()
+        .map(String::from)
+        .or_else(|| v["id"].as_u64().map(|n| n.to_string()));
+    if let Some(id) = id {
+        v["labels"] = space_labels(c, &id)?;
+    }
+    Ok(())
+}
+
 fn match_personal_space<'a>(user: &Value, spaces: &'a [Value]) -> Option<&'a Value> {
     let account_id = user["accountId"].as_str();
     let personal_key = user["personalSpace"]["key"].as_str();

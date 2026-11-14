@@ -345,3 +345,252 @@ fn jira_transition_handles_has_screen_true_and_false() {
 
     assert_eq!(reqs[4].path, "/rest/api/3/issue/PROJ-1/comment");
 }
+
+#[test]
+fn jira_space_query_sends_twg_filters_and_offset() {
+    let srv = MockServer::with_responses([MockResponse::json(
+        200,
+        json!({
+            "isLast": true,
+            "values": [{"id": "10000", "key": "PROJ", "name": "Project", "projectTypeKey": "software"}]
+        }),
+    )]);
+    let client = srv.client();
+    let keys = vec!["PROJ".to_string(), "OPS".to_string()];
+    let out = jira::space_query(
+        &client,
+        &jira::SpaceQuery {
+            query: Some("proj"),
+            keys: &keys,
+            type_key: Some("software"),
+            order_by: Some("name"),
+            start: 10,
+            limit: 5,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(out[0]["key"], "PROJ");
+    assert_eq!(out[0]["type"], "software");
+
+    let reqs = srv.requests();
+    assert_eq!(reqs[0].path, "/rest/api/3/project/search");
+    assert!(
+        reqs[0].query.contains("keys=PROJ&keys=OPS"),
+        "{}",
+        reqs[0].query
+    );
+    assert_eq!(reqs[0].query_param("query").as_deref(), Some("proj"));
+    assert_eq!(reqs[0].query_param("typeKey").as_deref(), Some("software"));
+    assert_eq!(reqs[0].query_param("orderBy").as_deref(), Some("name"));
+    assert_eq!(reqs[0].query_param("startAt").as_deref(), Some("10"));
+    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("5"));
+}
+
+#[test]
+fn jira_board_query_by_issue_and_sprints_for_project() {
+    let srv = MockServer::with_responses([
+        // issue_project
+        MockResponse::json(200, json!({"fields": {"project": {"key": "PROJ"}}})),
+        // board_query
+        MockResponse::json(
+            200,
+            json!({"isLast": true, "values": [{"id": 12, "name": "PROJ board", "type": "scrum", "location": {"projectKey": "PROJ"}}]}),
+        ),
+        // project_board
+        MockResponse::json(
+            200,
+            json!({"isLast": true, "values": [{"id": 12, "name": "PROJ board"}]}),
+        ),
+        // sprints
+        MockResponse::json(
+            200,
+            json!({"isLast": true, "values": [{"id": 99, "name": "Sprint 9", "state": "active", "originBoardId": 12}]}),
+        ),
+    ]);
+    let client = srv.client();
+    let project = jira::issue_project(&client, "PROJ-1").unwrap();
+    assert_eq!(project, "PROJ");
+    let boards = jira::board_query(
+        &client,
+        &jira::BoardQuery {
+            project: Some(&project),
+            name: Some("board"),
+            filter_id: Some("10100"),
+            start: 0,
+            limit: 10,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(boards[0]["id"], 12);
+    assert_eq!(boards[0]["project_key"], "PROJ");
+
+    let board = jira::project_board(&client, "PROJ").unwrap();
+    let sprints = jira::sprints(&client, board, Some("active"), 5, 10).unwrap();
+    assert_eq!(sprints[0]["id"], 99);
+
+    let reqs = srv.requests();
+    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1");
+    assert_eq!(reqs[0].query_param("fields").as_deref(), Some("project"));
+    assert_eq!(reqs[1].path, "/rest/agile/1.0/board");
+    assert_eq!(
+        reqs[1].query_param("projectKeyOrId").as_deref(),
+        Some("PROJ")
+    );
+    assert_eq!(reqs[1].query_param("name").as_deref(), Some("board"));
+    assert_eq!(reqs[1].query_param("filterId").as_deref(), Some("10100"));
+    assert_eq!(reqs[1].query_param("maxResults").as_deref(), Some("10"));
+    assert_eq!(reqs[3].path, "/rest/agile/1.0/board/12/sprint");
+    assert_eq!(reqs[3].query_param("state").as_deref(), Some("active"));
+    assert_eq!(reqs[3].query_param("startAt").as_deref(), Some("5"));
+}
+
+#[test]
+fn jira_resolve_board_by_id_url_and_name() {
+    let srv = MockServer::with_responses([
+        MockResponse::json(
+            200,
+            json!({"isLast": true, "values": [
+                {"id": 7, "name": "Team Board Extra"},
+                {"id": 8, "name": "Team Board"}
+            ]}),
+        ),
+        MockResponse::json(200, json!({"isLast": true, "values": []})),
+    ]);
+    let client = srv.client();
+    assert_eq!(jira::resolve_board(&client, "12").unwrap(), 12);
+    assert_eq!(
+        jira::resolve_board(
+            &client,
+            "https://acme.atlassian.net/jira/software/projects/PROJ/boards/34"
+        )
+        .unwrap(),
+        34
+    );
+    assert_eq!(
+        jira::resolve_board(
+            &client,
+            "https://acme.atlassian.net/secure/RapidBoard.jspa?rapidView=56"
+        )
+        .unwrap(),
+        56
+    );
+    assert_eq!(jira::resolve_board(&client, "team board").unwrap(), 8);
+    assert!(jira::resolve_board(&client, "Nope").is_err());
+    let reqs = srv.requests();
+    assert_eq!(reqs.len(), 2);
+    assert_eq!(reqs[0].query_param("name").as_deref(), Some("team board"));
+}
+
+#[test]
+fn jira_project_board_rejects_several_boards() {
+    let srv = MockServer::with_responses([MockResponse::json(
+        200,
+        json!({"isLast": true, "values": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}]}),
+    )]);
+    let err = jira::project_board(&srv.client(), "PROJ").unwrap_err();
+    assert!(err.to_string().contains("several boards"), "{err}");
+}
+
+#[test]
+fn jira_sprint_workitems_with_fields_and_offset() {
+    let srv = MockServer::with_responses([MockResponse::json(
+        200,
+        json!({
+            "total": 3,
+            "issues": [{"key": "PROJ-3", "fields": {"summary": "Three", "labels": ["x"]}}]
+        }),
+    )]);
+    let client = srv.client();
+    let fields = vec!["labels".to_string()];
+    let out = jira::sprint_issues(
+        &client,
+        jira::sprint_ref("ari:cloud:jira-software:abc:sprint/99").unwrap(),
+        &jira::SprintIssues {
+            jql: Some("status != Done"),
+            fields: &fields,
+            expand: Some("names"),
+            start: 2,
+            limit: 10,
+        },
+    )
+    .unwrap();
+    assert_eq!(out[0]["key"], "PROJ-3");
+    assert_eq!(out[0]["labels"], json!(["x"]));
+    let reqs = srv.requests();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].path, "/rest/agile/1.0/sprint/99/issue");
+    assert_eq!(reqs[0].query_param("startAt").as_deref(), Some("2"));
+    assert_eq!(reqs[0].query_param("expand").as_deref(), Some("names"));
+    assert_eq!(
+        reqs[0].query_param("jql").as_deref(),
+        Some("status != Done")
+    );
+    assert!(reqs[0].query_param("fields").unwrap().contains("labels"));
+    assert!(jira::sprint_ref("not a sprint").is_err());
+}
+
+#[test]
+fn jira_link_workitem_sends_source_as_inward_issue_per_target() {
+    let srv = MockServer::with_responses([MockResponse::empty(201), MockResponse::empty(201)]);
+    let client = srv.client();
+    let targets = vec!["PROJ-2".to_string(), "PROJ-3".to_string()];
+    let out = jira::link_workitem(&client, "PROJ-1", &targets, "Blocks").unwrap();
+    assert_eq!(out.as_array().unwrap().len(), 2);
+    assert_eq!(out[1]["outward"], "PROJ-3");
+    let reqs = srv.requests();
+    assert_eq!(reqs.len(), 2);
+    for (r, t) in reqs.iter().zip(["PROJ-2", "PROJ-3"]) {
+        assert_eq!(r.method, "POST");
+        assert_eq!(r.path, "/rest/api/3/issueLink");
+        let b = r.json_body();
+        assert_eq!(b["inwardIssue"], json!({"key": "PROJ-1"}));
+        assert_eq!(b["outwardIssue"], json!({"key": t}));
+        assert_eq!(b["type"], json!({"name": "Blocks"}));
+    }
+
+    let one = MockServer::with_responses([MockResponse::empty(201)]);
+    let v = jira::link_workitem(&one.client(), "PROJ-1", &targets[..1], "10000").unwrap();
+    assert_eq!(v["outward"], "PROJ-2");
+    assert_eq!(
+        one.requests()[0].json_body()["type"],
+        json!({"id": "10000"})
+    );
+    assert!(jira::link_workitem(&one.client(), "PROJ-1", &[], "Blocks").is_err());
+}
+
+#[test]
+fn jira_weblink_and_user_by_account() {
+    let srv = MockServer::with_responses([
+        MockResponse::json(201, json!({"id": 10001})),
+        MockResponse::json(
+            200,
+            json!({"accountId": "abc", "displayName": "Alice", "active": true, "accountType": "atlassian"}),
+        ),
+    ]);
+    let client = srv.client();
+    let out = jira::link_remote(
+        &client,
+        "PROJ-1",
+        &jira::Weblink {
+            url: "https://example.com/spec",
+            title: "Spec",
+            global_id: Some("spec-1"),
+            resolved: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(out["id"], 10001);
+    let users = jira::user_by_account(&client, "ari:cloud:identity::user/abc").unwrap();
+    assert_eq!(users[0]["display_name"], "Alice");
+
+    let reqs = srv.requests();
+    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1/remotelink");
+    let body = reqs[0].json_body();
+    assert_eq!(body["globalId"], "spec-1");
+    assert_eq!(body["object"]["status"]["resolved"], true);
+    assert_eq!(reqs[1].path, "/rest/api/3/user");
+    assert_eq!(reqs[1].query_param("accountId").as_deref(), Some("abc"));
+}

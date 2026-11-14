@@ -161,31 +161,41 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | --- | --- |
 | `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth; `-p/--profile`, `login --new-profile`, `--token-cmd` (atlx extra) |
 | `auth profile list`, `auth profile default`, `auth profile rename`, `auth profile migrate` | Profiles in `config.toml`; `list` never shows tokens |
-| `user search <query>` | `--limit`; returns `account_id`, `display_name`, `email`, `active`, `account_type` |
-| `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches |
+| `user search [name...]` | `--name`/`--query`, `--email`, `--account-id`, `-n/--limit`; returns `account_id`, `display_name`, `email`, `active`, `account_type` |
+| `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches fetched `--batch-concurrency` at a time (default 5, max 20), in input order |
 | `jira workitem search <text...>` | `text ~ "…" ORDER BY updated DESC`; `--limit`, `--after` |
-| `jira workitem query --jql` | `--limit`, `--after` (cursor), `--fields` |
+| `jira workitem query --jql` | `-n/--limit`, `--first`, `--after` (cursor), `--fields`; `--last`/`--before` are rejected (REST pages forward only) |
 | `jira workitem create` | `--space --type --summary --description[-format] --assignee --reporter --priority --labels --parent --field --fields-json` |
-| `jira workitem create-meta --space` | `--type` to inspect required/allowed fields for an issue type |
+| `jira workitem field create-metadata --space` | `--type` to inspect required/allowed fields for an issue type; also `custom-fields create-metadata` |
 | `jira workitem update --id` | fields, `--add-/--remove-labels`, components, fix versions, `--status`, `--comment` |
 | `jira workitem comment create` | `--issue-id --body --body-format`, visibility, `--internal` |
 | `jira workitem transition --id` | omit `--transition-id` to list; `--field`, `--transition-comment` |
 | `jira workitem transitions query --id` | includes required screen fields |
-| `jira workitem link types\|create\|remote` | `--inward/--outward/--type` or `--id/--url/--title/--relationship` |
+| `jira workitem link-types query`, `jira workitem link workitem\|weblink` | `workitem`: `--id --target-id... --link-type-id` (`--id` reads with the outward phrase: A blocks B); `weblink`: `--id --url --title`, `--relationship`, `--global-id`, `--application-name/-type`, `--summary`, `--icon-url`, `--resolved` |
 | `jira field list` | `--query`, `--custom-only` |
-| `jira project list\|get` | `--query`, `--limit`, or `<key-or-id>` |
-| `jira board list`, `jira sprint list\|issues` | Agile boards (`--project`, `--type`) and sprints (`--board`, `--state`, `--sprint`, `--jql`) |
+| `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
+| `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|full`, `--format html\|md`, `--body-only`, `--reference-space` |
-| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; delete needs `--yes`, optional `--purge` |
-| `confluence content comments list\|create` | `--inline`, `--format md\|html`, `--limit`, `--cursor`; `--body`, `--format` |
-| `confluence content list\|children\|labels`, `confluence tree` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
-| `confluence space list\|get\|me` | `me` resolves current user's personal space |
-| `bitbucket\|bb repo query\|get\|file\|branches` | `--workspace`, `--repo` (slug, `ws/slug` or URL), `--ref`, `--query` |
-| `bb pull-requests query\|get\|create\|diff\|activity\|tasks`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type` |
-| `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `--strategy merge_commit\|squash\|fast_forward`, `--close-source-branch`, `--yes` |
+| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `delete` (atlx extra) moves to the trash, or `--purge` |
+| `confluence content comments list\|create --id` | `--comment-type footer\|inline`, `--body-format md\|html`, `--limit`, `--cursor`; create takes `--body`/`--body-file` and `--body-format` (markdown by default) |
+| `confluence content list\|children`, `confluence content labels list --id`, `confluence tree [ref]\|--target` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
+| `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
+| `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |
+| `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |
+| `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `merge --pull-request`, `--merge-strategy merge_commit\|squash\|fast_forward`, `--merge-message`, `--close-source-branch`/`--keep-source-branch`; no confirmation prompt |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
 | `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
+
+Older atlx names from 0.1 (`jira project list|get`, `jira board list`,
+`jira sprint list|issues`, `jira workitem create-meta`, `jira workitem link
+types|create|remote`, `bb repo branches`, `bb pull-requests tasks`, the
+positional forms of `confluence content labels`, `comments list|create` and
+`pull-requests merge`, and the `--inline`, `--format`, `--strategy` and
+`--message` flags they used) still work but are hidden from help. In text mode
+on a terminal they print a one-line note naming the new form; JSON and piped
+output stay clean. They will be removed in 0.3. Like twg, merge, decline and
+content delete ask for no confirmation; `--yes` is still accepted and ignored.
 
 atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
 Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +
@@ -251,10 +261,6 @@ command by command. Today these differences remain:
   objects/arrays (and `{"items": [...], "summary": {...}}` for multi-ID
   batches). Switching to `twg`'s `{"data": ...}` envelope and key names is
   planned in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
-- **Destructive commands still need `--yes`**: `twg` has no such flag on
-  merge, decline or content delete.
-  [#18](https://github.com/pedrosanzmtz/atlx/issues/18) removes the
-  requirement (`--yes` stays accepted).
 - **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
   with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
   environment variables) instead of `twg`'s OAuth flow.
@@ -300,7 +306,7 @@ when stdout is piped), a failed command prints an error envelope on **stdout**
   `not_found` (404, 410), `conflict` (409, 412), `validation` (400, 422 and
   other 4xx), `rate_limited` (429), `server` (5xx), `network`, `timeout`,
   `config` (missing site, email or token), `usage` (for example a missing
-  `--yes`) or `other`.
+  required argument) or `other`.
 - `hint`, `method`, `url`, `traceId` and `requestId` appear when they are known.
   URLs never include credentials, and request headers are never printed.
 

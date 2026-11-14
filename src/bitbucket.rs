@@ -38,6 +38,24 @@ pub fn repo_path(
     ))
 }
 
+/// The workspace a `--repo` value points at: its own `workspace/` part or
+/// URL, else `--workspace`, else the default workspace.
+pub fn workspace_of(
+    repo: &str,
+    workspace: Option<&str>,
+    default_ws: Option<&str>,
+) -> Result<String> {
+    let path = repo_path(Some(repo), workspace, default_ws)?;
+    let ws = path
+        .trim_start_matches("/repositories/")
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    Ok(urlencoding::decode(ws)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| ws.to_string()))
+}
+
 pub fn workspace_or<'a>(ws: Option<&'a str>, default_ws: Option<&'a str>) -> Result<&'a str> {
     ws.or(default_ws).ok_or_else(|| {
         anyhow!("no Bitbucket workspace; pass --workspace or run `atlx setup bitbucket`")
@@ -225,15 +243,59 @@ fn branch_summary(b: &Value) -> Value {
     })
 }
 
-/// `bitbucket repo branches`
-pub fn repo_branches(c: &Client, path: &str, query: Option<&str>, limit: usize) -> Result<Value> {
-    let filter = query.map(|q| format!("name ~ {}", quote(q)));
+/// Options for `bitbucket branch query`.
+#[derive(Default)]
+pub struct BranchQuery<'a> {
+    /// Branch name substring.
+    pub query: Option<&'a str>,
+    /// Head commit author: display name (substring) or account ID.
+    pub author: Option<&'a str>,
+    /// Sort field, e.g. `name` or `-target.date`.
+    pub sort: Option<&'a str>,
+    pub limit: usize,
+}
+
+/// Most branches scanned when filtering by author, which Bitbucket can't do
+/// server side.
+const AUTHOR_SCAN: usize = 1000;
+
+fn branch_by_author(b: &Value, who: &str) -> bool {
+    let user = &b["target"]["author"]["user"];
+    let who_l = who.to_lowercase();
+    user["account_id"].as_str() == Some(who)
+        || user["uuid"].as_str() == Some(who)
+        || [
+            user["display_name"].as_str(),
+            user["nickname"].as_str(),
+            b["target"]["author"]["raw"].as_str(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|s| s.to_lowercase().contains(&who_l))
+}
+
+/// `bitbucket branch query` (and the old `repo branches`)
+pub fn branch_query(c: &Client, path: &str, o: &BranchQuery) -> Result<Value> {
+    let filter = o.query.map(|q| format!("name ~ {}", quote(q)));
     let mut params = Vec::new();
     if let Some(f) = &filter {
         params.push(("q", f.as_str()));
     }
-    let items = paginate(c, &format!("{path}/refs/branches"), &params, limit)?;
-    Ok(items.iter().map(branch_summary).collect())
+    if let Some(s) = o.sort {
+        params.push(("sort", s));
+    }
+    let fetch = if o.author.is_some() {
+        AUTHOR_SCAN.max(o.limit)
+    } else {
+        o.limit
+    };
+    let items = paginate(c, &format!("{path}/refs/branches"), &params, fetch)?;
+    Ok(items
+        .iter()
+        .filter(|b| o.author.is_none_or(|a| branch_by_author(b, a)))
+        .take(o.limit)
+        .map(branch_summary)
+        .collect())
 }
 
 // --- pull requests -----------------------------------------------------------
@@ -587,9 +649,9 @@ fn task_summary(t: &Value) -> Value {
     })
 }
 
-/// `bitbucket pull-requests tasks`
-pub fn pr_tasks(c: &Client, path: &str, id: u64) -> Result<Value> {
-    let items = paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], 500)?;
+/// `bitbucket pull-requests task query` (and the old `tasks`)
+pub fn pr_tasks(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
+    let items = paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], limit)?;
     Ok(items.iter().map(task_summary).collect())
 }
 
@@ -657,6 +719,8 @@ impl MergeStrategy {
 pub struct PrMerge<'a> {
     pub strategy: Option<MergeStrategy>,
     pub close_source_branch: bool,
+    /// Keep the source branch even if the pull request asks to close it.
+    pub keep_source_branch: bool,
     pub message: Option<&'a str>,
 }
 
@@ -667,6 +731,8 @@ fn pr_merge_body(o: &PrMerge) -> Value {
     }
     if o.close_source_branch {
         req["close_source_branch"] = true.into();
+    } else if o.keep_source_branch {
+        req["close_source_branch"] = false.into();
     }
     if let Some(m) = o.message {
         req["message"] = m.into();
@@ -1067,12 +1133,23 @@ mod tests {
             strategy: Some(MergeStrategy::Squash),
             close_source_branch: true,
             message: Some("Squash merge"),
+            ..Default::default()
         });
         assert_eq!(
             body,
             json!({"merge_strategy": "squash", "close_source_branch": true, "message": "Squash merge"})
         );
         assert_eq!(pr_merge_body(&PrMerge::default()), json!({}));
+        let keep = pr_merge_body(&PrMerge {
+            keep_source_branch: true,
+            ..Default::default()
+        });
+        assert_eq!(keep, json!({"close_source_branch": false}));
+
+        let by = |name: &str, id: &str| json!({"target": {"author": {"raw": format!("{name} <x@y>"), "user": {"display_name": name, "account_id": id}}}});
+        assert!(branch_by_author(&by("Alice Example", "557:a"), "alice"));
+        assert!(branch_by_author(&by("Alice Example", "557:a"), "557:a"));
+        assert!(!branch_by_author(&by("Bob", "557:b"), "alice"));
 
         assert_eq!(code_search_query("foo bar", None), "foo bar");
         assert_eq!(code_search_query("foo", Some("api")), "foo repo:api");
@@ -1229,7 +1306,7 @@ mod tests {
         assert_eq!(act.as_array().unwrap().len(), 1);
         assert_eq!(act[0]["type"], "comment");
 
-        let tasks = pr_tasks(&c, p, 5).unwrap();
+        let tasks = pr_tasks(&c, p, 5, 50).unwrap();
         assert_eq!(tasks[0]["id"], 3);
         assert_eq!(tasks[0]["state"], "UNRESOLVED");
 
@@ -1315,7 +1392,16 @@ mod tests {
             }
             RepoFile::Raw(_) => panic!("expected directory listing"),
         }
-        let branches = repo_branches(&c, p, Some("feat"), 10).unwrap();
+        let branches = branch_query(
+            &c,
+            p,
+            &BranchQuery {
+                query: Some("feat"),
+                limit: 10,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(branches[0]["name"], "feat/x");
         assert_eq!(branches[0]["commit"], "abcdef123456");
 

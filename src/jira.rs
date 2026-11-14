@@ -584,6 +584,16 @@ pub fn user_search(c: &Client, query: &str, limit: usize) -> Result<Value> {
     Ok(users.iter().take(limit).map(summarize_user).collect())
 }
 
+/// `user search --account-id`: one user by account ID (or identity ARI), as
+/// a one-element list so the output matches a search.
+pub fn user_by_account(c: &Client, account: &str) -> Result<Value> {
+    let id = account
+        .strip_prefix("ari:cloud:identity::user/")
+        .unwrap_or(account);
+    let v = c.get("/rest/api/3/user", &[("accountId", id)])?;
+    Ok(json!([summarize_user(&v)]))
+}
+
 /// `me`, a raw accountId, or a name/email that matches exactly one user.
 fn resolve_account(c: &Client, who: &str) -> Result<String> {
     if who.eq_ignore_ascii_case("me") {
@@ -652,10 +662,13 @@ pub fn fields(c: &Client, query: Option<&str>, custom_only: bool) -> Result<Valu
     Ok(Value::Array(filter_fields(list, query, custom_only)))
 }
 
+/// Collect up to `limit` items from an offset-paged endpoint, starting at
+/// item `offset`.
 fn paginate_values(
     c: &Client,
     path: &str,
     query: &[(&str, &str)],
+    offset: usize,
     limit: usize,
 ) -> Result<Vec<Value>> {
     if limit == 0 {
@@ -663,7 +676,7 @@ fn paginate_values(
     }
     let mut out = Vec::new();
     loop {
-        let start = out.len().to_string();
+        let start = (offset + out.len()).to_string();
         let max_page = (limit - out.len()).min(50);
         let page_size = max_page.to_string();
         let mut q = query.to_vec();
@@ -677,7 +690,7 @@ fn paginate_values(
         let total = v["total"].as_u64();
         if page_len == 0
             || is_last == Some(true)
-            || total.is_some_and(|t| out.len() as u64 >= t)
+            || total.is_some_and(|t| (offset + out.len()) as u64 >= t)
             || (is_last.is_none() && total.is_none() && page_len < max_page)
             || out.len() >= limit
         {
@@ -701,17 +714,53 @@ fn summarize_project(c: &Client, p: &Value) -> Value {
     })
 }
 
-/// `jira project list`
-pub fn projects(c: &Client, query: Option<&str>, limit: usize) -> Result<Value> {
+/// Filters for `jira space query` (Jira REST `project/search`).
+#[derive(Default)]
+pub struct SpaceQuery<'a> {
+    pub query: Option<&'a str>,
+    /// Project keys; repeatable.
+    pub keys: &'a [String],
+    /// Project IDs; repeatable.
+    pub ids: &'a [String],
+    pub type_key: Option<&'a str>,
+    pub category_id: Option<&'a str>,
+    pub action: Option<&'a str>,
+    pub expand: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub properties: &'a [String],
+    pub property_query: Option<&'a str>,
+    pub order_by: Option<&'a str>,
+    pub start: usize,
+    pub limit: usize,
+}
+
+/// `jira space query` (and the old `jira project list`)
+pub fn space_query(c: &Client, o: &SpaceQuery) -> Result<Value> {
     let mut q = Vec::new();
-    if let Some(s) = query.map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(s) = o.query.map(str::trim).filter(|s| !s.is_empty()) {
         q.push(("query", s));
     }
-    let items = paginate_values(c, "/rest/api/3/project/search", &q, limit)?;
+    q.extend(o.keys.iter().map(|k| ("keys", k.as_str())));
+    q.extend(o.ids.iter().map(|i| ("id", i.as_str())));
+    q.extend(o.properties.iter().map(|p| ("properties", p.as_str())));
+    for (k, v) in [
+        ("typeKey", o.type_key),
+        ("categoryId", o.category_id),
+        ("action", o.action),
+        ("expand", o.expand),
+        ("status", o.status),
+        ("propertyQuery", o.property_query),
+        ("orderBy", o.order_by),
+    ] {
+        if let Some(v) = v {
+            q.push((k, v));
+        }
+    }
+    let items = paginate_values(c, "/rest/api/3/project/search", &q, o.start, o.limit)?;
     Ok(items.iter().map(|p| summarize_project(c, p)).collect())
 }
 
-/// `jira project get`
+/// `jira space get` (and the old `jira project get`)
 pub fn project(c: &Client, key_or_id: &str) -> Result<Value> {
     let v = c.get(&format!("/rest/api/3/project/{}", enc(key_or_id)), &[])?;
     let mut out = summarize_project(c, &v);
@@ -885,37 +934,93 @@ pub fn link_create(
     }))
 }
 
-fn build_remote_link_payload(url: &str, title: &str, relationship: Option<&str>) -> Value {
+/// `jira workitem link workitem`: link `source` to each target.
+///
+/// The source reads with the link type's outward phrase, so
+/// `--id PROJ-1 --target-id PROJ-2 --link-type-id Blocks` records "PROJ-1
+/// blocks PROJ-2". Jira's REST API names that side `inwardIssue`, so the
+/// source is sent as `inwardIssue` and the target as `outwardIssue`. One
+/// target returns that link; several return an array in target order.
+pub fn link_workitem(
+    c: &Client,
+    source: &str,
+    targets: &[String],
+    link_type: &str,
+) -> Result<Value> {
+    if targets.is_empty() {
+        bail!("pass at least one --target-id");
+    }
+    let mut links = Vec::with_capacity(targets.len());
+    for t in targets {
+        links.push(link_create(c, source, t, link_type, None)?);
+    }
+    Ok(match links.len() {
+        1 => links.remove(0),
+        _ => Value::Array(links),
+    })
+}
+
+/// A remote web link (`jira workitem link weblink`).
+#[derive(Default)]
+pub struct Weblink<'a> {
+    pub url: &'a str,
+    pub title: &'a str,
+    pub relationship: Option<&'a str>,
+    pub global_id: Option<&'a str>,
+    pub application_name: Option<&'a str>,
+    pub application_type: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub icon_url: Option<&'a str>,
+    pub resolved: bool,
+}
+
+fn build_remote_link_payload(w: &Weblink) -> Value {
     let mut req = json!({
         "object": {
-            "url": url,
-            "title": title,
+            "url": w.url,
+            "title": w.title,
         }
     });
-    if let Some(rel) = relationship {
+    if let Some(rel) = w.relationship {
         req["relationship"] = rel.into();
+    }
+    if let Some(g) = w.global_id {
+        req["globalId"] = g.into();
+    }
+    if w.application_name.is_some() || w.application_type.is_some() {
+        let mut app = json!({});
+        if let Some(n) = w.application_name {
+            app["name"] = n.into();
+        }
+        if let Some(t) = w.application_type {
+            app["type"] = t.into();
+        }
+        req["application"] = app;
+    }
+    if let Some(s) = w.summary {
+        req["object"]["summary"] = s.into();
+    }
+    if let Some(i) = w.icon_url {
+        req["object"]["icon"] = json!({"url16x16": i});
+    }
+    if w.resolved {
+        req["object"]["status"] = json!({"resolved": true});
     }
     req
 }
 
-/// `jira workitem link remote`
-pub fn link_remote(
-    c: &Client,
-    key: &str,
-    url: &str,
-    title: &str,
-    relationship: Option<&str>,
-) -> Result<Value> {
-    let req = build_remote_link_payload(url, title, relationship);
+/// `jira workitem link weblink` (and the old `link remote`)
+pub fn link_remote(c: &Client, key: &str, w: &Weblink) -> Result<Value> {
+    let req = build_remote_link_payload(w);
     let v = c.post(&format!("/rest/api/3/issue/{}/remotelink", enc(key)), &req)?;
     let mut out = json!({
         "key": key,
         "id": v["id"],
-        "title": title,
-        "url": url,
+        "title": w.title,
+        "url": w.url,
         "issue_url": browse_url(c, key),
     });
-    if let Some(rel) = relationship {
+    if let Some(rel) = w.relationship {
         out["relationship"] = rel.into();
     }
     Ok(out)
@@ -948,22 +1053,149 @@ fn summarize_board(b: &Value) -> Value {
     })
 }
 
-/// `jira board list`
-pub fn boards(
-    c: &Client,
-    project: Option<&str>,
-    board_type: Option<BoardType>,
-    limit: usize,
-) -> Result<Value> {
+/// Filters for `jira board query` (Agile REST `board`).
+#[derive(Default)]
+pub struct BoardQuery<'a> {
+    /// Project key or ID.
+    pub project: Option<&'a str>,
+    pub board_type: Option<BoardType>,
+    /// Board name substring.
+    pub name: Option<&'a str>,
+    pub filter_id: Option<&'a str>,
+    pub start: usize,
+    pub limit: usize,
+}
+
+fn board_values(c: &Client, o: &BoardQuery) -> Result<Vec<Value>> {
     let mut q = Vec::new();
-    if let Some(p) = project {
+    if let Some(p) = o.project {
         q.push(("projectKeyOrId", p));
     }
-    if let Some(t) = board_type {
+    if let Some(t) = o.board_type {
         q.push(("type", t.as_str()));
     }
-    let items = paginate_values(c, "/rest/agile/1.0/board", &q, limit)?;
-    Ok(items.iter().map(summarize_board).collect())
+    if let Some(n) = o.name {
+        q.push(("name", n));
+    }
+    if let Some(f) = o.filter_id {
+        q.push(("filterId", f));
+    }
+    paginate_values(c, "/rest/agile/1.0/board", &q, o.start, o.limit)
+}
+
+/// `jira board query` (and the old `jira board list`)
+pub fn board_query(c: &Client, o: &BoardQuery) -> Result<Value> {
+    Ok(board_values(c, o)?.iter().map(summarize_board).collect())
+}
+
+/// The project key of a work item, for `--issue` filters.
+pub fn issue_project(c: &Client, issue: &str) -> Result<String> {
+    let v = c.get(
+        &format!("/rest/api/3/issue/{}", enc(issue)),
+        &[("fields", "project")],
+    )?;
+    v["fields"]["project"]["key"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| anyhow!("work item {issue} has no project"))
+}
+
+/// A Jira filter ID from an ID, a `filter=N` URL or a filter ARI.
+pub fn filter_ref(s: &str) -> String {
+    let s = s.trim();
+    if let Some(i) = s.find("filter=") {
+        let id: String = s[i + 7..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    trailing_number(s).unwrap_or_else(|| s.to_string())
+}
+
+/// The last run of digits after a `/` (ARIs, `/boards/12` URLs).
+fn trailing_number(s: &str) -> Option<String> {
+    s.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
+        .map(String::from)
+}
+
+/// A board ID from an ID, an ARI, a board URL (`/boards/12`,
+/// `rapidView=12`), or an exact board name.
+pub fn resolve_board(c: &Client, r: &str) -> Result<u64> {
+    let r = r.trim();
+    if let Ok(n) = r.parse() {
+        return Ok(n);
+    }
+    for marker in ["rapidView=", "/boards/"] {
+        if let Some(i) = r.find(marker) {
+            let id: String = r[i + marker.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if let Ok(n) = id.parse() {
+                return Ok(n);
+            }
+        }
+    }
+    if r.starts_with("ari:")
+        && let Some(n) = trailing_number(r).and_then(|n| n.parse().ok())
+    {
+        return Ok(n);
+    }
+    let found = board_values(
+        c,
+        &BoardQuery {
+            name: Some(r),
+            limit: 50,
+            ..Default::default()
+        },
+    )?;
+    let exact: Vec<&Value> = found
+        .iter()
+        .filter(|b| {
+            b["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(r))
+        })
+        .collect();
+    match exact.as_slice() {
+        [b] => b["id"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("board '{r}' has no ID")),
+        [] => bail!("no board named '{r}'"),
+        _ => bail!("several boards are named '{r}'; pass the board ID"),
+    }
+}
+
+/// The only board of a project, for sprint queries scoped by project.
+pub fn project_board(c: &Client, project: &str) -> Result<u64> {
+    let found = board_values(
+        c,
+        &BoardQuery {
+            project: Some(project),
+            limit: 50,
+            ..Default::default()
+        },
+    )?;
+    match found.as_slice() {
+        [b] => b["id"].as_u64().ok_or_else(|| anyhow!("board has no ID")),
+        [] => bail!("project {project} has no boards"),
+        many => {
+            let list: Vec<String> = many
+                .iter()
+                .map(|b| format!("{} ({})", b["id"], b["name"].as_str().unwrap_or_default()))
+                .collect();
+            bail!(
+                "project {project} has several boards: {}; pass --id",
+                list.join(", ")
+            )
+        }
+    }
 }
 
 pub fn normalize_sprint_states(s: &str) -> Result<String> {
@@ -995,8 +1227,15 @@ fn summarize_sprint(s: &Value) -> Value {
     })
 }
 
-/// `jira sprint list`
-pub fn sprints(c: &Client, board_id: u64, state: Option<&str>, limit: usize) -> Result<Value> {
+/// `jira board sprints query` (and the old `jira sprint list`); sprints
+/// from item `start`.
+pub fn sprints(
+    c: &Client,
+    board_id: u64,
+    state: Option<&str>,
+    start: usize,
+    limit: usize,
+) -> Result<Value> {
     let state_param = state.map(normalize_sprint_states).transpose()?;
     let mut q = Vec::new();
     if let Some(st) = &state_param {
@@ -1006,28 +1245,66 @@ pub fn sprints(c: &Client, board_id: u64, state: Option<&str>, limit: usize) -> 
         c,
         &format!("/rest/agile/1.0/board/{board_id}/sprint"),
         &q,
+        start,
         limit,
     )?;
     Ok(items.iter().map(summarize_sprint).collect())
 }
 
-/// `jira sprint issues`
-pub fn sprint_issues(c: &Client, sprint_id: u64, jql: Option<&str>, limit: usize) -> Result<Value> {
+/// Options for `jira sprint workitems query`.
+#[derive(Default)]
+pub struct SprintIssues<'a> {
+    pub jql: Option<&'a str>,
+    /// Extra fields to fetch and include.
+    pub fields: &'a [String],
+    pub expand: Option<&'a str>,
+    pub start: usize,
+    pub limit: usize,
+}
+
+/// A sprint ID from an ID, an ARI, or a URL with `sprint=N` / `/sprints/N`.
+pub fn sprint_ref(s: &str) -> Result<u64> {
+    let s = s.trim();
+    if let Ok(n) = s.parse() {
+        return Ok(n);
+    }
+    for marker in ["sprint=", "/sprints/", "/sprint/"] {
+        if let Some(i) = s.find(marker) {
+            let id: String = s[i + marker.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if let Ok(n) = id.parse() {
+                return Ok(n);
+            }
+        }
+    }
+    trailing_number(s)
+        .and_then(|n| n.parse().ok())
+        .ok_or_else(|| anyhow!("'{s}' is not a sprint ID, ARI or URL"))
+}
+
+/// `jira sprint workitems query` (and the old `jira sprint issues`)
+pub fn sprint_issues(c: &Client, sprint_id: u64, o: &SprintIssues) -> Result<Value> {
+    let limit = o.limit;
     if limit == 0 {
         return Ok(json!([]));
     }
-    let field_param = field_list(LIST_FIELDS, &[]);
+    let field_param = field_list(LIST_FIELDS, o.fields);
     let mut issues = Vec::new();
     loop {
-        let start = issues.len().to_string();
+        let start = (o.start + issues.len()).to_string();
         let page_size = (limit - issues.len()).min(100).to_string();
         let mut q = vec![
             ("startAt", start.as_str()),
             ("maxResults", page_size.as_str()),
             ("fields", field_param.as_str()),
         ];
-        if let Some(j) = jql {
+        if let Some(j) = o.jql {
             q.push(("jql", j));
+        }
+        if let Some(e) = o.expand {
+            q.push(("expand", e));
         }
         let v = c.get(&format!("/rest/agile/1.0/sprint/{sprint_id}/issue"), &q)?;
         let batch = v["issues"].as_array().cloned().unwrap_or_default();
@@ -1036,12 +1313,12 @@ pub fn sprint_issues(c: &Client, sprint_id: u64, jql: Option<&str>, limit: usize
             batch
                 .iter()
                 .take(limit - issues.len())
-                .map(|i| summarize(c, i, &[])),
+                .map(|i| summarize(c, i, o.fields)),
         );
         let total = v["total"].as_u64();
         if batch_len == 0
             || issues.len() >= limit
-            || total.is_some_and(|t| issues.len() as u64 >= t)
+            || total.is_some_and(|t| (o.start + issues.len()) as u64 >= t)
             || (total.is_none() && batch_len < 100)
         {
             break;
@@ -1214,14 +1491,48 @@ mod tests {
         assert_eq!(link_no_comment["type"], json!({"id": "10000"}));
         assert!(link_no_comment.get("comment").is_none());
 
-        let remote =
-            build_remote_link_payload("https://example.com/doc", "Design Doc", Some("Wiki Page"));
+        let remote = build_remote_link_payload(&Weblink {
+            url: "https://example.com/doc",
+            title: "Design Doc",
+            relationship: Some("Wiki Page"),
+            ..Default::default()
+        });
         assert_eq!(
             remote,
             json!({"relationship": "Wiki Page", "object": {"url": "https://example.com/doc", "title": "Design Doc"}})
         );
-        let remote_min = build_remote_link_payload("https://example.com", "Home", None);
+        let remote_min = build_remote_link_payload(&Weblink {
+            url: "https://example.com",
+            title: "Home",
+            ..Default::default()
+        });
         assert!(remote_min.get("relationship").is_none());
+
+        let full = build_remote_link_payload(&Weblink {
+            url: "https://example.com/spec",
+            title: "Spec",
+            global_id: Some("spec-1"),
+            application_name: Some("Docs"),
+            application_type: Some("com.example.docs"),
+            summary: Some("Design spec"),
+            icon_url: Some("https://example.com/i.png"),
+            resolved: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            full,
+            json!({
+                "globalId": "spec-1",
+                "application": {"name": "Docs", "type": "com.example.docs"},
+                "object": {
+                    "url": "https://example.com/spec",
+                    "title": "Spec",
+                    "summary": "Design spec",
+                    "icon": {"url16x16": "https://example.com/i.png"},
+                    "status": {"resolved": true},
+                },
+            })
+        );
     }
 
     #[test]

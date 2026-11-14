@@ -66,12 +66,12 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `--output-shape` | ⛔ | the shapes reshape Teamwork Graph relationships |
 | `{"data": ...}` JSON envelope and key names | 📋 | atlx prints unwrapped payloads today ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
 | Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/pedrosanzmtz/atlx/issues/17) |
-| No `--yes` on merge, decline and content delete | 📋 | atlx still requires `--yes` ([#18](https://github.com/pedrosanzmtz/atlx/issues/18)) |
+| No `--yes` on merge, decline and content delete | ✅ | `--yes` is still accepted and ignored; nothing asks for confirmation ([#18](https://github.com/pedrosanzmtz/atlx/issues/18)) |
 | API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
 
 ## Jira
 
-161 twg commands: ✅ 4, 🟡 4, 📋 143, ⛔ 10.
+161 twg commands: ✅ 14, 🟡 3, 📋 134, ⛔ 10.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -82,11 +82,11 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira board delete` | 📋 | #25 |
 | `jira board get` | 📋 | #25 |
 | `jira board projects query` | 📋 | #25; Agile 1.0 board projects |
-| `jira board query` | 📋 | #18; atlx today: `jira board list` |
+| `jira board query` | ✅ | #18; `--issue` uses the work item's space; GraphQL-only `--variables-json` not planned |
 | `jira board quick-filter get` | 📋 | #25; Agile 1.0 quick filters |
 | `jira board quick-filter query` | 📋 | #25; Agile 1.0 quick filters |
 | `jira board scope query` | ⛔ | board scope model is only in the GraphQL gateway |
-| `jira board sprints query` | 📋 | #18; atlx today: `jira sprint list --board` |
+| `jira board sprints query` | ✅ | #18; `--project`/`--issue` use the space's only board; GraphQL-only `--variables-json` not planned |
 | `jira board view-settings query` | ⛔ | board view model is only in the GraphQL gateway |
 | `jira dashboard bulk-edit` | 📋 | #13 (unscheduled); REST v3 dashboards |
 | `jira dashboard copy` | 📋 | #13 (unscheduled); REST v3 dashboards |
@@ -132,10 +132,10 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira space component update` | 📋 | #26 |
 | `jira space create` | 📋 | #26; REST v3 project endpoints |
 | `jira space delete` | 📋 | #26; REST v3 project endpoints |
-| `jira space get` | 📋 | #18; atlx today: `jira project get` |
+| `jira space get` | ✅ | #18; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space issue-types` | 📋 | #26; REST v3 project endpoints |
 | `jira space notification-scheme get` | 📋 | #26; REST v3 project endpoints |
-| `jira space query` | 📋 | #18; atlx today: `jira project list` |
+| `jira space query` | ✅ | #18; `--after` takes a numeric offset (REST pages by number); GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
 | `jira space restore` | 📋 | #26; REST v3 project endpoints |
 | `jira space status query` | 📋 | #26; REST v3 project endpoints |
 | `jira space types query` | 📋 | #26; REST v3 project endpoints |
@@ -155,7 +155,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira sprint snapshot` | 📋 | #25 |
 | `jira sprint start` | 📋 | #25; Agile 1.0 sprint endpoints |
 | `jira sprint update` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint workitems query` | 📋 | #18; atlx today: `jira sprint issues --sprint` |
+| `jira sprint workitems query` | ✅ | #18; GraphQL-only `--variables-json` not planned |
 | `jira workitem archive` | 📋 | #13 (unscheduled); REST v3 issue archival |
 | `jira workitem attachment delete` | 📋 | #24 |
 | `jira workitem attachment download` | 📋 | #24 |
@@ -174,9 +174,9 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira workitem create` | ✅ | GraphQL-only `--variables-json` not planned |
 | `jira workitem create-bulk` | 📋 | #13 (unscheduled); REST v3 bulk create |
 | `jira workitem delete` | 📋 | #23 |
-| `jira workitem field create-metadata` | 📋 | #18; atlx today: `jira workitem create-meta` |
+| `jira workitem field create-metadata` | ✅ | #18; also reachable as `jira workitem custom-fields create-metadata` |
 | `jira workitem field update-metadata` | 📋 | #23; REST v3 editmeta |
-| `jira workitem get` | 🟡 | missing `--batch-concurrency` (#18); GraphQL-only `--variables-json` not planned |
+| `jira workitem get` | ✅ | `--batch-concurrency` fetches in parallel and keeps input order (#18); GraphQL-only `--variables-json` not planned |
 | `jira workitem link artifact` | 📋 | #23; a remote link (REST v3 remotelink) |
 | `jira workitem link branch` | 📋 | #23; a remote link (REST v3 remotelink) |
 | `jira workitem link build` | 📋 | #23; a remote link (REST v3 remotelink) |
@@ -190,16 +190,16 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira workitem link project` | ⛔ | Atlassian Projects link (GraphQL gateway) |
 | `jira workitem link query` | 📋 | #23; issue links plus remote links |
 | `jira workitem link repo` | 📋 | #23; a remote link (REST v3 remotelink) |
-| `jira workitem link weblink` | 📋 | #18; atlx today: `jira workitem link remote` |
-| `jira workitem link workitem` | 📋 | #18; atlx today: `jira workitem link create` |
-| `jira workitem link-types query` | 📋 | #18; atlx today: `jira workitem link types` |
+| `jira workitem link weblink` | ✅ | #18 |
+| `jira workitem link workitem` | ✅ | #18; `--id` is the side that reads with the outward phrase (`--id A --target-id B --link-type-id Blocks` means A blocks B), sent as REST `inwardIssue` |
+| `jira workitem link-types query` | ✅ | #18; REST returns every link type at once, so the GraphQL paging flags `--after`, `--before`, `--first`, `--last` and `--cloud-id`, `--variables-json` are not planned |
 | `jira workitem priorities query` | 📋 | #23 |
 | `jira workitem project-link-candidates query` | ⛔ | Atlassian Projects relationship (Teamwork Graph) |
 | `jira workitem property delete` | 📋 | #13 (unscheduled); REST v3 issue properties |
 | `jira workitem property get` | 📋 | #13 (unscheduled); REST v3 issue properties |
 | `jira workitem property query` | 📋 | #13 (unscheduled); REST v3 issue properties |
 | `jira workitem property set` | 📋 | #13 (unscheduled); REST v3 issue properties |
-| `jira workitem query` | 🟡 | missing `--before`, `--last` (#18); GraphQL-only `--cloud-id`, `--field-sets-input`, `--issue-search-input`, `--namespace`, `--options`, `--save-jqlto-user-history`, `--scope`, `--variables-json`, `--view-config-input` not planned |
+| `jira workitem query` | 🟡 | `--before` and `--last` parse but return a usage error: REST search only pages forward (#18); GraphQL-only `--cloud-id`, `--field-sets-input`, `--issue-search-input`, `--namespace`, `--options`, `--save-jqlto-user-history`, `--scope`, `--variables-json`, `--view-config-input` not planned |
 | `jira workitem search` | ✅ |  |
 | `jira workitem similar` | ⛔ | semantic similarity needs Atlassian AI |
 | `jira workitem statuses query` | 📋 | #23 |
@@ -236,20 +236,20 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `jira workitem worklog get` | 📋 | #24 |
 | `jira workitem worklog query` | 📋 | #24 |
 | `jira workitem worklog update` | 📋 | #24 |
-| `jira board list` | ➕ | old name of `jira board query` (#18) |
+| `jira board list` | ➕ | old name of `jira board query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 | `jira field list` | ➕ | list fields with ids; twg's `jira field` is admin CRUD |
-| `jira project get` | ➕ | old name of `jira space get` (#18) |
-| `jira project list` | ➕ | old name of `jira space query` (#18) |
-| `jira sprint issues` | ➕ | old name of `jira sprint workitems query` (#18) |
-| `jira sprint list` | ➕ | old name of `jira board sprints query` (#18) |
-| `jira workitem create-meta` | ➕ | old name of `jira workitem field create-metadata` (#18) |
-| `jira workitem link create` | ➕ | old name of `jira workitem link workitem` (#18) |
-| `jira workitem link remote` | ➕ | old name of `jira workitem link weblink` (#18) |
-| `jira workitem link types` | ➕ | old name of `jira workitem link-types query` (#18) |
+| `jira project get` | ➕ | old name of `jira space get` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira project list` | ➕ | old name of `jira space query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira sprint issues` | ➕ | old name of `jira sprint workitems query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira sprint list` | ➕ | old name of `jira board sprints query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira workitem create-meta` | ➕ | old name of `jira workitem field create-metadata` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira workitem link create` | ➕ | old name of `jira workitem link workitem` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira workitem link remote` | ➕ | old name of `jira workitem link weblink` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `jira workitem link types` | ➕ | old name of `jira workitem link-types query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 
 ## Confluence
 
-121 twg commands: ✅ 4, 🟡 8, 📋 73, ⛔ 36.
+121 twg commands: ✅ 6, 🟡 7, 📋 72, ⛔ 36.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -278,10 +278,10 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `confluence content attachments list` | 📋 | #28 |
 | `confluence content attachments upload` | 📋 | #28 |
 | `confluence content body-formats` | 📋 | #28 |
-| `confluence content comments create` | 🟡 | missing `--body-file`, `--body-format`, `--comment-type`, `--id`, `--reference-space`, `--text-selection`, `--text-selection-match-count`, `--text-selection-match-index` (#18, #29); `--id`, `--body-file`, `--body-format` and `--comment-type` are #18; text selection is #29 |
+| `confluence content comments create` | 🟡 | missing `--reference-space`, `--text-selection`, `--text-selection-match-count`, `--text-selection-match-index` (#29); `--comment-type inline` returns a usage error until #29. The old positional `<ref>` and `--format` still work (hidden, deprecated) |
 | `confluence content comments delete` | 📋 | #29 |
 | `confluence content comments get` | 📋 | #29 |
-| `confluence content comments list` | 🟡 | missing `--body-format`, `--comment-type`, `--content-type`, `--id`, `--include-replies`, `--reference-space`, `--resolution-status`, `--sort`, `--status` (#18, #29); `--id`, `--comment-type` and `--body-format` replace `--inline`/`--format` in #18; the rest is #29 |
+| `confluence content comments list` | 🟡 | missing `--content-type`, `--include-replies`, `--reference-space`, `--resolution-status`, `--sort`, `--status` (#29). The old positional `<ref>`, `--inline` and `--format` still work (hidden, deprecated) |
 | `confluence content comments reopen` | 📋 | #29 |
 | `confluence content comments reply` | 📋 | #29 |
 | `confluence content comments resolve` | 📋 | #29 |
@@ -300,7 +300,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `confluence content history get` | 📋 | #28 |
 | `confluence content history list` | 📋 | #28 |
 | `confluence content labels add` | 📋 | #28 |
-| `confluence content labels list` | 📋 | #18; atlx today: `confluence content labels <ref>` |
+| `confluence content labels list` | 🟡 | missing `--content-type`, `--reference-space` (#28) |
 | `confluence content labels remove` | 📋 | #28 |
 | `confluence content labels unwatch` | 📋 | #28 |
 | `confluence content labels watch` | 📋 | #28 |
@@ -352,10 +352,10 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `confluence space archive` | 📋 | #30 |
 | `confluence space create` | 📋 | #30 |
 | `confluence space delete` | 📋 | #30 |
-| `confluence space get` | 🟡 | missing `--labels` (#18) |
+| `confluence space get` | ✅ | `--labels` adds a `labels` array (#18) |
 | `confluence space instructions get` | ⛔ | Rovo space instructions |
 | `confluence space instructions set` | ⛔ | Rovo space instructions |
-| `confluence space list` | 🟡 | missing `--labels` (#18) |
+| `confluence space list` | ✅ | `--labels` adds a `labels` array to each space (#18) |
 | `confluence space me` | ✅ |  |
 | `confluence space permission available` | 📋 | #13 (unscheduled); v2 space permissions |
 | `confluence space permission list` | 📋 | #13 (unscheduled); v2 space permissions |
@@ -373,20 +373,20 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `confluence space watch` | 📋 | #13 (unscheduled); v1 user/watch |
 | `confluence templates get` | 📋 | #13 (unscheduled); v1 templates |
 | `confluence templates list` | 📋 | #13 (unscheduled); v1 templates |
-| `confluence tree` | 🟡 | missing `--target`, `--type` (#18, #30); `--target` is #18, `--type` is #30 |
+| `confluence tree` | 🟡 | missing `--type`; `--target` and `[ref]` take page IDs or URLs only, space targets are #30 |
 | `confluence content children` | ➕ | direct children of a page |
-| `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge` (#30); atlx requires `--yes` |
-| `confluence content labels` | ➕ | old form of `confluence content labels list` (#18) |
+| `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge` (#30); no confirmation is asked and `--yes` is ignored (#18) |
+| `confluence content labels` | ➕ | old form `labels <ref>` of `confluence content labels list --id <ref>` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 
 ## Bitbucket
 
-78 twg commands: ✅ 7, 🟡 9, 📋 62.
+78 twg commands: ✅ 12, 🟡 6, 📋 60.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
 | `bitbucket branch create` | 📋 | #33 |
 | `bitbucket branch delete` | 📋 | #33 |
-| `bitbucket branch query` | 📋 | #18; atlx today: `bb repo branches` |
+| `bitbucket branch query` | ✅ | #18; `--author` is matched by atlx over up to 1000 branches, since Bitbucket can't filter by author |
 | `bitbucket commit create` | 📋 | #33 |
 | `bitbucket commit query` | 📋 | #33 |
 | `bitbucket commit report create` | 📋 | #33 |
@@ -412,7 +412,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `bitbucket pipeline run` | 📋 | #34 |
 | `bitbucket pipeline tail` | 📋 | #34 |
 | `bitbucket pipeline trigger` | 📋 | #34 |
-| `bitbucket pull-requests activity` | 🟡 | missing `--batch-concurrency`, `--strict` (#18); twg accepts several ids (batch) |
+| `bitbucket pull-requests activity` | ✅ | takes several ids as a batch, with `--strict` and `--batch-concurrency` (#18) |
 | `bitbucket pull-requests approve` | ✅ |  |
 | `bitbucket pull-requests comment create` | 🟡 | missing `--end-from-line`, `--end-line`, `--from-line`, `--image`, `--image-name`, `--pending`, `--start-from-line`, `--start-line` (#31) |
 | `bitbucket pull-requests comment delete` | 📋 | #31 |
@@ -424,7 +424,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `bitbucket pull-requests commits` | 📋 | #31 |
 | `bitbucket pull-requests conflicts` | 📋 | #32 |
 | `bitbucket pull-requests create` | 🟡 | missing `--image`, `--image-name`, `--reviewer` (#32) |
-| `bitbucket pull-requests decline` | 🟡 | atlx still requires `--yes`; twg asks for no confirmation (#18) |
+| `bitbucket pull-requests decline` | ✅ | no confirmation is asked; `--yes` is ignored (#18) |
 | `bitbucket pull-requests default-reviewer add` | 📋 | #32 |
 | `bitbucket pull-requests default-reviewer get` | 📋 | #32 |
 | `bitbucket pull-requests default-reviewer query` | 📋 | #32 |
@@ -434,8 +434,8 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `bitbucket pull-requests diffstat` | 📋 | #31 |
 | `bitbucket pull-requests effective-default-reviewer query` | 📋 | #32 |
 | `bitbucket pull-requests for-commit` | 📋 | #32 |
-| `bitbucket pull-requests get` | 🟡 | missing `--batch-concurrency` (#18) |
-| `bitbucket pull-requests merge` | 🟡 | missing `--keep-source-branch`, `--merge-message`, `--merge-strategy`, `--pull-request`, `--timeout`, `--wait`, `--wait-timeout` (#18, #32); twg takes `--pull-request` only and asks for no confirmation; `--wait*`/`--timeout` are #32 |
+| `bitbucket pull-requests get` | ✅ | `--batch-concurrency` fetches in parallel and keeps input order (#18) |
+| `bitbucket pull-requests merge` | 🟡 | missing `--timeout`, `--wait`, `--wait-timeout` (#32); no confirmation is asked. The old positional id, `--strategy`, `--message` and `--yes` still work (hidden, deprecated) |
 | `bitbucket pull-requests merge-status` | 📋 | #32 |
 | `bitbucket pull-requests mergeability` | 📋 | #32 |
 | `bitbucket pull-requests patch` | 📋 | #31 |
@@ -445,7 +445,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `bitbucket pull-requests task create` | 📋 | #31 |
 | `bitbucket pull-requests task delete` | 📋 | #31 |
 | `bitbucket pull-requests task get` | 📋 | #31 |
-| `bitbucket pull-requests task query` | 📋 | #18; atlx today: `bb pull-requests tasks` |
+| `bitbucket pull-requests task query` | ✅ | #18 |
 | `bitbucket pull-requests task reopen` | 📋 | #31 |
 | `bitbucket pull-requests task resolve` | 📋 | #31 |
 | `bitbucket pull-requests task update` | 📋 | #31 |
@@ -456,14 +456,14 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `bitbucket repo file` | ✅ |  |
 | `bitbucket repo get` | ✅ |  |
 | `bitbucket repo list-files` | 📋 | #33 |
-| `bitbucket repo query` | ✅ |  |
+| `bitbucket repo query` | ✅ | `--repo workspace/slug` or a URL selects the workspace (#18) |
 | `bitbucket repo url` | 📋 | #33 |
 | `bitbucket search prs` | 📋 | #32 |
 | `bitbucket workspace get` | 📋 | #33 |
 | `bitbucket workspace member get` | 📋 | #33 |
 | `bitbucket workspace member query` | 📋 | #33 |
-| `bitbucket pull-requests tasks` | ➕ | old name of `bb pull-requests task query` (#18) |
-| `bitbucket repo branches` | ➕ | old name of `bb branch query` (#18) |
+| `bitbucket pull-requests tasks` | ➕ | old name of `bb pull-requests task query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
+| `bitbucket repo branches` | ➕ | old name of `bb branch query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 | `bitbucket search code` | ➕ | Bitbucket code search; twg's `search-code` uses Code Intelligence |
 
 ## Users
@@ -478,7 +478,7 @@ the notes and in [#21](https://github.com/pedrosanzmtz/atlx/issues/21).
 | `user manager` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user manager-chain` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user peers` | ⛔ | reporting lines come from the Teamwork Graph |
-| `user search` | 🟡 | missing `--account-id`, `--compact`, `--email`, `--name`, `--query` (#18); GraphQL-only `--include-slack` not planned |
+| `user search` | 🟡 | missing `--compact` (#21, it changes the output shape); `--name`, `--query` and `--email` all use Jira's user search (#18); GraphQL-only `--include-slack` not planned |
 
 ## Accounts and setup
 

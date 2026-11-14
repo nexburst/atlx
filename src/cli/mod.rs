@@ -150,6 +150,9 @@ pub fn main() {
     } else {
         Format::Json
     });
+    util::enable_notes(
+        fmt == Format::Text && std::io::stdout().is_terminal() && std::io::stderr().is_terminal(),
+    );
     let path = command_path(&matches);
     let shaping = match shape::Shaping::new(cli.shaping, fmt, &path) {
         Ok(s) => s,

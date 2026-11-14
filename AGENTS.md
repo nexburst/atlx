@@ -30,8 +30,11 @@ UPDATE_SNAPSHOTS=1 cargo test --test cli_tree   # after any CLI change
   `compat/corpus.txt` flipped to `ok` (`cargo test --test twg_compat`).
 - fmt, clippy with `-D warnings`, and tests all pass.
 - No new dependency without a stated reason. Sync `ureq` 2, no async.
-- Destructive commands require `--yes` (`util::require_yes`). Return errors
-  as `client::ApiError` where the class matters; `main` prints them.
+- Confirmation follows twg: require `--yes` (`util::require_yes`) only where
+  twg does; elsewhere accept it as a hidden no-op and never prompt. Return
+  errors as `client::ApiError` where the class matters; `main` prints them.
+- Renamed commands and flags stay as hidden aliases that call
+  `util::deprecated(old, new)`; the note only shows in text mode on a terminal.
 
 ## twg text rule
 
