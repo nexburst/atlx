@@ -1,0 +1,68 @@
+global: [-o/--output <OUTPUT> {text|json|jsonl} [env: ATLX_OUTPUT]]
+global: [-s/--site <SITE>]
+global: [-u/--user <USER>]
+global: [--timeout-ms <TIMEOUT_MS>]
+alias: atlx bb -> atlx bitbucket
+alias: atlx bitbucket prs -> atlx bitbucket pull-requests
+alias: atlx confluence content comment -> atlx confluence content comments
+atlx api <PRODUCT> {jira|confluence|bitbucket} (required) <PATH> (required) [-X/--method <METHOD> [default: GET]] [-d/--data <DATA>] [-q/--query <KEY=VALUE>...]
+atlx bitbucket pipeline get --pipeline <PIPELINE> (required) --logs --failed-steps [--lines <LINES> [default: 100]] [--step <STEP>] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pipeline query [--state <STATE>] [--status <STATUS>] [--branch <BRANCH>] [--trigger <TRIGGER>] [--limit <LIMIT> [default: 15]] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests activity <ID> (required) [--type <EVENT_TYPE>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests approve <ID> (required) [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests comment create --pull-request <PULL_REQUEST> (required) --text <TEXT> (required) [--reply-to <REPLY_TO>] [--path <PATH>] [--line <LINE>] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests create --title <TITLE> (required) --source <SOURCE> (required) [--dest <DEST>] [--description <DESCRIPTION>] [--description-file/--desc-file <DESCRIPTION_FILE>] [--reviewer-uuid <REVIEWER_UUID>] [--reviewer-account-id <REVIEWER_ACCOUNT_ID>] --close-source-branch --draft [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests decline <ID> (required) -y/--yes [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests diff <ID> (required) [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests get [<IDS>...] --comments --diff --statuses --full --strict [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests merge <ID> (required) [--strategy <STRATEGY> {merge_commit|squash|fast_forward}] --close-source-branch [--message <MESSAGE>] -y/--yes [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests query [<TEXT>...] [--state <STATE>] [--author <AUTHOR>] [--source <SOURCE>] [--dest <DEST>] [--query <QUERY>] [--created-since <CREATED_SINCE>] [--created-before <CREATED_BEFORE>] [--updated-since <UPDATED_SINCE>] [--updated-before <UPDATED_BEFORE>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests request-changes <ID> (required) [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests tasks <ID> (required) [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket pull-requests unapprove <ID> (required) [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket repo branches [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket repo file <PATH> (required) [--ref <GIT_REF>] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket repo get [<SLUG>] [--workspace <WORKSPACE>] [--repo <REPO>]
+atlx bitbucket repo query [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--project <PROJECT>] [--language <LANGUAGE>] [--sort <SORT> [default: -updated_on]] [--role <ROLE>]
+atlx bitbucket search code <QUERY>... (required) [--workspace <WORKSPACE>] [--repo <REPO>] [--limit <LIMIT> [default: 25]]
+atlx confluence content children <REFERENCE> (required) [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence content comments create <REFERENCE> (required) --body <BODY> (required) [--format <FORMAT> {html|markdown|plain} [default: html]]
+atlx confluence content comments list <REFERENCE> (required) --inline [--format <FORMAT> {html|md} [default: md]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence content create --space-id <SPACE_ID> (required) [--parent-id <PARENT_ID>] --content-type <CONTENT_TYPE> {page|blogpost} (required) --title <TITLE> (required) [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --draft -y/--yes --ack-body-formats
+atlx confluence content delete <REFERENCE> (required) -y/--yes (required) --purge
+atlx confluence content get [<REFS>...] [--id <ID_FLAGS>...] [--detail <DETAIL> {summary|full}] [--format <FORMAT> {html|md} [default: html]] --body-only --draft [--reference-space <REFERENCE_SPACE>] --include-metadata --strict
+atlx confluence content labels <REFERENCE> (required) [--limit <LIMIT> [default: 25]]
+atlx confluence content list --space <SPACE> (required) [--content-type <CONTENT_TYPE> {page|blogpost} [default: page]] [--status <STATUS> [default: current]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence content update [<REFERENCE>] [--id <ID>] [--snapshot-token <SNAPSHOT_TOKEN>] [--title <TITLE>] [--version-message <VERSION_MESSAGE>] --minor-edit [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --dry-run --draft -y/--yes --ack-body-formats
+atlx confluence search query [<CQL_ARG>...] [--cql <CQL>] [--limit <LIMIT> [default: 25]] --excerpt [--cursor <CURSOR>]
+atlx confluence search text [<TEXT>...] [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--updated-since/--since <UPDATED_SINCE>] [--created-since <CREATED_SINCE>] --excerpt [--cursor <CURSOR>]
+atlx confluence space get <IDENTIFIER> (required)
+atlx confluence space list [--type <KIND>] [--status <STATUS>] [--keys <KEYS>] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence space me
+atlx confluence tree <REFERENCE> (required) [--depth <DEPTH> [default: 2]]
+atlx doctor --strict
+atlx jira board list [--project <PROJECT>] [--type <BOARD_TYPE> {scrum|kanban}] [--limit <LIMIT> [default: 25]]
+atlx jira field list [--query <QUERY>] --custom-only
+atlx jira project get <IDENTIFIER> (required)
+atlx jira project list [--query <QUERY>] [--limit <LIMIT> [default: 25]]
+atlx jira sprint issues --sprint <SPRINT> (required) [--jql <JQL>] [--limit <LIMIT> [default: 25]]
+atlx jira sprint list --board <BOARD> (required) [--state <STATE>] [--limit <LIMIT> [default: 25]]
+atlx jira workitem comment create --issue-id <ISSUE_ID> (required) --body <BODY> (required) [--body-format <BODY_FORMAT> {html|markdown|plain} [default: html]] --internal [--visibility-role <VISIBILITY_ROLE>] [--visibility-group <VISIBILITY_GROUP>]
+atlx jira workitem create --space <SPACE> (required) [--type <ISSUE_TYPE> [default: Task]] --summary <SUMMARY> (required) [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--reporter <REPORTER>] [--priority <PRIORITY>] [--labels <LABELS>] [--parent <PARENT>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] -y/--yes
+atlx jira workitem create-meta --space <SPACE> (required) [--type <ISSUE_TYPE>]
+atlx jira workitem get [<IDS>...] [--id <ID_FLAGS>...] [--issue-id <ISSUE_ID>] [--key <KEY>] [--fields <FIELDS>] [--field <FIELD>...] --comments --remote-links --full --strict
+atlx jira workitem link create --inward <INWARD> (required) --outward <OUTWARD> (required) --type <LINK_TYPE> (required) [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
+atlx jira workitem link remote --id <ID> (required) --url <URL> (required) --title <TITLE> (required) [--relationship <RELATIONSHIP>]
+atlx jira workitem link types
+atlx jira workitem query [<JQL_ARG>] [--jql <JQL>] [--limit <LIMIT>] [--first <FIRST>] [--after <AFTER>] [--fields <FIELDS>]
+atlx jira workitem search <TEXT>... (required) [--limit <LIMIT>] [--first <FIRST>] [--after <AFTER>] [--fields <FIELDS>]
+atlx jira workitem transition --id <ID> (required) [--transition-id <TRANSITION_ID>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]]
+atlx jira workitem transitions query --id <ID> (required)
+atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
+atlx login [--token <TOKEN>] --no-verify --force
+atlx logout
+atlx search <QUERY> (required) [--limit <LIMIT> [default: 10]] [--only <ONLY>,... {jira|confluence|bitbucket}]
+atlx setup bitbucket [--workspace <WORKSPACE>] [--token <TOKEN>] [--email <EMAIL>] --force --no-verify
+atlx setup default-site [<SITE>]
+atlx user search <QUERY>... (required) [--limit <LIMIT> [default: 25]]
+atlx whoami
