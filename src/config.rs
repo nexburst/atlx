@@ -4,7 +4,7 @@
 use crate::client::Client;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const BITBUCKET_API: &str = "https://api.bitbucket.org/2.0";
 
@@ -68,7 +68,11 @@ pub fn normalize_site(s: &str) -> String {
         .unwrap_or(s);
     let s = s.trim_end_matches('/');
     // twg accepts a bare site prefix: `acme` -> `acme.atlassian.net`.
-    if s.contains('.') { s.to_string() } else { format!("{s}.atlassian.net") }
+    if s.contains('.') {
+        s.to_string()
+    } else {
+        format!("{s}.atlassian.net")
+    }
 }
 
 impl Config {
@@ -78,7 +82,8 @@ impl Config {
         if !p.exists() {
             return Ok(Self::default());
         }
-        let text = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        let text =
+            std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing {}", p.display()))
     }
 
@@ -114,10 +119,9 @@ impl Config {
     }
 
     fn site(&self) -> Result<String> {
-        self.site
-            .as_deref()
-            .map(normalize_site)
-            .ok_or_else(|| anyhow!("no Atlassian site configured; run `atlx login` or set ATLX_SITE"))
+        self.site.as_deref().map(normalize_site).ok_or_else(|| {
+            anyhow!("no Atlassian site configured; run `atlx login` or set ATLX_SITE")
+        })
     }
 
     fn creds(&self) -> Result<(&str, &str)> {
@@ -125,21 +129,30 @@ impl Config {
             .email
             .as_deref()
             .ok_or_else(|| anyhow!("no email configured; run `atlx login` or set ATLX_EMAIL"))?;
-        let token = self
-            .token
-            .as_deref()
-            .ok_or_else(|| anyhow!("no API token configured; run `atlx login` or set ATLX_TOKEN"))?;
+        let token = self.token.as_deref().ok_or_else(|| {
+            anyhow!("no API token configured; run `atlx login` or set ATLX_TOKEN")
+        })?;
         Ok((email, token))
     }
 
     pub fn jira(&self) -> Result<Client> {
         let (email, token) = self.creds()?;
-        Ok(Client::new(format!("https://{}", self.site()?), email, token, self.timeout_ms))
+        Ok(Client::new(
+            format!("https://{}", self.site()?),
+            email,
+            token,
+            self.timeout_ms,
+        ))
     }
 
     pub fn confluence(&self) -> Result<Client> {
         let (email, token) = self.creds()?;
-        Ok(Client::new(format!("https://{}/wiki", self.site()?), email, token, self.timeout_ms))
+        Ok(Client::new(
+            format!("https://{}/wiki", self.site()?),
+            email,
+            token,
+            self.timeout_ms,
+        ))
     }
 
     pub fn bitbucket_configured(&self) -> bool {
@@ -148,18 +161,124 @@ impl Config {
 
     /// Bitbucket client and default workspace.
     pub fn bitbucket(&self) -> Result<(Client, Option<String>)> {
-        let email = self.bitbucket.email.as_deref().or(self.email.as_deref()).ok_or_else(|| {
-            anyhow!("no Bitbucket email configured; run `atlx setup bitbucket` or set ATLX_BB_EMAIL")
-        })?;
+        let email = self
+            .bitbucket
+            .email
+            .as_deref()
+            .or(self.email.as_deref())
+            .ok_or_else(|| {
+                anyhow!(
+                    "no Bitbucket email configured; run `atlx setup bitbucket` or set ATLX_BB_EMAIL"
+                )
+            })?;
         let token = self.bitbucket.token.as_deref().or(self.token.as_deref()).ok_or_else(|| {
             anyhow!("no Bitbucket API token configured; run `atlx setup bitbucket` or set ATLX_BB_TOKEN")
         })?;
-        Ok((Client::new(BITBUCKET_API.into(), email, token, self.timeout_ms), self.bitbucket.workspace.clone()))
+        Ok((
+            Client::new(BITBUCKET_API.into(), email, token, self.timeout_ms),
+            self.bitbucket.workspace.clone(),
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckStatus {
+    Ok,
+    Warn,
+    Error,
+    NotConfigured,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileInspection {
+    pub status: CheckStatus,
+    pub path: String,
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    pub detail: String,
+}
+
+/// Inspect the config file's existence and (on Unix) permissions.
+pub fn inspect_file(path: &Path) -> FileInspection {
+    let path_str = path.display().to_string();
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return FileInspection {
+                status: CheckStatus::NotConfigured,
+                path: path_str,
+                exists: false,
+                mode: None,
+                detail: "config file does not exist (run `atlx login` or set ATLX_* env vars)"
+                    .into(),
+            };
+        }
+        Err(e) => {
+            return FileInspection {
+                status: CheckStatus::Error,
+                path: path_str,
+                exists: false,
+                mode: None,
+                detail: format!("failed to inspect config file: {e}"),
+            };
+        }
+    };
+    if !meta.is_file() {
+        return FileInspection {
+            status: CheckStatus::Error,
+            path: path_str,
+            exists: true,
+            mode: None,
+            detail: "config path exists but is not a regular file".into(),
+        };
+    }
+    inspect_permissions(path, path_str, &meta)
+}
+
+#[cfg(unix)]
+fn inspect_permissions(path: &Path, path_str: String, meta: &std::fs::Metadata) -> FileInspection {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = meta.permissions().mode() & 0o777;
+    let mode_str = format!("{mode:04o}");
+    let (status, detail) = if mode & 0o077 != 0 {
+        (
+            CheckStatus::Warn,
+            format!(
+                "permissions {mode_str} allow group/other access; run `chmod 600 {}`",
+                path.display()
+            ),
+        )
+    } else {
+        (CheckStatus::Ok, format!("exists (mode {mode_str})"))
+    };
+    FileInspection {
+        status,
+        path: path_str,
+        exists: true,
+        mode: Some(mode_str),
+        detail,
+    }
+}
+
+#[cfg(not(unix))]
+fn inspect_permissions(
+    _path: &Path,
+    path_str: String,
+    _meta: &std::fs::Metadata,
+) -> FileInspection {
+    FileInspection {
+        status: CheckStatus::Ok,
+        path: path_str,
+        exists: true,
+        mode: None,
+        detail: "exists".into(),
     }
 }
 
 #[cfg(unix)]
-fn write_private(p: &std::path::Path, text: &str) -> std::io::Result<()> {
+fn write_private(p: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let mut f = std::fs::OpenOptions::new()
@@ -174,7 +293,7 @@ fn write_private(p: &std::path::Path, text: &str) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn write_private(p: &std::path::Path, text: &str) -> std::io::Result<()> {
+fn write_private(p: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(p, text)
 }
 
@@ -184,7 +303,10 @@ mod tests {
 
     #[test]
     fn normalizes_site() {
-        assert_eq!(normalize_site("https://acme.atlassian.net/"), "acme.atlassian.net");
+        assert_eq!(
+            normalize_site("https://acme.atlassian.net/"),
+            "acme.atlassian.net"
+        );
         assert_eq!(normalize_site(" acme.atlassian.net "), "acme.atlassian.net");
         assert_eq!(normalize_site("http://x.y//"), "x.y");
         assert_eq!(normalize_site("acme"), "acme.atlassian.net");
@@ -196,7 +318,10 @@ mod tests {
             site: Some("a.atlassian.net".into()),
             email: Some("me@example.com".into()),
             token: Some("t".into()),
-            bitbucket: Bitbucket { workspace: Some("ws".into()), ..Default::default() },
+            bitbucket: Bitbucket {
+                workspace: Some("ws".into()),
+                ..Default::default()
+            },
             timeout_ms: None,
         };
         let text = toml::to_string_pretty(&c).unwrap();
@@ -205,5 +330,48 @@ mod tests {
         assert_eq!(back.site.as_deref(), Some("a.atlassian.net"));
         let empty: Config = toml::from_str("").unwrap();
         assert!(empty.site.is_none());
+    }
+
+    #[test]
+    fn inspects_missing_config_file() {
+        let p =
+            std::env::temp_dir().join(format!("atlx-doctor-missing-{}.toml", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let res = inspect_file(&p);
+        assert_eq!(res.status, CheckStatus::NotConfigured);
+        assert!(!res.exists);
+        assert!(res.mode.is_none());
+    }
+
+    #[test]
+    fn inspects_existing_config_file_permissions() {
+        let p = std::env::temp_dir().join(format!("atlx-doctor-perms-{}.toml", std::process::id()));
+        std::fs::write(&p, "site = \"acme.atlassian.net\"\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let ok_res = inspect_file(&p);
+            assert_eq!(ok_res.status, CheckStatus::Ok);
+            assert!(ok_res.exists);
+            assert_eq!(ok_res.mode.as_deref(), Some("0600"));
+
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let warn_res = inspect_file(&p);
+            assert_eq!(warn_res.status, CheckStatus::Warn);
+            assert!(warn_res.exists);
+            assert_eq!(warn_res.mode.as_deref(), Some("0644"));
+        }
+
+        #[cfg(not(unix))]
+        {
+            let res = inspect_file(&p);
+            assert_eq!(res.status, CheckStatus::Ok);
+            assert!(res.exists);
+            assert!(res.mode.is_none());
+        }
+
+        let _ = std::fs::remove_file(&p);
     }
 }

@@ -39,6 +39,12 @@ enum Cmd {
     Logout,
     /// Show the authenticated user
     Whoami,
+    /// Check config, permissions, and service connectivity (atlx extra)
+    Doctor {
+        /// Fail on warnings or unconfigured checks
+        #[arg(long)]
+        strict: bool,
+    },
     /// Optional setup: Bitbucket token, default site
     Setup {
         #[command(subcommand)]
@@ -1086,6 +1092,8 @@ enum Out {
     Data(Value),
     /// Printed verbatim regardless of format (`--body-only`).
     Raw(String),
+    /// Print structured output, then exit with a non-zero status code.
+    Exit(Value, i32),
 }
 
 fn main() {
@@ -1103,6 +1111,10 @@ fn main() {
     match run(&globals, cli.cmd) {
         Ok(Out::Data(v)) => output::print(&v, fmt),
         Ok(Out::Raw(s)) => println!("{s}"),
+        Ok(Out::Exit(v, code)) => {
+            output::print(&v, fmt);
+            std::process::exit(code);
+        }
         Err(e) => {
             eprintln!("error: {e:#}");
             std::process::exit(1);
@@ -1150,6 +1162,7 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
             json!({"name": me["displayName"], "email": me["emailAddress"], "account_id": me["accountId"],
                    "site": cfg.site, "bitbucket_workspace": cfg.bitbucket.workspace})
         }
+        Cmd::Doctor { strict } => return Ok(doctor(g, strict)),
         Cmd::Setup { cmd } => setup(g, cmd)?,
         Cmd::Jira { cmd } => jira_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::User {
@@ -1167,6 +1180,228 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         } => api(&g.config()?, product, &path, &method, data, &query)?,
     };
     Ok(Out::Data(data))
+}
+
+fn check_entry(
+    status: config::CheckStatus,
+    detail: impl Into<String>,
+    extra: &[(&str, Value)],
+) -> (config::CheckStatus, Value) {
+    let mut obj = serde_json::Map::new();
+    obj.insert("status".into(), json!(status));
+    for (k, v) in extra {
+        if !v.is_null() {
+            obj.insert((*k).into(), v.clone());
+        }
+    }
+    obj.insert("detail".into(), Value::String(detail.into()));
+    (status, Value::Object(obj))
+}
+
+fn check_jira(cfg: &Config) -> (config::CheckStatus, Value) {
+    let site = cfg.site.as_deref().map(config::normalize_site);
+    let site_val = site.as_deref().map_or(Value::Null, |s| json!(s));
+    let client = match cfg.jira() {
+        Ok(c) => c,
+        Err(e) => {
+            return check_entry(
+                config::CheckStatus::Error,
+                format!("{e:#}"),
+                &[("site", site_val)],
+            );
+        }
+    };
+    match jira::myself(&client) {
+        Ok(me) => {
+            let name = me["displayName"].as_str().unwrap_or("unknown");
+            let detail = match site.as_deref() {
+                Some(s) => format!("authenticated as {name} ({s})"),
+                None => format!("authenticated as {name}"),
+            };
+            check_entry(
+                config::CheckStatus::Ok,
+                detail,
+                &[
+                    ("site", site_val),
+                    ("name", json!(name)),
+                    ("email", me["emailAddress"].clone()),
+                    ("account_id", me["accountId"].clone()),
+                ],
+            )
+        }
+        Err(e) => check_entry(
+            config::CheckStatus::Error,
+            format!("{e:#}"),
+            &[("site", site_val)],
+        ),
+    }
+}
+
+fn check_confluence(cfg: &Config) -> (config::CheckStatus, Value) {
+    let site = cfg.site.as_deref().map(config::normalize_site);
+    let site_val = site.as_deref().map_or(Value::Null, |s| json!(s));
+    let client = match cfg.confluence() {
+        Ok(c) => c,
+        Err(e) => {
+            return check_entry(
+                config::CheckStatus::Error,
+                format!("{e:#}"),
+                &[("site", site_val)],
+            );
+        }
+    };
+    match confluence::spaces(&client, None, None, None, 1, None) {
+        Ok(spaces) => {
+            let count = spaces["results"].as_array().map_or(0, Vec::len);
+            let detail = match site.as_deref() {
+                Some(s) => format!("reachable ({s}/wiki)"),
+                None => "reachable".into(),
+            };
+            check_entry(
+                config::CheckStatus::Ok,
+                detail,
+                &[("site", site_val), ("spaces_sampled", json!(count))],
+            )
+        }
+        Err(e) => check_entry(
+            config::CheckStatus::Error,
+            format!("{e:#}"),
+            &[("site", site_val)],
+        ),
+    }
+}
+
+fn check_bitbucket(cfg: &Config) -> (config::CheckStatus, Value) {
+    if !cfg.bitbucket_configured() {
+        return check_entry(
+            config::CheckStatus::NotConfigured,
+            "no Bitbucket workspace configured (run `atlx setup bitbucket` or set ATLX_BB_WORKSPACE)",
+            &[],
+        );
+    }
+    let ws = cfg.bitbucket.workspace.as_deref().unwrap_or_default();
+    let ws_val = json!(ws);
+    let (client, _) = match cfg.bitbucket() {
+        Ok(pair) => pair,
+        Err(e) => {
+            return check_entry(
+                config::CheckStatus::Error,
+                format!("{e:#}"),
+                &[("workspace", ws_val)],
+            );
+        }
+    };
+    let q = bitbucket::RepoQuery {
+        query: None,
+        project: None,
+        language: None,
+        sort: "-updated_on",
+        role: None,
+        limit: 1,
+    };
+    match bitbucket::repo_query(&client, ws, &q) {
+        Ok(repos) => {
+            let count = repos.as_array().map_or(0, Vec::len);
+            check_entry(
+                config::CheckStatus::Ok,
+                format!("authenticated (workspace {ws})"),
+                &[("workspace", ws_val), ("repos_sampled", json!(count))],
+            )
+        }
+        Err(e) => check_entry(
+            config::CheckStatus::Error,
+            format!("{e:#}"),
+            &[("workspace", ws_val)],
+        ),
+    }
+}
+
+fn doctor_passed(statuses: &[config::CheckStatus], strict: bool) -> bool {
+    statuses.iter().all(|s| match s {
+        config::CheckStatus::Ok => true,
+        config::CheckStatus::Warn | config::CheckStatus::NotConfigured => !strict,
+        config::CheckStatus::Error => false,
+    })
+}
+
+fn doctor(g: &Globals, strict: bool) -> Out {
+    let mut cfg_inspection = match config::path() {
+        Ok(p) => config::inspect_file(&p),
+        Err(e) => config::FileInspection {
+            status: config::CheckStatus::Error,
+            path: String::new(),
+            exists: false,
+            mode: None,
+            detail: format!("{e:#}"),
+        },
+    };
+
+    let cfg = match g.config() {
+        Ok(c) => Some(c),
+        Err(e) => {
+            cfg_inspection.status = config::CheckStatus::Error;
+            cfg_inspection.detail = format!("{e:#}");
+            None
+        }
+    };
+
+    let ((j_status, j_val), (cf_status, cf_val), (bb_status, bb_val)) = match cfg.as_ref() {
+        Some(cfg) => std::thread::scope(|s| {
+            let j = s.spawn(|| check_jira(cfg));
+            let cf = s.spawn(|| check_confluence(cfg));
+            let bb = s.spawn(|| check_bitbucket(cfg));
+            let panic_err = |name: &str| {
+                check_entry(
+                    config::CheckStatus::Error,
+                    format!("{name} check panicked"),
+                    &[],
+                )
+            };
+            (
+                j.join().unwrap_or_else(|_| panic_err("jira")),
+                cf.join().unwrap_or_else(|_| panic_err("confluence")),
+                bb.join().unwrap_or_else(|_| panic_err("bitbucket")),
+            )
+        }),
+        None => (
+            check_entry(
+                config::CheckStatus::Error,
+                "skipped: config failed to load",
+                &[],
+            ),
+            check_entry(
+                config::CheckStatus::Error,
+                "skipped: config failed to load",
+                &[],
+            ),
+            check_entry(
+                config::CheckStatus::NotConfigured,
+                "skipped: config failed to load",
+                &[],
+            ),
+        ),
+    };
+
+    let ok = doctor_passed(
+        &[cfg_inspection.status, j_status, cf_status, bb_status],
+        strict,
+    );
+    let report = json!({
+        "ok": ok,
+        "strict": strict,
+        "checks": {
+            "config": cfg_inspection,
+            "jira": j_val,
+            "confluence": cf_val,
+            "bitbucket": bb_val,
+        }
+    });
+
+    if ok {
+        Out::Data(report)
+    } else {
+        Out::Exit(report, 1)
+    }
 }
 
 /// `-` means read stdin; anything else is used as-is.
@@ -1214,7 +1449,10 @@ impl EchoGuard {
 #[cfg(unix)]
 impl Drop for EchoGuard {
     fn drop(&mut self) {
-        let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
+        let _ = std::process::Command::new("stty")
+            .arg("echo")
+            .stdin(std::process::Stdio::inherit())
+            .status();
         eprintln!();
     }
 }
@@ -1235,7 +1473,11 @@ fn read_prompt_line(label: &str, secret: bool) -> Result<String> {
     }
     eprint!("{label}: ");
     std::io::stderr().flush()?;
-    let _guard = if secret { Some(EchoGuard::disable()?) } else { None };
+    let _guard = if secret {
+        Some(EchoGuard::disable()?)
+    } else {
+        None
+    };
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;
     drop(_guard);
@@ -1273,7 +1515,9 @@ fn login(g: &Globals, a: LoginArgs) -> Result<Value> {
         Some(t) => text_arg(t)?.trim().to_string(),
         None => match keep(cfg.token.take(), a.force) {
             Some(t) => t,
-            None => prompt_secret("API token (https://id.atlassian.com/manage-profile/security/api-tokens)")?,
+            None => prompt_secret(
+                "API token (https://id.atlassian.com/manage-profile/security/api-tokens)",
+            )?,
         },
     });
     cfg.timeout_ms = g.timeout_ms;
@@ -1317,7 +1561,9 @@ fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
                 Some(t) => text_arg(t)?.trim().to_string(),
                 None => match keep(cfg.bitbucket.token.take(), force) {
                     Some(t) => t,
-                    None => prompt_secret("Bitbucket API token (scopes: account, repository, pullrequest, pipeline)")?,
+                    None => prompt_secret(
+                        "Bitbucket API token (scopes: account, repository, pullrequest, pipeline)",
+                    )?,
                 },
             });
             cfg.timeout_ms = g.timeout_ms;
@@ -1687,11 +1933,29 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
         }
         ConfCmd::Content { cmd } => match cmd {
-            ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, reference_space, include_metadata: _, strict } => {
+            ContentCmd::Get {
+                refs,
+                id_flags,
+                detail,
+                format,
+                body_only,
+                draft,
+                reference_space,
+                include_metadata: _,
+                strict,
+            } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
-                let detail = if body_only { confluence::Detail::Full } else { detail.unwrap_or_default() };
-                let opts =
-                    confluence::GetOpts { detail, format, draft, reference_space: reference_space.as_deref() };
+                let detail = if body_only {
+                    confluence::Detail::Full
+                } else {
+                    detail.unwrap_or_default()
+                };
+                let opts = confluence::GetOpts {
+                    detail,
+                    format,
+                    draft,
+                    reference_space: reference_space.as_deref(),
+                };
                 if body_only {
                     let [one] = inputs.as_slice() else {
                         bail!("--body-only takes exactly one ID")
@@ -1758,32 +2022,71 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     },
                 )?
             }
-            ContentCmd::List { space, content_type, status, limit, cursor } => {
-                confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?
-            }
+            ContentCmd::List {
+                space,
+                content_type,
+                status,
+                limit,
+                cursor,
+            } => confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?,
             ContentCmd::Comments { cmd } => match cmd {
-                ConfCommentCmd::List { reference, inline, format, limit, cursor } => {
-                    confluence::comments_list(c, &reference, inline, format, limit, cursor.as_deref())?
-                }
-                ConfCommentCmd::Create { reference, body, format } => {
-                    confluence::comment_create(c, &reference, &text_arg(body)?, format)?
-                }
+                ConfCommentCmd::List {
+                    reference,
+                    inline,
+                    format,
+                    limit,
+                    cursor,
+                } => confluence::comments_list(
+                    c,
+                    &reference,
+                    inline,
+                    format,
+                    limit,
+                    cursor.as_deref(),
+                )?,
+                ConfCommentCmd::Create {
+                    reference,
+                    body,
+                    format,
+                } => confluence::comment_create(c, &reference, &text_arg(body)?, format)?,
             },
-            ContentCmd::Children { reference, limit, cursor } => {
-                confluence::children(c, &reference, limit, cursor.as_deref())?
-            }
+            ContentCmd::Children {
+                reference,
+                limit,
+                cursor,
+            } => confluence::children(c, &reference, limit, cursor.as_deref())?,
             ContentCmd::Labels { reference, limit } => confluence::labels(c, &reference, limit)?,
-            ContentCmd::Delete { reference, yes, purge } => {
+            ContentCmd::Delete {
+                reference,
+                yes,
+                purge,
+            } => {
                 if !yes {
                     bail!("deleting Confluence content requires --yes");
                 }
                 confluence::delete(c, &reference, purge)?
             }
         },
-        ConfCmd::Space { cmd: SpaceCmd::List { kind, status, keys, limit, cursor } } => {
-            confluence::spaces(c, kind.as_deref(), status.as_deref(), keys.as_deref(), limit, cursor.as_deref())?
-        }
-        ConfCmd::Space { cmd: SpaceCmd::Get { identifier } } => confluence::space(c, &identifier)?,
+        ConfCmd::Space {
+            cmd:
+                SpaceCmd::List {
+                    kind,
+                    status,
+                    keys,
+                    limit,
+                    cursor,
+                },
+        } => confluence::spaces(
+            c,
+            kind.as_deref(),
+            status.as_deref(),
+            keys.as_deref(),
+            limit,
+            cursor.as_deref(),
+        )?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Get { identifier },
+        } => confluence::space(c, &identifier)?,
         ConfCmd::Space { cmd: SpaceCmd::Me } => confluence::space_me(c)?,
         ConfCmd::Tree { reference, depth } => confluence::tree(c, &reference, depth)?,
     };
@@ -1804,7 +2107,18 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
         bitbucket::repo_path(slug.or(r.repo.as_deref()), r.workspace.as_deref(), dws)
     };
     let data = match cmd {
-        BbCmd::Repo { cmd: RepoCmd::Query { query, limit, workspace, project, language, sort, role } } => {
+        BbCmd::Repo {
+            cmd:
+                RepoCmd::Query {
+                    query,
+                    limit,
+                    workspace,
+                    project,
+                    language,
+                    sort,
+                    role,
+                },
+        } => {
             let q = bitbucket::RepoQuery {
                 query: query.as_deref(),
                 project: project.as_deref(),
@@ -1815,16 +2129,28 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
             };
             bitbucket::repo_query(&c, bitbucket::workspace_or(workspace.as_deref(), dws)?, &q)?
         }
-        BbCmd::Repo { cmd: RepoCmd::Get { slug, repo } } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?)?,
-        BbCmd::Repo { cmd: RepoCmd::File { path: file_path, git_ref, repo } } => {
-            return Ok(match bitbucket::repo_file(&c, &path(&repo, None)?, &file_path, git_ref.as_deref())? {
-                bitbucket::RepoFile::Dir(v) => Out::Data(v),
-                bitbucket::RepoFile::Raw(s) => Out::Raw(s),
-            });
+        BbCmd::Repo {
+            cmd: RepoCmd::Get { slug, repo },
+        } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?)?,
+        BbCmd::Repo {
+            cmd:
+                RepoCmd::File {
+                    path: file_path,
+                    git_ref,
+                    repo,
+                },
+        } => {
+            return Ok(
+                match bitbucket::repo_file(&c, &path(&repo, None)?, &file_path, git_ref.as_deref())?
+                {
+                    bitbucket::RepoFile::Dir(v) => Out::Data(v),
+                    bitbucket::RepoFile::Raw(s) => Out::Raw(s),
+                },
+            );
         }
-        BbCmd::Repo { cmd: RepoCmd::Branches { query, limit, repo } } => {
-            bitbucket::repo_branches(&c, &path(&repo, None)?, query.as_deref(), limit)?
-        }
+        BbCmd::Repo {
+            cmd: RepoCmd::Branches { query, limit, repo },
+        } => bitbucket::repo_branches(&c, &path(&repo, None)?, query.as_deref(), limit)?,
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
                 text,
@@ -1865,8 +2191,14 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 repo,
             } => {
                 let p = path(&repo, None)?;
-                let o = bitbucket::PrGet { comments: comments || full, diff: diff || full, statuses: statuses || full };
-                batch(ids, strict, |id| bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o))?
+                let o = bitbucket::PrGet {
+                    comments: comments || full,
+                    diff: diff || full,
+                    statuses: statuses || full,
+                };
+                batch(ids, strict, |id| {
+                    bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
+                })?
             }
             PrCmd::Create {
                 title,
@@ -1915,20 +2247,36 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     &c,
                     &path(&repo, None)?,
                     bitbucket::pr_number(&pull_request)?,
-                    bitbucket::NewComment { text: &text, reply_to, path: file.as_deref(), line },
+                    bitbucket::NewComment {
+                        text: &text,
+                        reply_to,
+                        path: file.as_deref(),
+                        line,
+                    },
                 )?
             }
             PrCmd::Diff { id, repo } => {
-                return Ok(Out::Raw(bitbucket::pr_diff(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?));
+                return Ok(Out::Raw(bitbucket::pr_diff(
+                    &c,
+                    &path(&repo, None)?,
+                    bitbucket::pr_number(&id)?,
+                )?));
             }
-            PrCmd::Activity { id, event_type, limit, repo } => bitbucket::pr_activity(
+            PrCmd::Activity {
+                id,
+                event_type,
+                limit,
+                repo,
+            } => bitbucket::pr_activity(
                 &c,
                 &path(&repo, None)?,
                 bitbucket::pr_number(&id)?,
                 event_type.as_deref(),
                 limit,
             )?,
-            PrCmd::Tasks { id, repo } => bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?,
+            PrCmd::Tasks { id, repo } => {
+                bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
+            }
             PrCmd::Approve { id, repo } => {
                 bitbucket::pr_approve(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
             }
@@ -1938,10 +2286,21 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
             PrCmd::RequestChanges { id, repo } => {
                 bitbucket::pr_request_changes(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?)?
             }
-            PrCmd::Merge { id, strategy, close_source_branch, message, yes, repo } => {
+            PrCmd::Merge {
+                id,
+                strategy,
+                close_source_branch,
+                message,
+                yes,
+                repo,
+            } => {
                 let pr_id = bitbucket::pr_number(&id)?;
                 require_yes(yes, &format!("merging pull request #{pr_id}"))?;
-                let o = bitbucket::PrMerge { strategy, close_source_branch, message: message.as_deref() };
+                let o = bitbucket::PrMerge {
+                    strategy,
+                    close_source_branch,
+                    message: message.as_deref(),
+                };
                 bitbucket::pr_merge(&c, &path(&repo, None)?, pr_id, &o)?
             }
             PrCmd::Decline { id, yes, repo } => {
@@ -1970,11 +2329,34 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
             };
             bitbucket::pipeline_query(&c, &path(&repo, None)?, &q)?
         }
-        BbCmd::Pipeline { cmd: PipelineCmd::Get { pipeline, logs, failed_steps, lines, step, repo } } => {
-            let o = bitbucket::PipelineGet { logs, failed_steps, lines, step: step.as_deref() };
+        BbCmd::Pipeline {
+            cmd:
+                PipelineCmd::Get {
+                    pipeline,
+                    logs,
+                    failed_steps,
+                    lines,
+                    step,
+                    repo,
+                },
+        } => {
+            let o = bitbucket::PipelineGet {
+                logs,
+                failed_steps,
+                lines,
+                step: step.as_deref(),
+            };
             bitbucket::pipeline_get(&c, &path(&repo, None)?, &pipeline, &o)?
         }
-        BbCmd::Search { cmd: BbSearchCmd::Code { query, workspace, repo, limit } } => {
+        BbCmd::Search {
+            cmd:
+                BbSearchCmd::Code {
+                    query,
+                    workspace,
+                    repo,
+                    limit,
+                },
+        } => {
             let ws = bitbucket::workspace_or(workspace.as_deref(), dws)?;
             bitbucket::search_code(&c, ws, &query.join(" "), repo.as_deref(), limit)?
         }
@@ -2102,6 +2484,8 @@ mod tests {
             "atlx bb search code 'AuthService' --workspace acme --repo api --limit 10",
             "atlx bitbucket search code AuthService --repo api",
             "atlx whoami -o text",
+            "atlx doctor",
+            "atlx doctor --strict -o json",
             "atlx setup bitbucket --workspace acme",
         ] {
             let argv: Vec<String> = shell_words(args);
@@ -2153,7 +2537,10 @@ mod tests {
             "atlx jira workitem update --id PROJ-1 --fix-versions a --add-fix-versions b",
             "atlx jira workitem update --id PROJ-1 --fix-versions a --remove-fix-versions b",
         ] {
-            assert!(Cli::try_parse_from(shell_words(bad)).is_err(), "expected error for: {bad}");
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
         }
         let ok = "atlx jira workitem update --id PROJ-1 --add-labels a --remove-labels b";
         assert!(Cli::try_parse_from(shell_words(ok)).is_ok());
@@ -2166,24 +2553,41 @@ mod tests {
             "atlx bb prs query --repo api --repo web",
             "atlx bb pipeline query --repo api --repo web",
         ] {
-            assert!(Cli::try_parse_from(shell_words(bad)).is_err(), "expected error for: {bad}");
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
         }
     }
 
     #[test]
     fn parses_confluence_content_get_strict_and_space_list_cursor() {
-        let cli = Cli::try_parse_from(shell_words("atlx confluence content get 123 456 --strict")).unwrap();
+        let cli = Cli::try_parse_from(shell_words("atlx confluence content get 123 456 --strict"))
+            .unwrap();
         match cli.cmd {
-            Cmd::Confluence { cmd: ConfCmd::Content { cmd: ContentCmd::Get { refs, strict, .. } } } => {
+            Cmd::Confluence {
+                cmd:
+                    ConfCmd::Content {
+                        cmd: ContentCmd::Get { refs, strict, .. },
+                    },
+            } => {
                 assert_eq!(refs, vec!["123", "456"]);
                 assert!(strict);
             }
             _ => panic!("unexpected parsed command"),
         }
 
-        let cli = Cli::try_parse_from(shell_words("atlx confluence space list --limit 10 --cursor cur%3D")).unwrap();
+        let cli = Cli::try_parse_from(shell_words(
+            "atlx confluence space list --limit 10 --cursor cur%3D",
+        ))
+        .unwrap();
         match cli.cmd {
-            Cmd::Confluence { cmd: ConfCmd::Space { cmd: SpaceCmd::List { limit, cursor, .. } } } => {
+            Cmd::Confluence {
+                cmd:
+                    ConfCmd::Space {
+                        cmd: SpaceCmd::List { limit, cursor, .. },
+                    },
+            } => {
                 assert_eq!(limit, 10);
                 assert_eq!(cursor.as_deref(), Some("cur%3D"));
             }
@@ -2194,14 +2598,22 @@ mod tests {
     #[test]
     fn batch_respects_strict_flag() {
         let non_strict = batch(vec!["ok".into(), "bad".into()], false, |id| {
-            if id == "bad" { bail!("boom") } else { Ok(json!({"id": id})) }
+            if id == "bad" {
+                bail!("boom")
+            } else {
+                Ok(json!({"id": id}))
+            }
         })
         .unwrap();
         assert_eq!(non_strict["items"][0]["ok"], true);
         assert_eq!(non_strict["items"][1]["ok"], false);
 
         let err = batch(vec!["ok".into(), "bad".into()], true, |id| {
-            if id == "bad" { bail!("boom") } else { Ok(json!({"id": id})) }
+            if id == "bad" {
+                bail!("boom")
+            } else {
+                Ok(json!({"id": id}))
+            }
         })
         .unwrap_err();
         assert!(err.to_string().contains("1 of 2 reads failed"), "{err}");
@@ -2211,9 +2623,17 @@ mod tests {
     fn confluence_delete_requires_yes_and_comments_default_md() {
         assert!(Cli::try_parse_from(["atlx", "confluence", "content", "delete", "12345"]).is_err());
 
-        let cli = Cli::try_parse_from(["atlx", "confluence", "content", "comments", "list", "12345"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["atlx", "confluence", "content", "comments", "list", "12345"])
+                .unwrap();
         let Cmd::Confluence {
-            cmd: ConfCmd::Content { cmd: ContentCmd::Comments { cmd: ConfCommentCmd::List { format, .. } } },
+            cmd:
+                ConfCmd::Content {
+                    cmd:
+                        ContentCmd::Comments {
+                            cmd: ConfCommentCmd::List { format, .. },
+                        },
+                },
         } = cli.cmd
         else {
             panic!("unexpected parsed command");
@@ -2225,7 +2645,57 @@ mod tests {
     fn bb_confirmation_and_args() {
         assert!(require_yes(false, "merging pull request #1").is_err());
         assert!(require_yes(true, "merging pull request #1").is_ok());
-        assert!(Cli::try_parse_from(["atlx", "bb", "pull-requests", "merge", "1", "--repo", "acme/api", "--strategy", "merge_commit", "--yes"]).is_ok());
-        assert!(Cli::try_parse_from(["atlx", "bb", "pull-requests", "merge", "1", "--repo", "acme/api", "--strategy", "invalid"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "atlx",
+                "bb",
+                "pull-requests",
+                "merge",
+                "1",
+                "--repo",
+                "acme/api",
+                "--strategy",
+                "merge_commit",
+                "--yes"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "atlx",
+                "bb",
+                "pull-requests",
+                "merge",
+                "1",
+                "--repo",
+                "acme/api",
+                "--strategy",
+                "invalid"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parses_doctor_command() {
+        let normal = Cli::try_parse_from(["atlx", "doctor"]).unwrap();
+        assert!(matches!(normal.cmd, Cmd::Doctor { strict: false }));
+
+        let strict = Cli::try_parse_from(["atlx", "doctor", "--strict"]).unwrap();
+        assert!(matches!(strict.cmd, Cmd::Doctor { strict: true }));
+    }
+
+    #[test]
+    fn doctor_exit_policy() {
+        use config::CheckStatus::{Error, NotConfigured, Ok, Warn};
+
+        assert!(doctor_passed(&[Ok, Ok, Ok, NotConfigured], false));
+        assert!(doctor_passed(&[Warn, Ok, Ok, Ok], false));
+        assert!(!doctor_passed(&[Ok, Error, Ok, Ok], false));
+
+        assert!(doctor_passed(&[Ok, Ok, Ok, Ok], true));
+        assert!(!doctor_passed(&[Warn, Ok, Ok, Ok], true));
+        assert!(!doctor_passed(&[Ok, Ok, Ok, NotConfigured], true));
+        assert!(!doctor_passed(&[Ok, Error, Ok, Ok], true));
     }
 }

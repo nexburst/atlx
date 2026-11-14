@@ -339,7 +339,11 @@ fn none_or(s: &str) -> Option<&str> {
 
 /// `jira workitem update`: field edits, then optional transition and comment.
 pub fn update(c: &Client, key: &str, u: Update) -> Result<Value> {
-    for (name, edit) in [("labels", &u.labels), ("components", &u.components), ("fixVersions", &u.fix_versions)] {
+    for (name, edit) in [
+        ("labels", &u.labels),
+        ("components", &u.components),
+        ("fixVersions", &u.fix_versions),
+    ] {
         if let Some(edit) = edit
             && edit.set.is_some()
             && (!edit.add.is_empty() || !edit.remove.is_empty())
@@ -1079,7 +1083,11 @@ mod tests {
             &c,
             "PROJ-1",
             Update {
-                labels: Some(ListEdit { set: Some(vec!["a".into()]), add: vec!["b".into()], remove: vec![] }),
+                labels: Some(ListEdit {
+                    set: Some(vec!["a".into()]),
+                    add: vec!["b".into()],
+                    remove: vec![],
+                }),
                 ..Default::default()
             },
         )
@@ -1090,7 +1098,11 @@ mod tests {
             &c,
             "PROJ-1",
             Update {
-                components: Some(ListEdit { set: Some(vec![]), add: vec![], remove: vec!["api".into()] }),
+                components: Some(ListEdit {
+                    set: Some(vec![]),
+                    add: vec![],
+                    remove: vec!["api".into()],
+                }),
                 ..Default::default()
             },
         )
@@ -1101,7 +1113,11 @@ mod tests {
             &c,
             "PROJ-1",
             Update {
-                fix_versions: Some(ListEdit { set: Some(vec!["1.0".into()]), add: vec!["2.0".into()], remove: vec![] }),
+                fix_versions: Some(ListEdit {
+                    set: Some(vec!["1.0".into()]),
+                    add: vec!["2.0".into()],
+                    remove: vec![],
+                }),
                 ..Default::default()
             },
         )

@@ -80,7 +80,10 @@ fn live_confluence_spaces_and_optional_page() {
 
     let spaces =
         confluence::spaces(&client, None, None, None, 5, None).expect("confluence::spaces failed");
-    assert!(spaces["results"].is_array(), "expected spaces results array in {spaces}");
+    assert!(
+        spaces["results"].is_array(),
+        "expected spaces results array in {spaces}"
+    );
 
     if let Some(page) = env_opt("ATLX_TEST_PAGE") {
         let content = confluence::get(
