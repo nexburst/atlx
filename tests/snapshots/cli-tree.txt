@@ -3,6 +3,11 @@ global: [-s/--site <SITE>]
 global: [-u/--user <USER>]
 global: [--timeout-ms <TIMEOUT_MS>]
 global: [-p/--profile <NAME>]
+global: [--select <PATHS>]
+global: [--agent-fields <PATHS>]
+global: [--output-file <PATH>]
+global: [--output-summary <LEVEL> {none|stats|auto|inline}]
+global: [--api-version <VERSION> {v2}]
 alias: atlx bb -> atlx bitbucket
 alias: atlx bitbucket prs -> atlx bitbucket pull-requests
 alias: atlx confluence content comment -> atlx confluence content comments

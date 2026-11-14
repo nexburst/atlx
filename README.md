@@ -14,8 +14,10 @@ atlx jira workitem get PROJ-1 --comments -o json
 ```
 
 Global flags match too: `-o/--output text|json|jsonl`, `-s/--site` (prefix like
-`acme` or a hostname), `-u/--user`, `--timeout-ms`. When stdout is piped, atlx
-defaults to JSON.
+`acme` or a hostname), `-u/--user`, `-p/--profile`, `--timeout-ms`, and the
+output controls `--select`, `--agent-fields`, `--output-file`,
+`--output-summary` and `--api-version` (see [Output controls](#output-controls)).
+When stdout is piped, atlx defaults to JSON.
 
 ## Install
 
@@ -197,6 +199,42 @@ Markdown.
 
 Errors go to stderr with a non-zero exit code. In `search`, a failing product is
 reported inline (`{"error": ...}`) so the other results still come through.
+
+## Output controls
+
+These global flags behave as in twg, so agent workflows written for twg work
+unchanged.
+
+- **`--select <paths>`** keeps only the listed comma-separated dot paths of the
+  JSON or JSONL output, e.g. `--select issues.key,issues.status`. A step that
+  meets an array applies to every element, and the result keeps the original
+  nesting. Paths that don't exist are skipped; if none matches, the full output
+  is printed with a warning on stderr. A leading `data.` is optional (twg's
+  payloads sit under `data`). `@compact`, `@evidence` and `@rows` expand to a
+  per-command list (Jira work items, Confluence pages and search, Bitbucket
+  repositories, pull requests and pipelines, user search); an unknown preset is
+  an error that lists the valid ones. Error envelopes are never projected. In
+  text mode the flag is ignored with a warning.
+- **`--output-file <path>`** writes what would have gone to stdout into the
+  file (creating missing directories, replacing an existing file) and prints
+  `stdout=<path>` instead. Errors are written there too and keep their exit
+  code. With `confluence content get --body-only --output-file page.html -o
+  json`, the page body goes to the file and stdout gets the rest of the result,
+  including `snapshot_token`, with `body.outputFile` pointing at the file, ready
+  for `content update --snapshot-token`.
+- **`--output-summary [none|stats|auto|inline]`** (JSON and JSONL only) writes
+  the full output to `--output-file`, or to a fresh file under
+  `$TMPDIR/atlx/`, and prints a YAML envelope instead: `output_files` (path,
+  lines, bytes), the command, and then either the payload itself
+  (`stdout_inline`) or its key counts and a type sketch (`stdout_stats`,
+  `stdout_shape`). `auto` (the default level) inlines payloads under 10 KiB
+  (`ATLX_INLINE_LIMIT` changes this), `inline` always does, `stats` never does,
+  and `none` turns the envelope off. The envelope ends with `---END---`.
+- **`--agent-fields <paths>`** only matters with `--output-summary`: the
+  envelope then inlines just those paths (relative to the whole payload, presets
+  allowed), and the projection is also saved as `<name>.compact.json` next to
+  the full output. Unlike `--select`, it never changes the full output file.
+- **`--api-version v2`** is accepted; any other version is rejected.
 
 ## Compatibility with twg
 

@@ -1,4 +1,10 @@
 //! Output: JSON for agents and scripts, aligned text for humans.
+//!
+//! The global output controls live in the submodules: `--select` and
+//! `--agent-fields` in [`select`], `--output-summary` in [`summary`].
+
+pub mod select;
+pub mod summary;
 
 use clap::ValueEnum;
 use serde_json::Value;
@@ -13,17 +19,22 @@ pub enum Format {
 }
 
 pub fn print(v: &Value, f: Format) {
+    print!("{}", render(v, f));
+}
+
+/// `v` as it is printed in format `f`, trailing newline included.
+pub fn render(v: &Value, f: Format) -> String {
     match f {
-        Format::Json => println!("{}", serde_json::to_string_pretty(v).unwrap_or_default()),
-        Format::Text => print!("{}", to_text(v)),
+        Format::Json => serde_json::to_string_pretty(v).unwrap_or_default() + "\n",
+        Format::Text => to_text(v),
         Format::Jsonl => {
             let rows = v
                 .as_array()
                 .or_else(|| v["issues"].as_array())
                 .or_else(|| v["results"].as_array());
             match rows {
-                Some(rows) => rows.iter().for_each(|r| println!("{r}")),
-                None => println!("{v}"),
+                Some(rows) => rows.iter().map(|r| format!("{r}\n")).collect(),
+                None => format!("{v}\n"),
             }
         }
     }
@@ -33,7 +44,7 @@ const MAX_CELL: usize = 60;
 
 pub fn to_text(v: &Value) -> String {
     let mut out = String::new();
-    render(v, &mut out, 0);
+    render_text(v, &mut out, 0);
     if !out.ends_with('\n') {
         out.push('\n');
     }
@@ -63,7 +74,7 @@ fn is_table(v: &Value) -> bool {
         .is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_object))
 }
 
-fn render(v: &Value, out: &mut String, indent: usize) {
+fn render_text(v: &Value, out: &mut String, indent: usize) {
     let pad = "  ".repeat(indent);
     match v {
         Value::Array(a) if a.is_empty() => out.push_str(&format!("{pad}(none)\n")),
@@ -82,11 +93,11 @@ fn render(v: &Value, out: &mut String, indent: usize) {
                     }
                     Value::Object(_) => {
                         out.push_str(&format!("{pad}{k}:\n"));
-                        render(val, out, indent + 1);
+                        render_text(val, out, indent + 1);
                     }
                     Value::Array(_) if is_table(val) => {
                         out.push_str(&format!("{pad}{k}:\n"));
-                        render(val, out, indent + 1);
+                        render_text(val, out, indent + 1);
                     }
                     Value::String(s) if s.contains('\n') => {
                         out.push_str(&format!("{pad}{k}:\n"));
