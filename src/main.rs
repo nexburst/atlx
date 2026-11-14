@@ -297,7 +297,7 @@ struct UpdateArgs {
     #[arg(long)]
     priority: Option<String>,
     /// Comma-separated; replaces existing
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["add_labels", "remove_labels"])]
     labels: Option<String>,
     #[arg(long)]
     add_labels: Option<String>,
@@ -309,13 +309,13 @@ struct UpdateArgs {
     /// YYYY-MM-DD, or "none"
     #[arg(long)]
     due_date: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["add_fix_versions", "remove_fix_versions"])]
     fix_versions: Option<String>,
     #[arg(long)]
     add_fix_versions: Option<String>,
     #[arg(long)]
     remove_fix_versions: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["add_components", "remove_components"])]
     components: Option<String>,
     #[arg(long)]
     add_components: Option<String>,
@@ -449,6 +449,9 @@ enum ContentCmd {
         /// Accepted for twg compatibility (metadata is always included)
         #[arg(long)]
         include_metadata: bool,
+        /// Fail the batch if any input fails
+        #[arg(long)]
+        strict: bool,
     },
     /// Create a page or blog post
     Create {
@@ -537,6 +540,8 @@ enum SpaceCmd {
         keys: Option<String>,
         #[arg(long, default_value_t = 25)]
         limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
     },
     /// Get a space by key or ID
     Get { identifier: String },
@@ -551,7 +556,7 @@ struct RepoArgs {
     workspace: Option<String>,
     /// Repository slug, workspace/repo, or Bitbucket URL
     #[arg(long)]
-    repo: Vec<String>,
+    repo: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -840,19 +845,66 @@ fn body_arg(inline: Option<String>, file: Option<String>) -> Result<Option<Strin
     }
 }
 
-fn prompt(label: &str) -> Result<String> {
+#[cfg(unix)]
+struct EchoGuard;
+
+#[cfg(unix)]
+impl EchoGuard {
+    /// Disable terminal echo for stdin and restore it automatically on drop.
+    fn disable() -> Result<Self> {
+        let status = std::process::Command::new("stty")
+            .arg("-echo")
+            .stdin(std::process::Stdio::inherit())
+            .status()
+            .context("disabling terminal echo via stty")?;
+        if !status.success() {
+            bail!("failed to disable terminal echo via stty");
+        }
+        Ok(Self)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for EchoGuard {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
+        eprintln!();
+    }
+}
+
+#[cfg(not(unix))]
+struct EchoGuard;
+
+#[cfg(not(unix))]
+impl EchoGuard {
+    fn disable() -> Result<Self> {
+        Ok(Self)
+    }
+}
+
+fn read_prompt_line(label: &str, secret: bool) -> Result<String> {
     if !std::io::stdin().is_terminal() {
         bail!("missing {label}; pass it as a flag");
     }
     eprint!("{label}: ");
     std::io::stderr().flush()?;
+    let _guard = if secret { Some(EchoGuard::disable()?) } else { None };
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;
+    drop(_guard);
     let line = line.trim().to_string();
     if line.is_empty() {
         bail!("{label} is required");
     }
     Ok(line)
+}
+
+fn prompt(label: &str) -> Result<String> {
+    read_prompt_line(label, false)
+}
+
+fn prompt_secret(label: &str) -> Result<String> {
+    read_prompt_line(label, true)
 }
 
 fn keep(saved: Option<String>, force: bool) -> Option<String> {
@@ -874,7 +926,7 @@ fn login(g: &Globals, a: LoginArgs) -> Result<Value> {
         Some(t) => text_arg(t)?.trim().to_string(),
         None => match keep(cfg.token.take(), a.force) {
             Some(t) => t,
-            None => prompt("API token (https://id.atlassian.com/manage-profile/security/api-tokens)")?,
+            None => prompt_secret("API token (https://id.atlassian.com/manage-profile/security/api-tokens)")?,
         },
     });
     cfg.timeout_ms = g.timeout_ms;
@@ -912,7 +964,7 @@ fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
                 Some(t) => text_arg(t)?.trim().to_string(),
                 None => match keep(cfg.bitbucket.token.take(), force) {
                     Some(t) => t,
-                    None => prompt("Bitbucket API token (scopes: account, repository, pullrequest, pipeline)")?,
+                    None => prompt_secret("Bitbucket API token (scopes: account, repository, pullrequest, pipeline)")?,
                 },
             });
             cfg.timeout_ms = g.timeout_ms;
@@ -1098,7 +1150,7 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
         }
         ConfCmd::Content { cmd } => match cmd {
-            ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, include_metadata: _ } => {
+            ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, include_metadata: _, strict } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
                 let detail = if body_only { confluence::Detail::Full } else { detail.unwrap_or_default() };
                 let opts = confluence::GetOpts { detail, format, draft };
@@ -1107,7 +1159,7 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     let v = confluence::get(c, one, &opts)?;
                     return Ok(Out::Raw(v["body"].as_str().unwrap_or_default().to_string()));
                 }
-                batch(inputs, false, |r| confluence::get(c, r, &opts))?
+                batch(inputs, strict, |r| confluence::get(c, r, &opts))?
             }
             ContentCmd::Create { space_id, parent_id, content_type, title, body, body_file, format, draft, .. } => {
                 let body = body_arg(body, body_file)?.unwrap_or_default();
@@ -1158,8 +1210,8 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?
             }
         },
-        ConfCmd::Space { cmd: SpaceCmd::List { kind, status, keys, limit } } => {
-            confluence::spaces(c, kind.as_deref(), status.as_deref(), keys.as_deref(), limit)?
+        ConfCmd::Space { cmd: SpaceCmd::List { kind, status, keys, limit, cursor } } => {
+            confluence::spaces(c, kind.as_deref(), status.as_deref(), keys.as_deref(), limit, cursor.as_deref())?
         }
         ConfCmd::Space { cmd: SpaceCmd::Get { identifier } } => confluence::space(c, &identifier)?,
     };
@@ -1170,7 +1222,7 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
     let (c, default_ws) = cfg.bitbucket()?;
     let dws = default_ws.as_deref();
     let path = |r: &RepoArgs, slug: Option<&str>| {
-        bitbucket::repo_path(slug.or(r.repo.first().map(String::as_str)), r.workspace.as_deref(), dws)
+        bitbucket::repo_path(slug.or(r.repo.as_deref()), r.workspace.as_deref(), dws)
     };
     match cmd {
         BbCmd::Repo { cmd: RepoCmd::Query { query, limit, workspace, project, language, sort, role } } => {
@@ -1377,5 +1429,69 @@ mod tests {
         assert_eq!(issue_ref("PROJ-1"), "PROJ-1");
         assert_eq!(issue_ref("https://a.atlassian.net/browse/PROJ-9?focusedCommentId=1"), "PROJ-9");
         assert_eq!(issue_ref("ari:cloud:jira:abc:issue/10001"), "10001");
+    }
+
+    #[test]
+    fn rejects_conflicting_jira_update_list_flags() {
+        for bad in [
+            "atlx jira workitem update --id PROJ-1 --labels a --add-labels b",
+            "atlx jira workitem update --id PROJ-1 --labels a --remove-labels b",
+            "atlx jira workitem update --id PROJ-1 --components a --add-components b",
+            "atlx jira workitem update --id PROJ-1 --components a --remove-components b",
+            "atlx jira workitem update --id PROJ-1 --fix-versions a --add-fix-versions b",
+            "atlx jira workitem update --id PROJ-1 --fix-versions a --remove-fix-versions b",
+        ] {
+            assert!(Cli::try_parse_from(shell_words(bad)).is_err(), "expected error for: {bad}");
+        }
+        let ok = "atlx jira workitem update --id PROJ-1 --add-labels a --remove-labels b";
+        assert!(Cli::try_parse_from(shell_words(ok)).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_bitbucket_repo_flags() {
+        for bad in [
+            "atlx bb repo get --repo api --repo web",
+            "atlx bb prs query --repo api --repo web",
+            "atlx bb pipeline query --repo api --repo web",
+        ] {
+            assert!(Cli::try_parse_from(shell_words(bad)).is_err(), "expected error for: {bad}");
+        }
+    }
+
+    #[test]
+    fn parses_confluence_content_get_strict_and_space_list_cursor() {
+        let cli = Cli::try_parse_from(shell_words("atlx confluence content get 123 456 --strict")).unwrap();
+        match cli.cmd {
+            Cmd::Confluence { cmd: ConfCmd::Content { cmd: ContentCmd::Get { refs, strict, .. } } } => {
+                assert_eq!(refs, vec!["123", "456"]);
+                assert!(strict);
+            }
+            _ => panic!("unexpected parsed command"),
+        }
+
+        let cli = Cli::try_parse_from(shell_words("atlx confluence space list --limit 10 --cursor cur%3D")).unwrap();
+        match cli.cmd {
+            Cmd::Confluence { cmd: ConfCmd::Space { cmd: SpaceCmd::List { limit, cursor, .. } } } => {
+                assert_eq!(limit, 10);
+                assert_eq!(cursor.as_deref(), Some("cur%3D"));
+            }
+            _ => panic!("unexpected parsed command"),
+        }
+    }
+
+    #[test]
+    fn batch_respects_strict_flag() {
+        let non_strict = batch(vec!["ok".into(), "bad".into()], false, |id| {
+            if id == "bad" { bail!("boom") } else { Ok(json!({"id": id})) }
+        })
+        .unwrap();
+        assert_eq!(non_strict["items"][0]["ok"], true);
+        assert_eq!(non_strict["items"][1]["ok"], false);
+
+        let err = batch(vec!["ok".into(), "bad".into()], true, |id| {
+            if id == "bad" { bail!("boom") } else { Ok(json!({"id": id})) }
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("1 of 2 reads failed"), "{err}");
     }
 }
