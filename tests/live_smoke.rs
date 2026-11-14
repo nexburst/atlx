@@ -90,6 +90,7 @@ fn live_confluence_spaces_and_optional_page() {
                 detail: Detail::Summary,
                 format: ReadFormat::Md,
                 draft: false,
+                reference_space: None,
             },
         )
         .expect("confluence::get failed");

@@ -801,6 +801,7 @@ fn confluence_get_falls_back_from_page_404_to_blogpost() {
             detail: Detail::Full,
             format: ReadFormat::Md,
             draft: false,
+            reference_space: None,
         },
     )
     .unwrap();
