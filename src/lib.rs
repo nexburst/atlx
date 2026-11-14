@@ -1,0 +1,16 @@
+pub mod bitbucket;
+pub mod client;
+pub mod config;
+pub mod confluence;
+pub mod jira;
+pub mod markup;
+pub mod output;
+pub mod search;
+pub mod time;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Product {
+    Jira,
+    Confluence,
+    Bitbucket,
+}
