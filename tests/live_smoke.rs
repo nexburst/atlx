@@ -98,6 +98,7 @@ fn live_confluence_spaces_and_optional_page() {
                 format: ReadFormat::Md,
                 draft: false,
                 reference_space: None,
+                sections: &[],
             },
         )
         .expect("confluence::get failed");

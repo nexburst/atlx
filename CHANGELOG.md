@@ -11,6 +11,15 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Confluence section reads and targeted edits (#27): `content get --detail
+  outline` (headings with level, anchor, ADF `localId` and word count),
+  `--section <heading>` (repeatable; Markdown by default, the exact storage
+  slice with `--format html`), the atlx-extra `--format adf`, and
+  `content update --edits`/`--edits-file` with twg's `localId` operations
+  plus heading- and text-based extras. Edits apply all-or-nothing to the ADF
+  body, honour `--snapshot-token`, and `--dry-run` prints the resulting HTML
+  and a unified diff without writing.
+
 - twg's global output controls: `--select` (dot-path projection with
   `@compact`, `@evidence` and `@rows` presets), `--output-file`,
   `--output-summary [none|stats|auto|inline]` with its YAML envelope,
