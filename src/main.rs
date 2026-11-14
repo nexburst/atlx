@@ -44,10 +44,15 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SetupCmd,
     },
-    /// Jira work items
+    /// Jira work items, metadata, boards and sprints
     Jira {
         #[command(subcommand)]
         cmd: JiraCmd,
+    },
+    /// Atlassian users
+    User {
+        #[command(subcommand)]
+        cmd: UserCmd,
     },
     /// Confluence search, content and spaces
     Confluence {
@@ -124,14 +129,119 @@ enum SetupCmd {
     DefaultSite { site: Option<String> },
 }
 
+// --- user ----------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum UserCmd {
+    /// Search Jira users by name or email
+    Search {
+        #[arg(required = true)]
+        query: Vec<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+}
+
 // --- jira ----------------------------------------------------------------------
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum JiraCmd {
     /// Jira work items (issues)
     Workitem {
         #[command(subcommand)]
         cmd: WorkitemCmd,
+    },
+    /// Jira fields
+    Field {
+        #[command(subcommand)]
+        cmd: FieldCmd,
+    },
+    /// Jira projects
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCmd,
+    },
+    /// Jira Agile boards
+    Board {
+        #[command(subcommand)]
+        cmd: BoardCmd,
+    },
+    /// Jira Agile sprints
+    Sprint {
+        #[command(subcommand)]
+        cmd: SprintCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum FieldCmd {
+    /// List Jira fields (including custom fields)
+    List {
+        /// Case-insensitive substring filter on field name or ID
+        #[arg(long)]
+        query: Option<String>,
+        /// Only include custom fields
+        #[arg(long)]
+        custom_only: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCmd {
+    /// List Jira projects
+    List {
+        /// Filter by project key or name
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+    /// Get a Jira project by key or ID
+    Get {
+        /// Project key or ID
+        identifier: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardCmd {
+    /// List Agile boards
+    List {
+        /// Filter by project key or ID
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by board type
+        #[arg(long = "type", value_enum)]
+        board_type: Option<jira::BoardType>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum SprintCmd {
+    /// List sprints on a board
+    List {
+        /// Board ID
+        #[arg(long)]
+        board: u64,
+        /// Comma-separated states: active, future, closed
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+    /// List issues in a sprint
+    Issues {
+        /// Sprint ID
+        #[arg(long)]
+        sprint: u64,
+        /// Additional JQL filter
+        #[arg(long)]
+        jql: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
     },
 }
 
@@ -260,6 +370,20 @@ enum WorkitemCmd {
         #[command(subcommand)]
         cmd: TransitionsCmd,
     },
+    /// Available issue types and fields for creating a work item
+    CreateMeta {
+        /// Jira space (project) key or ID
+        #[arg(long)]
+        space: String,
+        /// Issue type name or ID
+        #[arg(long = "type")]
+        issue_type: Option<String>,
+    },
+    /// Issue links and remote web links
+    Link {
+        #[command(subcommand)]
+        cmd: LinkCmd,
+    },
 }
 
 #[derive(Args)]
@@ -353,6 +477,41 @@ enum TransitionsCmd {
     Query {
         #[arg(long)]
         id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum LinkCmd {
+    /// List available issue link types
+    Types,
+    /// Link two work items
+    Create {
+        /// Inward issue key, ID, ARI, or URL
+        #[arg(long)]
+        inward: String,
+        /// Outward issue key, ID, ARI, or URL
+        #[arg(long)]
+        outward: String,
+        /// Link type name or ID
+        #[arg(long = "type")]
+        link_type: String,
+        /// Optional comment (`-` reads stdin)
+        #[arg(long)]
+        comment: Option<String>,
+        #[arg(long, value_enum, default_value_t)]
+        comment_format: TextFormat,
+    },
+    /// Add a remote web link to a work item
+    Remote {
+        /// Issue key, ID, ARI, or URL
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        relationship: Option<String>,
     },
 }
 
@@ -748,8 +907,16 @@ enum Out {
 
 fn main() {
     let cli = Cli::parse();
-    let fmt = cli.output.unwrap_or(if std::io::stdout().is_terminal() { Format::Text } else { Format::Json });
-    let globals = Globals { site: cli.site, user: cli.user, timeout_ms: cli.timeout_ms };
+    let fmt = cli.output.unwrap_or(if std::io::stdout().is_terminal() {
+        Format::Text
+    } else {
+        Format::Json
+    });
+    let globals = Globals {
+        site: cli.site,
+        user: cli.user,
+        timeout_ms: cli.timeout_ms,
+    };
     match run(&globals, cli.cmd) {
         Ok(Out::Data(v)) => output::print(&v, fmt),
         Ok(Out::Raw(s)) => println!("{s}"),
@@ -801,11 +968,20 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
                    "site": cfg.site, "bitbucket_workspace": cfg.bitbucket.workspace})
         }
         Cmd::Setup { cmd } => setup(g, cmd)?,
-        Cmd::Jira { cmd: JiraCmd::Workitem { cmd } } => workitem(&g.config()?.jira()?, cmd)?,
+        Cmd::Jira { cmd } => jira_cmd(&g.config()?.jira()?, cmd)?,
+        Cmd::User {
+            cmd: UserCmd::Search { query, limit },
+        } => jira::user_search(&g.config()?.jira()?, &query.join(" "), limit)?,
         Cmd::Confluence { cmd } => return confluence_cmd(&g.config()?.confluence()?, cmd),
         Cmd::Bitbucket { cmd } => bb_cmd(&g.config()?, cmd)?,
         Cmd::Search { query, limit, only } => search::run(&g.config()?, &query, limit, &only),
-        Cmd::Api { product, path, method, data, query } => api(&g.config()?, product, &path, &method, data, &query)?,
+        Cmd::Api {
+            product,
+            path,
+            method,
+            data,
+            query,
+        } => api(&g.config()?, product, &path, &method, data, &query)?,
     };
     Ok(Out::Data(data))
 }
@@ -816,7 +992,9 @@ fn text_arg(s: String) -> Result<String> {
         return Ok(s);
     }
     let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf).context("reading stdin")?;
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("reading stdin")?;
     Ok(buf)
 }
 
@@ -824,7 +1002,9 @@ fn text_arg(s: String) -> Result<String> {
 fn body_arg(inline: Option<String>, file: Option<String>) -> Result<Option<String>> {
     match (inline, file) {
         (Some(b), _) => Ok(Some(text_arg(b)?)),
-        (None, Some(f)) => Ok(Some(std::fs::read_to_string(&f).with_context(|| format!("reading {f}"))?)),
+        (None, Some(f)) => Ok(Some(
+            std::fs::read_to_string(&f).with_context(|| format!("reading {f}"))?,
+        )),
         (None, None) => Ok(None),
     }
 }
@@ -935,7 +1115,13 @@ fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
             cfg.site = Some(config::normalize_site(&site));
             Ok(json!({"site": cfg.site, "saved": cfg.save()?.display().to_string()}))
         }
-        SetupCmd::Bitbucket { workspace, token, email, force, no_verify } => {
+        SetupCmd::Bitbucket {
+            workspace,
+            token,
+            email,
+            force,
+            no_verify,
+        } => {
             let ws = match workspace.or(keep(cfg.bitbucket.workspace.take(), force)) {
                 Some(w) => w,
                 None => prompt("Bitbucket workspace slug")?,
@@ -955,8 +1141,16 @@ fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
             let mut out = json!({"workspace": ws});
             if !no_verify {
                 let (c, _) = cfg.bitbucket()?;
-                let q = bitbucket::RepoQuery { query: None, project: None, language: None, sort: "-updated_on", role: None, limit: 1 };
-                bitbucket::repo_query(&c, &ws, &q).context("Bitbucket check failed; nothing saved")?;
+                let q = bitbucket::RepoQuery {
+                    query: None,
+                    project: None,
+                    language: None,
+                    sort: "-updated_on",
+                    role: None,
+                    limit: 1,
+                };
+                bitbucket::repo_query(&c, &ws, &q)
+                    .context("Bitbucket check failed; nothing saved")?;
                 out["verified"] = true.into();
             }
             out["saved"] = cfg.save()?.display().to_string().into();
@@ -969,7 +1163,11 @@ fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
 fn issue_ref(s: &str) -> String {
     let s = s.trim();
     if let Some(i) = s.find("/browse/") {
-        return s[i + 8..].split(['/', '?', '#']).next().unwrap_or_default().to_string();
+        return s[i + 8..]
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_string();
     }
     if s.starts_with("ari:") {
         return s.rsplit('/').next().unwrap_or(s).to_string();
@@ -1004,12 +1202,20 @@ fn batch(inputs: Vec<String>, strict: bool, f: impl Fn(&str) -> Result<Value>) -
         })
         .collect();
     if strict && failed > 0 {
-        bail!("{failed} of {} reads failed: {}", items.len(), serde_json::to_string(&items)?);
+        bail!(
+            "{failed} of {} reads failed: {}",
+            items.len(),
+            serde_json::to_string(&items)?
+        );
     }
     Ok(json!({"items": items}))
 }
 
-fn list_edit(set: Option<String>, add: Option<String>, remove: Option<String>) -> Option<jira::ListEdit> {
+fn list_edit(
+    set: Option<String>,
+    add: Option<String>,
+    remove: Option<String>,
+) -> Option<jira::ListEdit> {
     if set.is_none() && add.is_none() && remove.is_none() {
         return None;
     }
@@ -1020,22 +1226,104 @@ fn list_edit(set: Option<String>, add: Option<String>, remove: Option<String>) -
     })
 }
 
+fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
+    match cmd {
+        JiraCmd::Workitem { cmd } => workitem(c, cmd),
+        JiraCmd::Field {
+            cmd: FieldCmd::List { query, custom_only },
+        } => jira::fields(c, query.as_deref(), custom_only),
+        JiraCmd::Project {
+            cmd: ProjectCmd::List { query, limit },
+        } => jira::projects(c, query.as_deref(), limit),
+        JiraCmd::Project {
+            cmd: ProjectCmd::Get { identifier },
+        } => jira::project(c, &identifier),
+        JiraCmd::Board {
+            cmd:
+                BoardCmd::List {
+                    project,
+                    board_type,
+                    limit,
+                },
+        } => jira::boards(c, project.as_deref(), board_type, limit),
+        JiraCmd::Sprint {
+            cmd:
+                SprintCmd::List {
+                    board,
+                    state,
+                    limit,
+                },
+        } => jira::sprints(c, board, state.as_deref(), limit),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Issues { sprint, jql, limit },
+        } => jira::sprint_issues(c, sprint, jql.as_deref(), limit),
+    }
+}
+
 fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
     match cmd {
-        WorkitemCmd::Get { ids, id_flags, issue_id, key, fields, field, comments, remote_links, full, strict } => {
-            let inputs: Vec<String> =
-                ids.into_iter().chain(id_flags).chain(issue_id).chain(key).map(|s| issue_ref(&s)).collect();
-            let opts = jira::GetOpts { fields: fields_arg(fields.as_deref(), &field), comments, remote_links, full };
+        WorkitemCmd::Get {
+            ids,
+            id_flags,
+            issue_id,
+            key,
+            fields,
+            field,
+            comments,
+            remote_links,
+            full,
+            strict,
+        } => {
+            let inputs: Vec<String> = ids
+                .into_iter()
+                .chain(id_flags)
+                .chain(issue_id)
+                .chain(key)
+                .map(|s| issue_ref(&s))
+                .collect();
+            let opts = jira::GetOpts {
+                fields: fields_arg(fields.as_deref(), &field),
+                comments,
+                remote_links,
+                full,
+            };
             batch(inputs, strict, |k| jira::get(c, k, &opts))
         }
-        WorkitemCmd::Search { text, limit, first, after, fields } => {
+        WorkitemCmd::Search {
+            text,
+            limit,
+            first,
+            after,
+            fields,
+        } => {
             let fields = fields_arg(fields.as_deref(), &[]);
-            jira::search(c, &text.join(" "), limit.or(first).unwrap_or(25), &fields, after.as_deref())
+            jira::search(
+                c,
+                &text.join(" "),
+                limit.or(first).unwrap_or(25),
+                &fields,
+                after.as_deref(),
+            )
         }
-        WorkitemCmd::Query { jql_arg, jql, limit, first, after, fields } => {
-            let Some(jql) = jql.or(jql_arg) else { bail!("pass --jql or a JQL argument") };
+        WorkitemCmd::Query {
+            jql_arg,
+            jql,
+            limit,
+            first,
+            after,
+            fields,
+        } => {
+            let Some(jql) = jql.or(jql_arg) else {
+                bail!("pass --jql or a JQL argument")
+            };
             let fields = fields_arg(fields.as_deref(), &[]);
-            jira::query(c, &jql, limit.or(first).unwrap_or(25), &fields, after.as_deref())
+            jira::query(
+                c,
+                &jql,
+                limit.or(first).unwrap_or(25),
+                &fields,
+                after.as_deref(),
+            )
         }
         WorkitemCmd::Create {
             space,
@@ -1084,68 +1372,170 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                     priority: u.priority.as_deref(),
                     labels: list_edit(u.labels, u.add_labels, u.remove_labels),
                     components: list_edit(u.components, u.add_components, u.remove_components),
-                    fix_versions: list_edit(u.fix_versions, u.add_fix_versions, u.remove_fix_versions),
+                    fix_versions: list_edit(
+                        u.fix_versions,
+                        u.add_fix_versions,
+                        u.remove_fix_versions,
+                    ),
                     parent: u.parent.as_deref(),
                     due_date: u.due_date.as_deref(),
                     resolution: u.resolution.as_deref(),
                     extra: jira::extra_fields(u.fields_json.as_deref(), &u.field)?,
                     status: u.status.as_deref(),
-                    transition_comment: u.transition_comment.as_deref().map(|t| (t, u.transition_comment_format)),
+                    transition_comment: u
+                        .transition_comment
+                        .as_deref()
+                        .map(|t| (t, u.transition_comment_format)),
                     comment: comment.as_deref().map(|t| (t, u.comment_format)),
                 },
             )
         }
         WorkitemCmd::Comment {
-            cmd: CommentCmd::Create { issue_id, body, body_format, internal, visibility_role, visibility_group },
+            cmd:
+                CommentCmd::Create {
+                    issue_id,
+                    body,
+                    body_format,
+                    internal,
+                    visibility_role,
+                    visibility_group,
+                },
         } => {
             let visibility = match (&visibility_role, &visibility_group) {
                 (Some(r), _) => Some(("role", r.as_str())),
                 (None, Some(g)) => Some(("group", g.as_str())),
                 _ => None,
             };
-            jira::comment(c, &issue_ref(&issue_id), &text_arg(body)?, body_format, visibility, internal)
-        }
-        WorkitemCmd::Transition { id, transition_id, field, fields_json, transition_comment, transition_comment_format } => {
-            jira::transition(
+            jira::comment(
                 c,
-                &issue_ref(&id),
-                transition_id.as_deref(),
-                jira::extra_fields(fields_json.as_deref(), &field)?,
-                transition_comment.as_deref().map(|t| (t, transition_comment_format)),
+                &issue_ref(&issue_id),
+                &text_arg(body)?,
+                body_format,
+                visibility,
+                internal,
             )
         }
-        WorkitemCmd::Transitions { cmd: TransitionsCmd::Query { id } } => jira::transitions(c, &issue_ref(&id)),
+        WorkitemCmd::Transition {
+            id,
+            transition_id,
+            field,
+            fields_json,
+            transition_comment,
+            transition_comment_format,
+        } => jira::transition(
+            c,
+            &issue_ref(&id),
+            transition_id.as_deref(),
+            jira::extra_fields(fields_json.as_deref(), &field)?,
+            transition_comment
+                .as_deref()
+                .map(|t| (t, transition_comment_format)),
+        ),
+        WorkitemCmd::Transitions {
+            cmd: TransitionsCmd::Query { id },
+        } => jira::transitions(c, &issue_ref(&id)),
+        WorkitemCmd::CreateMeta { space, issue_type } => {
+            jira::create_meta(c, &space, issue_type.as_deref())
+        }
+        WorkitemCmd::Link { cmd } => match cmd {
+            LinkCmd::Types => jira::link_types(c),
+            LinkCmd::Create {
+                inward,
+                outward,
+                link_type,
+                comment,
+                comment_format,
+            } => {
+                let comment = comment.map(text_arg).transpose()?;
+                jira::link_create(
+                    c,
+                    &issue_ref(&inward),
+                    &issue_ref(&outward),
+                    &link_type,
+                    comment.as_deref().map(|t| (t, comment_format)),
+                )
+            }
+            LinkCmd::Remote {
+                id,
+                url,
+                title,
+                relationship,
+            } => jira::link_remote(c, &issue_ref(&id), &url, &title, relationship.as_deref()),
+        },
     }
 }
 
 fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
     let data = match cmd {
-        ConfCmd::Search { cmd: ConfSearchCmd::Query { cql_arg, cql, limit, excerpt, cursor } } => {
+        ConfCmd::Search {
+            cmd:
+                ConfSearchCmd::Query {
+                    cql_arg,
+                    cql,
+                    limit,
+                    excerpt,
+                    cursor,
+                },
+        } => {
             let cql = cql.or_else(|| (!cql_arg.is_empty()).then(|| cql_arg.join(" ")));
-            let Some(cql) = cql else { bail!("pass --cql or a CQL argument") };
+            let Some(cql) = cql else {
+                bail!("pass --cql or a CQL argument")
+            };
             confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
         }
         ConfCmd::Search {
-            cmd: ConfSearchCmd::Text { text, query, limit, updated_since, created_since, excerpt, cursor },
+            cmd:
+                ConfSearchCmd::Text {
+                    text,
+                    query,
+                    limit,
+                    updated_since,
+                    created_since,
+                    excerpt,
+                    cursor,
+                },
         } => {
             let text = query.or_else(|| (!text.is_empty()).then(|| text.join(" ")));
-            let Some(text) = text else { bail!("pass search text or --query") };
-            let cql = confluence::text_cql(&text, updated_since.as_deref(), created_since.as_deref())?;
+            let Some(text) = text else {
+                bail!("pass search text or --query")
+            };
+            let cql =
+                confluence::text_cql(&text, updated_since.as_deref(), created_since.as_deref())?;
             confluence::search_query(c, &cql, limit, excerpt, cursor.as_deref())?
         }
         ConfCmd::Content { cmd } => match cmd {
             ContentCmd::Get { refs, id_flags, detail, format, body_only, draft, include_metadata: _, strict } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
-                let detail = if body_only { confluence::Detail::Full } else { detail.unwrap_or_default() };
-                let opts = confluence::GetOpts { detail, format, draft };
+                let detail = if body_only {
+                    confluence::Detail::Full
+                } else {
+                    detail.unwrap_or_default()
+                };
+                let opts = confluence::GetOpts {
+                    detail,
+                    format,
+                    draft,
+                };
                 if body_only {
-                    let [one] = inputs.as_slice() else { bail!("--body-only takes exactly one ID") };
+                    let [one] = inputs.as_slice() else {
+                        bail!("--body-only takes exactly one ID")
+                    };
                     let v = confluence::get(c, one, &opts)?;
                     return Ok(Out::Raw(v["body"].as_str().unwrap_or_default().to_string()));
                 }
                 batch(inputs, strict, |r| confluence::get(c, r, &opts))?
             }
-            ContentCmd::Create { space_id, parent_id, content_type, title, body, body_file, format, draft, .. } => {
+            ContentCmd::Create {
+                space_id,
+                parent_id,
+                content_type,
+                title,
+                body,
+                body_file,
+                format,
+                draft,
+                ..
+            } => {
                 let body = body_arg(body, body_file)?.unwrap_or_default();
                 confluence::create(
                     c,
@@ -1174,7 +1564,9 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 draft,
                 ..
             } => {
-                let Some(reference) = reference.or(id) else { bail!("pass a content ID/URL or --id") };
+                let Some(reference) = reference.or(id) else {
+                    bail!("pass a content ID/URL or --id")
+                };
                 let body = body_arg(body, body_file)?;
                 confluence::update(
                     c,
@@ -1190,9 +1582,13 @@ fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     },
                 )?
             }
-            ContentCmd::List { space, content_type, status, limit, cursor } => {
-                confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?
-            }
+            ContentCmd::List {
+                space,
+                content_type,
+                status,
+                limit,
+                cursor,
+            } => confluence::list(c, &space, content_type, &status, limit, cursor.as_deref())?,
         },
         ConfCmd::Space { cmd: SpaceCmd::List { kind, status, keys, limit, cursor } } => {
             confluence::spaces(c, kind.as_deref(), status.as_deref(), keys.as_deref(), limit, cursor.as_deref())?
@@ -1209,7 +1605,18 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
         bitbucket::repo_path(slug.or(r.repo.as_deref()), r.workspace.as_deref(), dws)
     };
     match cmd {
-        BbCmd::Repo { cmd: RepoCmd::Query { query, limit, workspace, project, language, sort, role } } => {
+        BbCmd::Repo {
+            cmd:
+                RepoCmd::Query {
+                    query,
+                    limit,
+                    workspace,
+                    project,
+                    language,
+                    sort,
+                    role,
+                },
+        } => {
             let q = bitbucket::RepoQuery {
                 query: query.as_deref(),
                 project: project.as_deref(),
@@ -1220,7 +1627,9 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
             };
             bitbucket::repo_query(&c, bitbucket::workspace_or(workspace.as_deref(), dws)?, &q)
         }
-        BbCmd::Repo { cmd: RepoCmd::Get { slug, repo } } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?),
+        BbCmd::Repo {
+            cmd: RepoCmd::Get { slug, repo },
+        } => bitbucket::repo_get(&c, &path(&repo, slug.as_deref())?),
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
                 text,
@@ -1251,10 +1660,24 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                 };
                 bitbucket::pr_query(&c, &path(&repo, None)?, &q)
             }
-            PrCmd::Get { ids, comments, diff, statuses, full, strict, repo } => {
+            PrCmd::Get {
+                ids,
+                comments,
+                diff,
+                statuses,
+                full,
+                strict,
+                repo,
+            } => {
                 let p = path(&repo, None)?;
-                let o = bitbucket::PrGet { comments: comments || full, diff: diff || full, statuses: statuses || full };
-                batch(ids, strict, |id| bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o))
+                let o = bitbucket::PrGet {
+                    comments: comments || full,
+                    diff: diff || full,
+                    statuses: statuses || full,
+                };
+                batch(ids, strict, |id| {
+                    bitbucket::pr_get(&c, &p, bitbucket::pr_number(id)?, &o)
+                })
             }
             PrCmd::Create {
                 title,
@@ -1278,23 +1701,51 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
                         dest: dest.as_deref(),
                         description: description.as_deref(),
                         reviewer_uuids: reviewer_uuid.as_deref().map(jira::csv).unwrap_or_default(),
-                        reviewer_account_ids: reviewer_account_id.as_deref().map(jira::csv).unwrap_or_default(),
+                        reviewer_account_ids: reviewer_account_id
+                            .as_deref()
+                            .map(jira::csv)
+                            .unwrap_or_default(),
                         close_source_branch,
                         draft,
                     },
                 )
             }
-            PrCmd::Comment { cmd: PrCommentCmd::Create { pull_request, text, reply_to, path: file, line, repo } } => {
+            PrCmd::Comment {
+                cmd:
+                    PrCommentCmd::Create {
+                        pull_request,
+                        text,
+                        reply_to,
+                        path: file,
+                        line,
+                        repo,
+                    },
+            } => {
                 let text = text_arg(text)?;
                 bitbucket::pr_comment(
                     &c,
                     &path(&repo, None)?,
                     bitbucket::pr_number(&pull_request)?,
-                    bitbucket::NewComment { text: &text, reply_to, path: file.as_deref(), line },
+                    bitbucket::NewComment {
+                        text: &text,
+                        reply_to,
+                        path: file.as_deref(),
+                        line,
+                    },
                 )
             }
         },
-        BbCmd::Pipeline { cmd: PipelineCmd::Query { state, status, branch, trigger, limit, repo } } => {
+        BbCmd::Pipeline {
+            cmd:
+                PipelineCmd::Query {
+                    state,
+                    status,
+                    branch,
+                    trigger,
+                    limit,
+                    repo,
+                },
+        } => {
             let q = bitbucket::PipelineQuery {
                 state: state.as_deref(),
                 status: status.as_deref(),
@@ -1304,15 +1755,41 @@ fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Value> {
             };
             bitbucket::pipeline_query(&c, &path(&repo, None)?, &q)
         }
-        BbCmd::Pipeline { cmd: PipelineCmd::Get { pipeline, logs, failed_steps, lines, step, repo } } => {
-            let o = bitbucket::PipelineGet { logs, failed_steps, lines, step: step.as_deref() };
+        BbCmd::Pipeline {
+            cmd:
+                PipelineCmd::Get {
+                    pipeline,
+                    logs,
+                    failed_steps,
+                    lines,
+                    step,
+                    repo,
+                },
+        } => {
+            let o = bitbucket::PipelineGet {
+                logs,
+                failed_steps,
+                lines,
+                step: step.as_deref(),
+            };
             bitbucket::pipeline_get(&c, &path(&repo, None)?, &pipeline, &o)
         }
     }
 }
 
-fn api(cfg: &Config, product: Product, path: &str, method: &str, data: Option<String>, query: &[String]) -> Result<Value> {
-    let mut path = if path.starts_with('/') || path.starts_with("http") { path.to_string() } else { format!("/{path}") };
+fn api(
+    cfg: &Config,
+    product: Product,
+    path: &str,
+    method: &str,
+    data: Option<String>,
+    query: &[String],
+) -> Result<Value> {
+    let mut path = if path.starts_with('/') || path.starts_with("http") {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
     let c = match product {
         Product::Jira => cfg.jira()?,
         Product::Confluence => cfg.confluence()?,
@@ -1328,7 +1805,9 @@ fn api(cfg: &Config, product: Product, path: &str, method: &str, data: Option<St
         None => None,
         Some(d) => {
             let text = match d.strip_prefix('@') {
-                Some(file) => std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?,
+                Some(file) => {
+                    std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?
+                }
                 None => text_arg(d)?,
             };
             Some(serde_json::from_str::<Value>(&text).context("--data is not valid JSON")?)
@@ -1336,7 +1815,10 @@ fn api(cfg: &Config, product: Product, path: &str, method: &str, data: Option<St
     };
     let query: Vec<(&str, &str)> = query
         .iter()
-        .map(|kv| kv.split_once('=').with_context(|| format!("query '{kv}' must be KEY=VALUE")))
+        .map(|kv| {
+            kv.split_once('=')
+                .with_context(|| format!("query '{kv}' must be KEY=VALUE"))
+        })
         .collect::<Result<_>>()?;
     c.request(&method.to_ascii_uppercase(), &path, &query, body.as_ref())
 }
@@ -1361,6 +1843,19 @@ mod tests {
             "atlx jira workitem comment create --issue-id PROJ-1 --body hi --body-format plain",
             "atlx jira workitem transition --id PROJ-1 --transition-id 31",
             "atlx jira workitem transitions query --id PROJ-1",
+            "atlx jira workitem create-meta --space PROJ --type Task",
+            "atlx jira workitem create-meta --space PROJ",
+            "atlx jira workitem link types",
+            "atlx jira workitem link create --inward PROJ-1 --outward PROJ-2 --type Blocks --comment 'blocked by'",
+            "atlx jira workitem link remote --id PROJ-1 --url https://example.com/spec --title Spec --relationship 'Wiki Page'",
+            "atlx jira field list --query story --custom-only",
+            "atlx jira project list --query PROJ --limit 10",
+            "atlx jira project get PROJ",
+            "atlx jira board list --project PROJ --type scrum --limit 10",
+            "atlx jira sprint list --board 12 --state active,future --limit 5",
+            "atlx jira sprint issues --sprint 99 --jql 'status != Done' --limit 20",
+            "atlx user search alice --limit 10 -o json",
+            "atlx user search 'alice smith' -o jsonl --site acme --user me@acme.com --timeout-ms 5000",
             "atlx confluence search query --cql type=page --excerpt",
             "atlx confluence search text launch plan --since 7d",
             "atlx confluence content get 12345 --detail full --format md",
@@ -1411,7 +1906,10 @@ mod tests {
     #[test]
     fn issue_refs() {
         assert_eq!(issue_ref("PROJ-1"), "PROJ-1");
-        assert_eq!(issue_ref("https://a.atlassian.net/browse/PROJ-9?focusedCommentId=1"), "PROJ-9");
+        assert_eq!(
+            issue_ref("https://a.atlassian.net/browse/PROJ-9?focusedCommentId=1"),
+            "PROJ-9"
+        );
         assert_eq!(issue_ref("ari:cloud:jira:abc:issue/10001"), "10001");
     }
 
