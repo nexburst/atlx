@@ -25,6 +25,7 @@ atlx bitbucket repo file <PATH> (required) [--ref <GIT_REF>] [--workspace <WORKS
 atlx bitbucket repo get [<SLUG>] [--workspace <WORKSPACE>] [--repo <REPO>]
 atlx bitbucket repo query [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--workspace <WORKSPACE>] [--project <PROJECT>] [--language <LANGUAGE>] [--sort <SORT> [default: -updated_on]] [--role <ROLE>]
 atlx bitbucket search code <QUERY>... (required) [--workspace <WORKSPACE>] [--repo <REPO>] [--limit <LIMIT> [default: 25]]
+atlx completion script <SHELL> {bash|elvish|fish|powershell|zsh} (required)
 atlx confluence content children <REFERENCE> (required) [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
 atlx confluence content comments create <REFERENCE> (required) --body <BODY> (required) [--format <FORMAT> {html|markdown|plain} [default: html]]
 atlx confluence content comments list <REFERENCE> (required) --inline [--format <FORMAT> {html|md} [default: md]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
@@ -61,6 +62,7 @@ atlx jira workitem transitions query --id <ID> (required)
 atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
 atlx login [--token <TOKEN>] --no-verify --force
 atlx logout
+atlx man (hidden) [--dir <DIR>]
 atlx search <QUERY> (required) [--limit <LIMIT> [default: 10]] [--only <ONLY>,... {jira|confluence|bitbucket}]
 atlx setup bitbucket [--workspace <WORKSPACE>] [--token <TOKEN>] [--email <EMAIL>] --force --no-verify
 atlx setup default-site [<SITE>]

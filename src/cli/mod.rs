@@ -7,6 +7,7 @@
 mod api;
 mod auth;
 mod bitbucket;
+mod completion;
 mod confluence;
 mod doctor;
 mod jira;
@@ -93,6 +94,14 @@ enum Cmd {
     /// or https://api.bitbucket.org/2.0 (bitbucket, where `{workspace}` is replaced
     /// with your default workspace).
     Api(api::ApiArgs),
+    /// Shell completion scripts
+    Completion {
+        #[command(subcommand)]
+        cmd: completion::CompletionCmd,
+    },
+    /// Generate man pages (used by the release build)
+    #[command(hide = true)]
+    Man(completion::ManArgs),
 }
 
 // --- runtime ---------------------------------------------------------------------
@@ -170,6 +179,8 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Bitbucket { cmd } => return bitbucket::bb_cmd(&g.config()?, cmd),
         Cmd::Search(a) => search::run(g, a)?,
         Cmd::Api(a) => api::run(&g.config()?, a)?,
+        Cmd::Completion { cmd } => return completion::completion_cmd(cmd),
+        Cmd::Man(a) => return completion::man(a),
     };
     Ok(Out::Data(data))
 }

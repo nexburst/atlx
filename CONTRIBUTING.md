@@ -28,7 +28,7 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return a summarized `serde_json::Value` |
 | `src/cli/mod.rs` | `Cli` with the global flags, the top-level `Cmd`, `Globals`, `Out`, dispatch and `main()` |
 | `src/cli/<product>.rs` (`jira`, `confluence`, `bitbucket`) | That product's clap enums and its dispatch function, plus parse tests |
-| `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs` | The non-product commands |
+| `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs`, `completion.rs` | The non-product commands (`completion.rs` also holds the hidden `man` generator) |
 | `src/cli/util.rs` | Helpers shared by commands: `batch`, `text_arg`, `body_arg`, `require_yes` |
 | `tests/common/mod.rs` | Offline mock HTTP server (`MockServer`, `MockResponse`, `RecordedRequest`) |
 | `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
@@ -81,6 +81,40 @@ the mock server and keeps product PRs out of each other's files.
 - If you run several worktrees (or agents) at once, give each its own
   `CARGO_TARGET_DIR`. A shared target directory makes the builds clobber each
   other.
+
+## Cutting a release
+
+Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is
+pushed. Only maintainers do this.
+
+1. On a branch, bump `version` in `Cargo.toml` and run `cargo check` so
+   `Cargo.lock` picks it up.
+2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`,
+   add a fresh empty `## [Unreleased]` above it, and update the compare links
+   at the bottom. The workflow uses this section as the release notes and fails
+   if it is missing.
+3. Merge the PR, then tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git checkout main && git pull
+   git tag -a vX.Y.Z -m "atlx vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+4. The workflow checks that the tag matches `Cargo.toml`, runs
+   `cargo publish --dry-run`, builds all seven targets, uploads the archives
+   and `SHA256SUMS` to a new GitHub release, then runs `cargo publish`. The
+   publish step is skipped with a warning when the `CARGO_REGISTRY_TOKEN`
+   repository secret is not set.
+5. Check the install paths: `cargo binstall atlx` and `cargo install atlx`.
+
+To rehearse without releasing, run the workflow by hand (Actions, Release, Run
+workflow, or `gh workflow run release.yml --ref <branch>`). It builds and
+uploads the same archives as workflow artifacts and skips the release and
+publish jobs. Pull requests that edit the workflow run it the same way.
+
+Archive names must keep matching `pkg-url` in `[package.metadata.binstall]`:
+`atlx-vX.Y.Z-<target>.tgz`, or `.zip` on Windows, with the binary at the root.
 
 ## twg text
 

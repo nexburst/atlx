@@ -19,9 +19,69 @@ defaults to JSON.
 
 ## Install
 
+Prebuilt binaries are published on the
+[releases page](https://github.com/pedrosanzmtz/atlx/releases) for Linux
+(x86_64 and aarch64 glibc, plus a static x86_64 musl build), macOS (Intel and
+Apple silicon) and Windows (x86_64 and ARM64).
+
+**cargo-binstall** downloads the matching archive without compiling anything:
+
 ```sh
-cargo install --path .
+cargo binstall atlx
 ```
+
+**Manual download.** Archives are named `atlx-vX.Y.Z-<target>.tgz` (`.zip` on
+Windows). Each one holds the `atlx` binary at the top level, the licenses, this
+README, the changelog, shell completions in `completions/` and man pages in
+`man/`. Check the download against `SHA256SUMS` from the same release:
+
+```sh
+curl -LO https://github.com/pedrosanzmtz/atlx/releases/download/v0.1.0/atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
+curl -LO https://github.com/pedrosanzmtz/atlx/releases/download/v0.1.0/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz atlx
+install -m 755 atlx ~/.local/bin/
+```
+
+**From crates.io** (needs a Rust toolchain):
+
+```sh
+cargo install atlx --locked
+```
+
+**From source:**
+
+```sh
+git clone https://github.com/pedrosanzmtz/atlx && cd atlx
+cargo install --path . --locked
+```
+
+### Shell completions
+
+`atlx completion script <bash|zsh|fish|powershell|elvish>` prints a completion
+script. Install it once for the shell you use:
+
+```sh
+# bash
+mkdir -p ~/.local/share/bash-completion/completions
+atlx completion script bash > ~/.local/share/bash-completion/completions/atlx
+
+# zsh: any directory on $fpath, loaded before compinit runs
+mkdir -p ~/.zfunc
+atlx completion script zsh > ~/.zfunc/_atlx
+# in ~/.zshrc: fpath=(~/.zfunc $fpath); autoload -Uz compinit; compinit
+
+# fish
+atlx completion script fish > ~/.config/fish/completions/atlx.fish
+```
+
+For PowerShell, add `atlx completion script powershell | Out-String |
+Invoke-Expression` to your `$PROFILE`. Release archives also ship these files
+pre-generated in `completions/`.
+
+Man pages are in the archive's `man/` directory (`atlx.1` plus one page per
+subcommand, such as `atlx-jira-workitem-get.1`). Copy them to
+`~/.local/share/man/man1/` and run `man atlx`.
 
 ## Authenticate
 
@@ -72,6 +132,7 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 | `bb pull-requests query\|get\|create\|diff\|activity\|tasks`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type` |
 | `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `--strategy merge_commit\|squash\|fast_forward`, `--close-source-branch`, `--yes` |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
+| `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
 
 atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
 Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +
