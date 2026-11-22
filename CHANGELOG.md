@@ -11,6 +11,10 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira Service Management over the public Service Desk API (#37): `jsm
+  request`, `request-type`, `approval`, `portal`/`servicedesk`, `queue`,
+  `sla get` and `knowledge-article query`. Request comments are public to
+  customers unless `--internal` is given.
 - An agent skill written for atlx, with `atlx skill install` and `atlx skill
   print` (#36).
 - Bitbucket repository commands (#33): `branch create|delete`, `commit

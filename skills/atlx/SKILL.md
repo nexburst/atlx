@@ -1,6 +1,6 @@
 ---
 name: atlx
-description: Use when a task involves Jira work items, sprints or filters, Confluence pages or comments, or Bitbucket Cloud pull requests, pipelines or repositories and the atlx CLI is available. Covers reading, triage, careful writes, review and CI debugging from the shell.
+description: Use when a task involves Jira work items, sprints or filters, service desk requests, Confluence pages or comments, or Bitbucket Cloud pull requests, pipelines or repositories and the atlx CLI is available. Covers reading, triage, careful writes, review and CI debugging from the shell.
 ---
 
 # atlx
@@ -31,6 +31,7 @@ Every command has `--help`. Check it rather than guessing a flag.
 | Find pages | `atlx confluence search query --cql 'title ~ "runbook"'` |
 | See a page's shape | `atlx confluence content get 12345 --detail outline` |
 | Read one section | `atlx confluence content get 12345 --section Rollback` |
+| Read a customer request | `atlx jsm request get SD-1` |
 | Review a pull request | `atlx bb pull-requests get 42 --full --repo acme/api` |
 | Why CI failed | `atlx bb pipeline latest-failure --repo acme/api` |
 | Any other endpoint | `atlx api jira /rest/api/3/myself` |
@@ -53,6 +54,8 @@ More in the references, which you should open only as needed:
    once, as in twg: Jira work item, comment, sprint, version and component deletes,
    version merge, pull request merge and decline, and `confluence content
    delete`. Confirm those with the person first.
+   `jsm approval approve|reject` decides as the person, and `jsm request
+   comment create` is visible to customers unless you pass `--internal`.
 5. Use `--dry-run` where it exists (`confluence content update`,
    `confluence space create`). Most other writes have no dry run.
 6. Pass the `snapshotToken` you read as `--snapshot-token` when updating a

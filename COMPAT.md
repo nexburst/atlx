@@ -100,6 +100,7 @@ repositories, so:
 | Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket `pipeline` actions, `deployment` | Inferred, not run live ([#34](https://github.com/nexburst/atlx/issues/34)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket branch and commit writes, workspaces, repository extras | Inferred, not run live ([#33](https://github.com/nexburst/atlx/issues/33)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Jira Service Management `jsm` | Inferred, not run live ([#37](https://github.com/nexburst/atlx/issues/37)) | Built from the public Service Desk REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -594,7 +595,7 @@ inferred rows.
 
 ## Jira Service Management
 
-121 twg commands: 📋 65, ⛔ 56.
+121 twg commands: ✅ 14, 🟡 4, 📋 47, ⛔ 56.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -602,24 +603,24 @@ inferred rows.
 | `jsm agents availability list` | ⛔ | agent availability is only in the GraphQL gateway |
 | `jsm agents availability set` | ⛔ | agent availability is only in the GraphQL gateway |
 | `jsm agents list` | ⛔ | agent availability is only in the GraphQL gateway |
-| `jsm alert acknowledge` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert assign` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert close` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert create` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert delete` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert escalate` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert get` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert note create` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert note query` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert query` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert request get` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert snooze` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert unacknowledge` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm alert update` | 📋 | #37; JSM Ops alerts REST API |
-| `jsm approval approve` | 📋 | #37; servicedeskapi approvals |
-| `jsm approval get` | 📋 | #37; servicedeskapi approvals |
-| `jsm approval list` | 📋 | #37; servicedeskapi approvals |
-| `jsm approval reject` | 📋 | #37; servicedeskapi approvals |
+| `jsm alert acknowledge` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert assign` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert close` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert create` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert delete` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert escalate` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert get` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert note create` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert note query` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert query` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert request get` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert snooze` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert unacknowledge` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm alert update` | 📋 | #13 (unscheduled); JSM Ops alerts REST API |
+| `jsm approval approve` | ✅ | #37 |
+| `jsm approval get` | ✅ | #37 |
+| `jsm approval list` | ✅ | #37 |
+| `jsm approval reject` | ✅ | #37 |
 | `jsm conversation claim create` | ⛔ | virtual agent conversations (GraphQL gateway) |
 | `jsm conversation close create` | ⛔ | virtual agent conversations (GraphQL gateway) |
 | `jsm conversation message query` | ⛔ | virtual agent conversations (GraphQL gateway) |
@@ -628,15 +629,15 @@ inferred rows.
 | `jsm conversation settings update` | ⛔ | virtual agent conversations (GraphQL gateway) |
 | `jsm conversation workspace create` | ⛔ | virtual agent conversations (GraphQL gateway) |
 | `jsm conversation workspace query` | ⛔ | virtual agent conversations (GraphQL gateway) |
-| `jsm form answers list` | 📋 | #37; Jira Forms REST API |
-| `jsm form attach` | 📋 | #37; Jira Forms REST API |
-| `jsm form describe` | 📋 | #37; Jira Forms REST API |
-| `jsm form fields list` | 📋 | #37; Jira Forms REST API |
-| `jsm form fill` | 📋 | #37; Jira Forms REST API |
-| `jsm form get` | 📋 | #37; Jira Forms REST API |
-| `jsm form list` | 📋 | #37; Jira Forms REST API |
-| `jsm form reopen` | 📋 | #37; Jira Forms REST API |
-| `jsm form submit` | 📋 | #37; Jira Forms REST API |
+| `jsm form answers list` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form attach` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form describe` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form fields list` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form fill` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form get` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form list` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form reopen` | 📋 | #13 (unscheduled); Jira Forms REST API |
+| `jsm form submit` | 📋 | #13 (unscheduled); Jira Forms REST API |
 | `jsm help-article query` | ⛔ | help center articles (GraphQL gateway) |
 | `jsm help-center config get` | ⛔ | help centers are only in the GraphQL gateway |
 | `jsm help-center create` | ⛔ | help centers are only in the GraphQL gateway |
@@ -658,24 +659,24 @@ inferred rows.
 | `jsm help-center topic get` | ⛔ | help centers are only in the GraphQL gateway |
 | `jsm help-object-store create` | ⛔ | help center object store (GraphQL gateway) |
 | `jsm help-object-store query` | ⛔ | help center object store (GraphQL gateway) |
-| `jsm incident affected-service query` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident affected-services query` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident alert query` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident create` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident delete` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident get` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident link affected-service` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident link alert` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident query` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident responder add` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident responder query` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident responder remove` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident transition` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident unlink affected-service` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident unlink alert` | 📋 | #37; JSM Ops and Jira REST |
-| `jsm incident update` | 📋 | #37; JSM Ops and Jira REST |
+| `jsm incident affected-service query` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident affected-services query` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident alert query` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident create` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident delete` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident get` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident link affected-service` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident link alert` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident query` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident responder add` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident responder query` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident responder remove` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident transition` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident unlink affected-service` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident unlink alert` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
+| `jsm incident update` | 📋 | #13 (unscheduled); JSM Ops and Jira REST |
 | `jsm knowledge-app-link query` | ⛔ | knowledge connectors (GraphQL gateway) |
-| `jsm knowledge-article query` | 📋 | #37; servicedeskapi knowledge base articles |
+| `jsm knowledge-article query` | 🟡 | #13: REST can only search, so `--query` (atlx extra) is required |
 | `jsm knowledge-base create` | ⛔ | knowledge configuration (GraphQL gateway) |
 | `jsm knowledge-base query` | ⛔ | knowledge configuration (GraphQL gateway) |
 | `jsm knowledge-base search query` | ⛔ | knowledge configuration (GraphQL gateway) |
@@ -690,32 +691,32 @@ inferred rows.
 | `jsm linked-source suggestion query` | ⛔ | knowledge connectors (GraphQL gateway) |
 | `jsm linked-source unlink` | ⛔ | knowledge connectors (GraphQL gateway) |
 | `jsm linked-source view update` | ⛔ | knowledge connectors (GraphQL gateway) |
-| `jsm portal query` | 📋 | #37; servicedeskapi service desks |
-| `jsm post-incident-review create` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review delete` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review get` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review incident get` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review link incident` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review query` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review unlink incident` | 📋 | #37; PIRs are Jira work items |
-| `jsm post-incident-review update` | 📋 | #37; PIRs are Jira work items |
-| `jsm request comment create` | 📋 | #37; servicedeskapi requests |
-| `jsm request comment list` | 📋 | #37; servicedeskapi requests |
-| `jsm request create` | 📋 | #37; servicedeskapi requests |
-| `jsm request participant add` | 📋 | #37; servicedeskapi requests |
-| `jsm request participant list` | 📋 | #37; servicedeskapi requests |
-| `jsm request participant remove` | 📋 | #37; servicedeskapi requests |
-| `jsm request validate` | 📋 | #37; servicedeskapi requests |
-| `jsm request-type field get` | 📋 | #37; servicedeskapi request types |
-| `jsm request-type fields get` | 📋 | #37; servicedeskapi request types |
-| `jsm request-type form get` | 📋 | #37; servicedeskapi request types |
-| `jsm request-type query` | 📋 | #37; servicedeskapi request types |
+| `jsm portal query` | 🟡 | #13: service desks from REST; `--help-center-ari` is GraphQL-only; `--query-term` filters client-side |
+| `jsm post-incident-review create` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review delete` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review get` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review incident get` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review link incident` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review query` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review unlink incident` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm post-incident-review update` | 📋 | #13 (unscheduled); PIRs are Jira work items |
+| `jsm request comment create` | ✅ | #37; public unless `--internal`, as in twg |
+| `jsm request comment list` | ✅ | #37 |
+| `jsm request create` | ✅ | #37 |
+| `jsm request participant add` | ✅ | #37 |
+| `jsm request participant list` | ✅ | #37 |
+| `jsm request participant remove` | ✅ | #37 |
+| `jsm request validate` | ✅ | #37; checks against the request type's fields without creating anything |
+| `jsm request-type field get` | ✅ | #37 |
+| `jsm request-type fields get` | ✅ | #37 |
+| `jsm request-type form get` | 🟡 | #13: built from the request type's REST fields, so no Forms layout or conditions |
+| `jsm request-type query` | 🟡 | #13: `--help-center-ari` is GraphQL-only; `--service-desk` is an alias of `--portal-id` |
 | `jsm resolution-state get` | ⛔ | resolution states (GraphQL gateway) |
 | `jsm service get` | ⛔ | service registry (GraphQL gateway) |
 | `jsm service query` | ⛔ | service registry (GraphQL gateway) |
 | `jsm service search` | ⛔ | service registry (GraphQL gateway) |
 | `jsm service-tier query` | ⛔ | service registry (GraphQL gateway) |
-| `jsm sla get` | 📋 | #37; servicedeskapi request SLA |
+| `jsm sla get` | ✅ | #37 |
 | `jsm sla metrics` | ⛔ | SLA reporting is only in the GraphQL gateway |
 | `jsm sla workitems` | ⛔ | SLA reporting is only in the GraphQL gateway |
 | `jsm support-site-article query` | ⛔ | help center articles (GraphQL gateway) |
@@ -728,5 +729,12 @@ inferred rows.
 | `completion script` | ➕ | shell completions |
 | `man` | ➕ | man page |
 | `search` | ➕ | Jira, Confluence and Bitbucket in one call |
+| `jsm servicedesk query` | ➕ | service desks; the same list as `jsm portal query` (#37) |
+| `jsm request get` | ➕ | one customer request (#37) |
+| `jsm request query` | ➕ | your requests, by status, desk and type (#37) |
+| `jsm request transition query` | ➕ | customer transitions (#37) |
+| `jsm request transition create` | ➕ | makes one (#37) |
+| `jsm queue query` | ➕ | agent queues (#37) |
+| `jsm queue workitems query` | ➕ | work items in a queue (#37) |
 | `skill install` | ➕ | installs the agent skill in `skills/atlx` (#36) |
 | `skill print` | ➕ | prints it (#36) |

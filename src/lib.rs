@@ -5,6 +5,7 @@ pub mod config;
 pub mod confluence;
 mod files;
 pub mod jira;
+pub mod jsm;
 pub mod markup;
 pub mod output;
 pub mod search;
