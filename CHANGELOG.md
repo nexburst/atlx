@@ -11,6 +11,8 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- An agent skill written for atlx, with `atlx skill install` and `atlx skill
+  print` (#36).
 - Bitbucket repository commands (#33): `branch create|delete`, `commit
   query|create`, Code Insights `commit report create|query`, `workspace
   get`, `workspace member query|get`, `repo create|list-files|url|
