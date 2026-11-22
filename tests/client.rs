@@ -2,6 +2,7 @@
 
 mod common;
 
+use atlx::client::{ApiError, ErrorKind};
 use base64::Engine;
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
@@ -129,4 +130,71 @@ fn client_handles_204_empty_and_plain_text_bodies() {
         client.get("/c", &[]).unwrap(),
         Value::String("line 1\nline 2".into())
     );
+}
+
+#[test]
+fn client_refuses_dot_segments_before_sending() {
+    // Percent-encoding leaves dots alone and URL parsers resolve them, so
+    // each of these would reach a different resource than the one named.
+    for path in [
+        "/rest/api/3/issue/PROJ-1/comment/..",
+        "/rest/api/3/issue/PROJ-1/comment/.",
+        "/rest/api/3/issue/PROJ-1/../PROJ-2",
+        "/issue/PROJ-1/comment/..?notify=false",
+        "/issue/PROJ-1/comment/..#top",
+        "/issue/PROJ-1/comment/%2e%2E",
+        "/issue/PROJ-1/comment/.%2e",
+        "/issue/PROJ-1/comment/..%2F..",
+        "/issue/PROJ-1/comment\\..",
+        "/issue/PROJ-1/comment/.\t.",
+        "/issue/PROJ-1/comment/.. ",
+    ] {
+        for method in ["GET", "POST", "PUT", "DELETE"] {
+            let srv = MockServer::with_responses([MockResponse::json(200, json!({}))]);
+            let err = srv.client().request(method, path, &[], None).unwrap_err();
+            let api = ApiError::find(&err).expect("a typed error");
+            assert_eq!(api.kind, ErrorKind::Usage, "{method} {path:?}");
+            assert!(srv.requests().is_empty(), "{method} {path:?} was sent");
+        }
+    }
+}
+
+#[test]
+fn client_refuses_dot_segments_in_absolute_urls_and_downloads() {
+    let srv = MockServer::with_responses([MockResponse::json(200, json!({}))]);
+    let c = srv.client();
+    let url = format!("{}/issue/PROJ-1/comment/..", srv.base_url());
+    assert!(c.delete(&url, &[]).is_err());
+    assert!(c.get_bytes("/attachment/..", &[]).is_err());
+    assert!(c.post_multipart("/issue/../attachments", &[], &[]).is_err());
+    assert!(srv.requests().is_empty());
+}
+
+#[test]
+fn client_refuses_delete_of_an_empty_id() {
+    for path in [
+        "/issue/PROJ-1/comment/",
+        "/branches/?name=x",
+        "/issue//votes",
+    ] {
+        let srv = MockServer::with_responses([MockResponse::json(200, json!({}))]);
+        let err = srv.client().delete(path, &[]).unwrap_err();
+        assert_eq!(ApiError::find(&err).unwrap().kind, ErrorKind::Usage);
+        assert!(srv.requests().is_empty(), "{path:?} was sent");
+    }
+}
+
+#[test]
+fn client_allows_dots_inside_segments_and_queries() {
+    for path in [
+        "/src/main/.github/a..b.rs",
+        "/refs/branches/feature%2Fv1.2",
+        "/repositories/acme/api/pipelines/",
+        "/files/...",
+        "/search?path=../x",
+    ] {
+        let srv = MockServer::with_responses([MockResponse::json(200, json!({}))]);
+        srv.client().get(path, &[]).unwrap();
+        assert_eq!(srv.requests().len(), 1, "{path:?}");
+    }
 }
