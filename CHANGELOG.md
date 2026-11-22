@@ -11,6 +11,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Confluence comment threads (#29): `content comments
+  get|reply|update|delete|resolve|reopen`, inline comments with `create
+  --text-selection`, and `list --include-replies --sort --status
+  --resolution-status --content-type --reference-space`. `delete` needs
+  `--yes`, as in twg; resolution is for inline comments only.
 - Jira Agile (#25): `jira sprint get|create|update|start|complete|delete`,
   `jira board get|create|delete`, `board backlog|projects|quick-filter
   query`, `board quick-filter get`, and `--sprint`, `--story-points`,

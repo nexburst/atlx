@@ -179,8 +179,9 @@ ok confluence content body-formats
 ok confluence content labels remove --id 12345 --label runbook --yes
 ok confluence content versions diff --id 12345 --from 1 --to 2
 ok confluence content attachments download --attachment-id att456 --out file.bin
-gap #29 confluence content comments reply --comment-id 777 --body 'Thanks'
-gap #29 confluence content comments resolve --comment-id 777
+ok confluence content comments reply --comment-id 777 --body 'Thanks'
+ok confluence content comments resolve --comment-id 777
+ok confluence content comments create --id 12345 --body 'Why?' --text-selection 'the service'
 gap #30 confluence content move 12345 --parent-id 67890
 gap #30 confluence content trash 12345
 gap #30 confluence content purge 12345

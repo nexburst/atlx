@@ -11,6 +11,10 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+mod comments;
+
+pub(crate) use comments::ConfCommentCmd;
+
 #[derive(Subcommand)]
 pub(crate) enum ConfCmd {
     /// CQL and text search
@@ -40,13 +44,6 @@ pub(crate) enum ConfCmd {
         #[arg(long, default_value_t = 2)]
         depth: usize,
     },
-}
-
-/// `--comment-type` on comment commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum CommentType {
-    Footer,
-    Inline,
 }
 
 #[derive(Subcommand)]
@@ -496,59 +493,6 @@ pub(crate) enum LabelsCmd {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum ConfCommentCmd {
-    /// List footer or inline comments
-    List {
-        /// Old form of --id
-        #[arg(hide = true, conflicts_with = "id")]
-        reference: Option<String>,
-        /// Page or blog post ID or URL
-        #[arg(long)]
-        id: Option<String>,
-        /// footer (default) or inline
-        #[arg(long, value_enum, conflicts_with = "inline")]
-        comment_type: Option<CommentType>,
-        /// Comment body format: md (default) or html
-        #[arg(long, value_enum, conflicts_with = "format")]
-        body_format: Option<confluence::ReadFormat>,
-        /// Old form of --comment-type inline
-        #[arg(long, hide = true)]
-        inline: bool,
-        /// Old form of --body-format
-        #[arg(long, value_enum, hide = true)]
-        format: Option<confluence::ReadFormat>,
-        #[arg(long, default_value_t = 25)]
-        limit: usize,
-        #[arg(long)]
-        cursor: Option<String>,
-    },
-    /// Add a footer comment
-    Create {
-        /// Old form of --id
-        #[arg(hide = true, conflicts_with = "id")]
-        reference: Option<String>,
-        /// Page or blog post ID or URL
-        #[arg(long)]
-        id: Option<String>,
-        /// Comment body (`-` reads stdin)
-        #[arg(long, conflicts_with = "body_file")]
-        body: Option<String>,
-        /// Read the comment body from a file
-        #[arg(long)]
-        body_file: Option<String>,
-        /// Body format: markdown/md (default), html or plain
-        #[arg(long, value_enum, conflicts_with = "format")]
-        body_format: Option<TextFormat>,
-        /// Old form of --body-format (default html)
-        #[arg(long, value_enum, hide = true)]
-        format: Option<TextFormat>,
-        /// Only footer comments can be created so far
-        #[arg(long, value_enum)]
-        comment_type: Option<CommentType>,
-    },
-}
-
-#[derive(Subcommand)]
 pub(crate) enum SpaceCmd {
     /// List spaces
     List {
@@ -821,91 +765,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     .next_cursor(data["nextCursor"].as_str())
                     .data(data)
             }
-            ContentCmd::Comments { cmd } => match cmd {
-                ConfCommentCmd::List {
-                    reference,
-                    id,
-                    comment_type,
-                    body_format,
-                    inline,
-                    format,
-                    limit,
-                    cursor,
-                } => {
-                    let reference = content_ref(
-                        reference,
-                        id,
-                        "confluence content comments list <ref>",
-                        "--id <ref>",
-                    )?;
-                    if inline {
-                        deprecated("--inline", "--comment-type inline");
-                    }
-                    if format.is_some() {
-                        deprecated("--format", "--body-format");
-                    }
-                    let inline = inline || comment_type == Some(CommentType::Inline);
-                    let format = body_format.or(format).unwrap_or(confluence::ReadFormat::Md);
-                    let data = confluence::comments_list(
-                        c,
-                        &reference,
-                        inline,
-                        format,
-                        limit,
-                        cursor.as_deref(),
-                    )?;
-                    envelope("confluence.content.comments.list", "confluence.comment")
-                        .request(json!({
-                            "id": reference,
-                            "commentType": if inline { "inline" } else { "footer" },
-                            "limit": limit,
-                            "cursor": cursor,
-                        }))
-                        .next_cursor(data["nextCursor"].as_str())
-                        .data(data)
-                }
-                ConfCommentCmd::Create {
-                    reference,
-                    id,
-                    body,
-                    body_file,
-                    body_format,
-                    format,
-                    comment_type,
-                } => {
-                    let old_form = reference.is_some();
-                    let reference = content_ref(
-                        reference,
-                        id,
-                        "confluence content comments create <ref>",
-                        "--id <ref>",
-                    )?;
-                    if comment_type == Some(CommentType::Inline) {
-                        return Err(ApiError::usage(
-                            "inline comments need a text selection, which atlx doesn't support yet; \
-                             omit --comment-type to add a footer comment",
-                        )
-                        .into());
-                    }
-                    if format.is_some() {
-                        deprecated("--format", "--body-format");
-                    }
-                    let Some(body) = body_arg(body, body_file)? else {
-                        return Err(ApiError::usage("pass --body or --body-file").into());
-                    };
-                    // twg defaults to markdown; the old positional form kept
-                    // atlx's earlier html default.
-                    let default = if old_form {
-                        TextFormat::Html
-                    } else {
-                        TextFormat::Markdown
-                    };
-                    let format = body_format.or(format).unwrap_or(default);
-                    envelope("confluence.content.comments.create", "confluence.comment")
-                        .request(json!({"id": reference, "commentType": "footer"}))
-                        .data(confluence::comment_create(c, &reference, &body, format)?)
-                }
-            },
+            ContentCmd::Comments { cmd } => comments::run(c, cmd)?,
             ContentCmd::Children {
                 reference,
                 limit,
@@ -1379,6 +1239,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_comment_threads() {
+        for ok in [
+            "atlx confluence content comments list --id 12345 --sort -created-date --status current --include-replies true",
+            "atlx confluence content comments list --id 12345 --comment-type inline --resolution-status open --content-type page",
+            "atlx confluence content comments get --comment-id 777 --include-replies false",
+            "atlx confluence content comments create --id 12345 --body x --text-selection words --text-selection-match-index 1",
+            "atlx confluence content comments reply --comment-id 777 --body Thanks",
+            "atlx confluence content comments update --comment-id 777 --body x --expected-version 2",
+            "atlx confluence content comments delete --comment-id 777 --yes",
+            "atlx confluence content comments resolve --comment-id 777",
+            "atlx confluence content comments reopen --comment-id 777 --comment-type inline",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx confluence content comments create --id 12345 --body x --text-selection-match-count 2",
+            "atlx confluence content comments list --id 12345 --status trashed",
+            "atlx confluence content comments reply --body x",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_versions_labels_attachments_and_formats() {
         for ok in [
             "atlx confluence content get 12345 --format url",
@@ -1519,7 +1408,7 @@ mod tests {
             panic!("unexpected parsed command");
         };
         assert_eq!(id.as_deref(), Some("12345"));
-        assert_eq!(comment_type, Some(CommentType::Inline));
+        assert_eq!(comment_type, Some(confluence::comments::Surface::Inline));
         assert_eq!(body_format, None);
     }
 }

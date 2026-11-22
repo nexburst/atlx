@@ -11,6 +11,7 @@ use clap::ValueEnum;
 use serde_json::{Value, json};
 
 pub mod attachments;
+pub mod comments;
 pub mod edits;
 pub mod formats;
 pub mod history;
@@ -604,60 +605,6 @@ fn format_comment(c: &Client, cm: &Value, format: ReadFormat) -> Value {
     o
 }
 
-/// `confluence content comments list`
-pub fn comments_list(
-    c: &Client,
-    reference: &str,
-    inline: bool,
-    format: ReadFormat,
-    limit: usize,
-    cursor: Option<&str>,
-) -> Result<Value> {
-    let id = content_id(reference)?;
-    let endpoint = if inline {
-        "inline-comments"
-    } else {
-        "footer-comments"
-    };
-    let limit = limit.clamp(1, 250).to_string();
-    let mut q = vec![("body-format", "storage"), ("limit", limit.as_str())];
-    if let Some(cur) = cursor {
-        q.push(("cursor", cur));
-    }
-    let (_, v) = try_content(|kind| {
-        c.get(
-            &format!("/api/v2/{}/{}/{}", kind.collection(), enc(&id), endpoint),
-            &q,
-        )
-    })?;
-    Ok(listing(&v, |cm| format_comment(c, cm, format)))
-}
-
-/// `confluence content comments create`
-pub fn comment_create(
-    c: &Client,
-    reference: &str,
-    body: &str,
-    format: TextFormat,
-) -> Result<Value> {
-    let id = content_id(reference)?;
-    let (kind, _) =
-        try_content(|k| c.get(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &[]))?;
-    let id_field = match kind {
-        ContentType::Page => "pageId",
-        ContentType::Blogpost => "blogPostId",
-    };
-    let req = json!({
-        id_field: id,
-        "body": {"representation": "storage", "value": to_storage(body, format)},
-    });
-    let mut v = c.post("/api/v2/footer-comments", &req)?;
-    if v.is_object() {
-        v["externalUrl"] = optional_content_url(c, &v);
-    }
-    Ok(v)
-}
-
 /// `confluence content children`
 pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>) -> Result<Value> {
     let id = content_id(reference)?;
@@ -1151,24 +1098,39 @@ mod tests {
             ),
         });
 
-        let md = comments_list(&c, "101", false, ReadFormat::Md, 10, None).unwrap();
+        let list = |id: &str, surface, format, limit| {
+            let o = comments::ListOpts {
+                surface,
+                format,
+                limit,
+                cursor: None,
+                sort: None,
+                status: None,
+                resolution: None,
+                content_type: None,
+                replies: false,
+            };
+            comments::list(&c, id, None, &o)
+        };
+        let md = list("101", comments::Surface::Footer, ReadFormat::Md, 10).unwrap();
         assert_eq!(
             md["results"][0]["body"],
             json!({"format": "md", "value": "Hello **world**"})
         );
         assert_eq!(md["nextCursor"], "c2");
 
-        let html = comments_list(&c, "101", false, ReadFormat::Html, 10, None).unwrap();
+        let html = list("101", comments::Surface::Footer, ReadFormat::Html, 10).unwrap();
         assert_eq!(
             html["results"][0]["body"]["value"],
             "<p>Hello <strong>world</strong></p>"
         );
 
-        let inline = comments_list(&c, "202", true, ReadFormat::Md, 25, None).unwrap();
+        let inline = list("202", comments::Surface::Inline, ReadFormat::Md, 25).unwrap();
         assert_eq!(inline["results"][0]["id"], "ic1");
         assert_eq!(inline["results"][0]["resolutionStatus"], "open");
 
-        let created = comment_create(&c, "202", "Nice **post**", TextFormat::Markdown).unwrap();
+        let created =
+            comments::create(&c, "202", None, "Nice **post**", TextFormat::Markdown, None).unwrap();
         assert_eq!(created["id"], "fc9");
         let reqs = log.lock().unwrap();
         let post_body: Value = serde_json::from_str(&reqs.last().unwrap().2).unwrap();
