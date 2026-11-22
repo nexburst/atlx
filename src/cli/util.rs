@@ -151,6 +151,18 @@ fn run_ordered<T: Send>(
 /// Whether deprecation notes may be printed (text output on a terminal).
 static NOTES: AtomicBool = AtomicBool::new(false);
 
+/// Whether output is text, for the commands that stream their own.
+static TEXT: AtomicBool = AtomicBool::new(false);
+
+/// Called once by `main` after the output format is known.
+pub(crate) fn set_text_output(on: bool) {
+    TEXT.store(on, Ordering::SeqCst);
+}
+
+pub(crate) fn text_output() -> bool {
+    TEXT.load(Ordering::SeqCst)
+}
+
 /// Called once by `main` after the output format is known.
 pub(crate) fn enable_notes(on: bool) {
     NOTES.store(on, Ordering::SeqCst);

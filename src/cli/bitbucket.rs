@@ -12,6 +12,7 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
 mod lifecycle;
+mod pipelines;
 
 #[derive(Args)]
 pub(crate) struct RepoArgs {
@@ -53,6 +54,11 @@ pub(crate) enum BbCmd {
     /// most recently updated repositories (25 unless --repo-limit says
     /// otherwise), at one request or more each.
     Inbox(lifecycle::InboxArgs),
+    /// Deployments and their environments
+    Deployment {
+        #[command(subcommand)]
+        cmd: pipelines::DeploymentCmd,
+    },
     /// Search code in a workspace
     Search {
         #[command(subcommand)]
@@ -653,7 +659,10 @@ pub(crate) enum PipelineCmd {
         /// PUSH, MANUAL, SCHEDULE, PULLREQUEST
         #[arg(long)]
         trigger: Option<String>,
-        #[arg(long, default_value_t = 15)]
+        /// The pipeline's pattern, such as a custom pipeline's name
+        #[arg(long)]
+        pattern: Option<String>,
+        #[arg(long, short = 'n', default_value_t = 15)]
         limit: usize,
         #[command(flatten)]
         repo: RepoArgs,
@@ -672,11 +681,40 @@ pub(crate) enum PipelineCmd {
         /// Max log lines per step (0 = all)
         #[arg(long, default_value_t = 100)]
         lines: usize,
-        /// Limit logs to one step (name or uuid)
+        /// Limit logs and tests to one step (1-based index, UUID or name)
         #[arg(long)]
         step: Option<String>,
+        /// Add each step's test report summary
+        #[arg(long)]
+        test_reports: bool,
+        /// Add each step's test cases
+        #[arg(long)]
+        test_cases: bool,
+        /// Max test cases per step (0 = all, up to 5000)
+        #[arg(long, default_value_t = 100)]
+        case_limit: usize,
         #[command(flatten)]
         repo: RepoArgs,
+    },
+    /// Start a pipeline
+    Run(pipelines::RunArgs),
+    /// Start a pipeline (same as run)
+    Trigger(pipelines::RunArgs),
+    /// The newest failed pipeline, with its failed steps' logs
+    LatestFailure(pipelines::LatestFailureArgs),
+    /// Follow a pipeline's logs; exits 1 if it fails
+    ///
+    /// Outside text mode each line is a JSON event (JSONL). Output shaping
+    /// flags don't apply to the stream.
+    Tail(pipelines::TailArgs),
+    /// Search a pipeline's logs
+    Grep(pipelines::GrepArgs),
+    /// Start a failed pipeline again (every step; needs --whole-pipeline)
+    RerunFailed(pipelines::RerunArgs),
+    /// Pipelines settings
+    Config {
+        #[command(subcommand)]
+        cmd: pipelines::ConfigCmd,
     },
 }
 
@@ -1036,11 +1074,13 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     status,
                     branch,
                     trigger,
+                    pattern,
                     limit,
                     repo,
                 },
         } => {
             let q = bitbucket::PipelineQuery {
+                pattern: pattern.as_deref(),
                 state: state.as_deref(),
                 status: status.as_deref(),
                 branch: branch.as_deref(),
@@ -1057,6 +1097,9 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     failed_steps,
                     lines,
                     step,
+                    test_reports,
+                    test_cases,
+                    case_limit,
                     repo,
                 },
         } => {
@@ -1066,8 +1109,32 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 lines,
                 step: step.as_deref(),
             };
-            bitbucket::pipeline_get(&c, &path(&repo, None)?, &pipeline, &o)?
+            let tests = bitbucket::pipelines::Tests {
+                reports: test_reports,
+                cases: test_cases,
+                case_limit,
+            };
+            bitbucket::pipelines::get(&c, &path(&repo, None)?, &pipeline, &o, &tests)?
         }
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::Run(a) | PipelineCmd::Trigger(a),
+        } => pipelines::run(&c, &|r| path(r, None), a)?,
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::LatestFailure(a),
+        } => pipelines::latest_failure(&c, &|r| path(r, None), a)?,
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::Tail(a),
+        } => return pipelines::tail(&c, &|r| path(r, None), a),
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::Grep(a),
+        } => return pipelines::grep(&c, &|r| path(r, None), a),
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::RerunFailed(a),
+        } => pipelines::rerun(&c, &|r| path(r, None), a)?,
+        BbCmd::Pipeline {
+            cmd: PipelineCmd::Config { cmd },
+        } => pipelines::config(&c, &|r| path(r, None), cmd)?,
+        BbCmd::Deployment { cmd } => pipelines::deployment(&c, &|r| path(r, None), cmd)?,
         BbCmd::Search {
             cmd:
                 BbSearchCmd::Code {
@@ -1268,6 +1335,45 @@ mod tests {
     use crate::cli::Cli;
     use crate::cli::tests::shell_words;
     use clap::Parser;
+
+    #[test]
+    fn parses_pipelines_and_deployments() {
+        for ok in [
+            "atlx bb pipeline run --branch main --variable A=b,c --secured-variable TOKEN --open",
+            "atlx bb pipeline trigger --commit abc --selector nightly",
+            "atlx bb pipeline latest-failure --branch main --status error --lines 5",
+            "atlx bb pipeline tail 101 --no-follow -n all",
+            "atlx bb pipeline tail --pipeline 101 --interval 5 --timeout 60",
+            "atlx bb pipeline grep boom --pipeline 101 -i -C 2",
+            "atlx bb pipeline grep --pattern boom --pipeline 101",
+            "atlx bb pipeline rerun-failed --pipeline 101 --whole-pipeline",
+            "atlx bb pipeline get --pipeline 101 --test-reports --test-cases --case-limit 0",
+            "atlx bb pipeline query --pattern nightly",
+            "atlx bb pipeline config update --enabled false",
+            "atlx bb deployment query --environment production",
+            "atlx bb deployment get {d}",
+            "atlx bb deployment environments query",
+            "atlx bb deployment environment variable query production",
+            "atlx bb deployment history query --environment e --status FAILED --sort asc",
+            "atlx bb deployment history get {d} --environment e",
+            "atlx bb deployment commits query --environment e --deployment d",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx bb pipeline run --branch main --tag v1",
+            "atlx bb pipeline tail 101 --poll-interval 1",
+            "atlx bb pipeline latest-failure --status passed",
+            "atlx bb deployment environment variable query",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
 
     #[test]
     fn parses_pull_request_lifecycle() {

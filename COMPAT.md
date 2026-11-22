@@ -96,6 +96,7 @@ repositories, so:
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Bitbucket `pipeline` actions, `deployment` | Inferred, not run live ([#34](https://github.com/nexburst/atlx/issues/34)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -466,7 +467,7 @@ inferred rows.
 
 ## Bitbucket
 
-78 twg commands: ✅ 39, 🟡 7, 📋 32.
+78 twg commands: ✅ 54, 🟡 7, 📋 17.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -477,27 +478,27 @@ inferred rows.
 | `bitbucket commit query` | 📋 | #33 |
 | `bitbucket commit report create` | 📋 | #33 |
 | `bitbucket commit report query` | 📋 | #33 |
-| `bitbucket deployment commits query` | 📋 | #34 |
-| `bitbucket deployment environment variable create` | 📋 | #34 |
-| `bitbucket deployment environment variable delete` | 📋 | #34 |
-| `bitbucket deployment environment variable query` | 📋 | #34 |
-| `bitbucket deployment environment variable update` | 📋 | #34 |
-| `bitbucket deployment environments query` | 📋 | #34 |
-| `bitbucket deployment get` | 📋 | #34 |
-| `bitbucket deployment history get` | 📋 | #34 |
-| `bitbucket deployment history query` | 📋 | #34 |
-| `bitbucket deployment query` | 📋 | #34 |
+| `bitbucket deployment commits query` | ✅ | #34; compared with the previous successful deployment among up to 5000 |
+| `bitbucket deployment environment variable create` | 📋 | #13; twg reads the value from the clipboard |
+| `bitbucket deployment environment variable delete` | 📋 | #13 |
+| `bitbucket deployment environment variable query` | ✅ | #34; secured values are never shown; `--environment` is an atlx extra |
+| `bitbucket deployment environment variable update` | 📋 | #13; twg reads the value from the clipboard |
+| `bitbucket deployment environments query` | ✅ | #34 |
+| `bitbucket deployment get` | ✅ | #34 |
+| `bitbucket deployment history get` | ✅ | #34 |
+| `bitbucket deployment history query` | ✅ | #34; filtered and sorted client-side over up to 5000 deployments |
+| `bitbucket deployment query` | ✅ | #34; `--environment` is an atlx extra |
 | `bitbucket inbox` | ✅ | #32; scans the most recently updated repositories (`--repo-limit`, 25), one request or more each; `--role all` is an atlx extra |
-| `bitbucket pipeline config get` | 📋 | #34 |
-| `bitbucket pipeline config update` | 📋 | #34 |
-| `bitbucket pipeline get` | 🟡 | missing `--case-limit`, `--test-cases`, `--test-reports` (#34) |
-| `bitbucket pipeline grep` | 📋 | #34 |
-| `bitbucket pipeline latest-failure` | 📋 | #34 |
-| `bitbucket pipeline query` | 🟡 | missing `--pattern` (#34) |
-| `bitbucket pipeline rerun-failed` | 📋 | #34 |
-| `bitbucket pipeline run` | 📋 | #34 |
-| `bitbucket pipeline tail` | 📋 | #34 |
-| `bitbucket pipeline trigger` | 📋 | #34 |
+| `bitbucket pipeline config get` | ✅ | #34 |
+| `bitbucket pipeline config update` | ✅ | #34 |
+| `bitbucket pipeline get` | ✅ | #34 added test reports and cases |
+| `bitbucket pipeline grep` | 🟡 | missing `--regex` (#13): plain substring matching, no regex dependency |
+| `bitbucket pipeline latest-failure` | ✅ | #34; searches the 100 most recent runs |
+| `bitbucket pipeline query` | ✅ | #34 added `--pattern` |
+| `bitbucket pipeline rerun-failed` | 🟡 | #13: REST has no rerun of failed steps only, so this starts the whole pipeline again and needs `--whole-pipeline` (atlx extra) to say so |
+| `bitbucket pipeline run` | ✅ | #34; `--secured-variable KEY` reads the environment, as in twg |
+| `bitbucket pipeline tail` | ✅ | #34; polls (`--no-ws` is a no-op); follows every step unless `--step`; exits 1 when the pipeline fails |
+| `bitbucket pipeline trigger` | ✅ | #34; same as `run` |
 | `bitbucket pull-requests activity` | ✅ | takes several ids as a batch, with `--strict` and `--batch-concurrency` (#18) |
 | `bitbucket pull-requests approve` | ✅ |  |
 | `bitbucket pull-requests comment create` | 🟡 | missing `--image`, `--image-name` (#13 (unscheduled); upload through Downloads). `--reply-to`, `--pending` and the inline `--path`/`--line`/`--from-line`/range flags work (#31) |

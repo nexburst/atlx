@@ -208,6 +208,9 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `bb pull-requests default-reviewer query\|get\|add\|remove`, `effective-default-reviewer query` | `add` and `remove` need `--yes` |
 | `bb inbox`, `bb pull-requests query --scope me` | scan your 25 most recently updated repositories (`inbox --repo-limit`), one request or more each; `query` also takes `--reviewer`, `--page` and `--merged-since`/`--merged-before`, which read up to 200 pull requests' activity |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
+| `bb pipeline run\|trigger` | `--branch`, `--tag`, `--commit`, `--custom`, `--variable KEY=VALUE`; `--secured-variable KEY` reads the value from the environment |
+| `bb pipeline latest-failure\|tail\|grep\|rerun-failed`, `config get\|update` | `tail` streams text or JSON lines and exits 1 on failure; `get --test-reports --test-cases`; `rerun-failed` needs `--whole-pipeline`, because REST can only repeat every step |
+| `bb deployment query\|get`, `environments query`, `environment variable query`, `history query\|get`, `commits query` | environments by UUID, name or slug; secured values are never shown |
 | `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
 
 Older atlx names from 0.1 (`jira project list|get`, `jira board list`,
