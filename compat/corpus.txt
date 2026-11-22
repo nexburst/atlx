@@ -252,8 +252,8 @@ ok bb pull-requests update --pull-request 42 --title 'Better title' --repo acme/
 ok bb pull-requests mergeability 42 --repo acme/api
 ok bb pull-requests merge --pull-request 42 --wait --repo acme/api
 ok bb inbox
-gap #33 bb commit query --repo acme/api --branch main
-gap #33 bb workspace get --workspace acme
+ok bb commit query --repo acme/api --branch main
+ok bb workspace get --workspace acme
 ok bb pipeline latest-failure --repo acme/api --branch main
 ok bb pipeline run --repo acme/api --branch main
 ok bb pipeline tail --pipeline 101 --repo acme/api

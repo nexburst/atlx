@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 pub mod deployments;
 pub mod lifecycle;
 pub mod pipelines;
+pub mod repos;
 
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()

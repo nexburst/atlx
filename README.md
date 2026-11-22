@@ -217,6 +217,8 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `bb pipeline run\|trigger` | `--branch`, `--tag`, `--commit`, `--custom`, `--variable KEY=VALUE`; `--secured-variable KEY` reads the value from the environment |
 | `bb pipeline latest-failure\|tail\|grep\|rerun-failed`, `config get\|update` | `tail` streams text or JSON lines and exits 1 on failure; `get --test-reports --test-cases`; `rerun-failed` needs `--whole-pipeline`, because REST can only repeat every step |
 | `bb deployment query\|get`, `environments query`, `environment variable query`, `history query\|get`, `commits query` | environments by UUID, name or slug; secured values are never shown |
+| `bb branch create\|delete`, `bb commit query\|create`, `bb commit report create\|query` | `commit create` commits without a checkout: `--file`, `--files-from`, `--delete`, with `--branch` or `--default-branch`, `--parent` to guard the head; it and `branch delete` need `--yes` |
+| `bb repo create\|list-files\|url\|contributors`, `bb workspace get`, `bb workspace member query\|get`, `bb search prs` | `repo create` is private unless `--public`; `repo url` needs no credentials |
 | `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
 
 Older atlx names from 0.1 (`jira project list|get`, `jira board list`,

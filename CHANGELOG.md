@@ -11,6 +11,10 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Bitbucket repository commands (#33): `branch create|delete`, `commit
+  query|create`, Code Insights `commit report create|query`, `workspace
+  get`, `workspace member query|get`, `repo create|list-files|url|
+  contributors` and `search prs`.
 - Confluence lifecycle (#30): `content move|copy|trash|untrash|purge|archive|
   publish|delete-draft`, `create --private --content-width --title-emoji`,
   `space create|update|archive|unarchive|delete`, and `tree` for whole

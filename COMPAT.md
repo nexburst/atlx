@@ -99,6 +99,7 @@ repositories, so:
 | Confluence content and space lifecycle, space `tree` | Inferred, not run live ([#30](https://github.com/nexburst/atlx/issues/30)) | Built from the public REST payloads and tested against mock responses only; the width and emoji property values are unverified too |
 | Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket `pipeline` actions, `deployment` | Inferred, not run live ([#34](https://github.com/nexburst/atlx/issues/34)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Bitbucket branch and commit writes, workspaces, repository extras | Inferred, not run live ([#33](https://github.com/nexburst/atlx/issues/33)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -469,17 +470,17 @@ inferred rows.
 
 ## Bitbucket
 
-78 twg commands: ✅ 54, 🟡 7, 📋 17.
+78 twg commands: ✅ 66, 🟡 9, 📋 3.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
-| `bitbucket branch create` | 📋 | #33 |
-| `bitbucket branch delete` | 📋 | #33 |
+| `bitbucket branch create` | ✅ | #33 |
+| `bitbucket branch delete` | ✅ | #33 |
 | `bitbucket branch query` | ✅ | #18; `--author` is matched by atlx over up to 1000 branches, since Bitbucket can't filter by author |
-| `bitbucket commit create` | 📋 | #33 |
-| `bitbucket commit query` | 📋 | #33 |
-| `bitbucket commit report create` | 📋 | #33 |
-| `bitbucket commit report query` | 📋 | #33 |
+| `bitbucket commit create` | ✅ | #33; `--file repoPath=localPath` is an atlx extra; a branch must be named, or `--default-branch` |
+| `bitbucket commit query` | ✅ | #33; `--include`, `--exclude`, `--path` are atlx extras |
+| `bitbucket commit report create` | ✅ | #33 |
+| `bitbucket commit report query` | ✅ | #33 |
 | `bitbucket deployment commits query` | ✅ | #34; compared with the previous successful deployment among up to 5000 |
 | `bitbucket deployment environment variable create` | 📋 | #13; twg reads the value from the clipboard |
 | `bitbucket deployment environment variable delete` | 📋 | #13 |
@@ -540,17 +541,17 @@ inferred rows.
 | `bitbucket pull-requests task update` | ✅ | #31 |
 | `bitbucket pull-requests unapprove` | ✅ |  |
 | `bitbucket pull-requests update` | 🟡 | missing `--image`, `--image-name` (#13) |
-| `bitbucket repo contributors` | 📋 | #33 |
-| `bitbucket repo create` | 📋 | #33 |
+| `bitbucket repo contributors` | 🟡 | missing `--repo-path` (#13): counts through REST over 1000 commits, where twg reads local git |
+| `bitbucket repo create` | ✅ | #33; private unless `--public` |
 | `bitbucket repo file` | ✅ |  |
 | `bitbucket repo get` | ✅ |  |
-| `bitbucket repo list-files` | 📋 | #33 |
+| `bitbucket repo list-files` | ✅ | #33; `--max-depth` is an atlx extra |
 | `bitbucket repo query` | ✅ | `--repo workspace/slug` or a URL selects the workspace (#18) |
-| `bitbucket repo url` | 📋 | #33 |
-| `bitbucket search prs` | 📋 | #33 |
-| `bitbucket workspace get` | 📋 | #33 |
-| `bitbucket workspace member get` | 📋 | #33 |
-| `bitbucket workspace member query` | 📋 | #33 |
+| `bitbucket repo url` | ✅ | #33; offline; `--path`, `--ref`, `--line` are atlx extras |
+| `bitbucket search prs` | 🟡 | #13: `--scope me` scans the 25 most recently updated repositories and matches the text client-side |
+| `bitbucket workspace get` | ✅ | #33 |
+| `bitbucket workspace member get` | ✅ | #33 |
+| `bitbucket workspace member query` | ✅ | #33; `-q` is an atlx extra |
 | `bitbucket pull-requests tasks` | ➕ | old name of `bb pull-requests task query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 | `bitbucket repo branches` | ➕ | old name of `bb branch query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 | `bitbucket search code` | ➕ | Bitbucket code search; twg's `search-code` uses Code Intelligence |

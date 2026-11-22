@@ -328,6 +328,25 @@ impl Client {
         Ok(parse_value(self.read_body(resp, &desc)?))
     }
 
+    /// [`Client::post_multipart`], for endpoints that answer with a `Location`.
+    pub fn post_multipart_response(&self, path: &str, parts: &[Part]) -> Result<Response> {
+        let boundary = format!("atlx-{:016x}{:08x}", random_u64(), std::process::id());
+        let opts = Opts {
+            headers: &[],
+            default_accept: "application/json",
+            overall_timeout: false,
+        };
+        let payload = Payload::Multipart { parts, boundary };
+        let (resp, desc) = self.execute("POST", path, &[], payload, &opts)?;
+        let status = resp.status();
+        let location = resp.header("Location").map(String::from);
+        Ok(Response {
+            status,
+            location,
+            body: parse_value(self.read_body(resp, &desc)?),
+        })
+    }
+
     fn read_body(&self, resp: ureq::Response, desc: &str) -> Result<Vec<u8>> {
         match read_capped(resp.into_reader(), self.max_body) {
             Ok(Some(data)) => Ok(data),

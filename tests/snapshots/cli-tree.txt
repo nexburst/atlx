@@ -20,7 +20,13 @@ atlx auth profile default <NAME> (required)
 atlx auth profile list
 atlx auth profile migrate -y/--yes
 atlx auth profile rename <NAME> (required) <NEW_NAME> (required)
+atlx bitbucket branch create --branch/--name <BRANCH> (required) [--from <FROM>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket branch delete <NAME> (required) -y/--yes [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket branch query [-q/--query <QUERY>] [--author <AUTHOR>] [--sort <SORT> [default: -target.date]] [-n/--limit <LIMIT> [default: 25]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket commit create -m/--message <MESSAGE> (required) [--file <FILE>...] [--file-local <FILE_LOCAL>...] [--file-remote <FILE_REMOTE>...] [--files-from <FILES_FROM>] [--delete <DELETE>...] [--branch <BRANCH>] --default-branch [--author <AUTHOR>] [--parent <PARENT>] -y/--yes [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket commit query [--branch <BRANCH>] [--include <INCLUDE>...] [--exclude <EXCLUDE>...] [--path <PATH>] [-n/--limit <LIMIT> [default: 20]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket commit report create <COMMIT> (required) <report-id> (required) --report <REPORT> (required) [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket commit report query <COMMIT> (required) [-n/--limit <LIMIT> [default: 100]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket deployment commits query --environment <ENVIRONMENT> (required) --deployment <DEPLOYMENT> (required) [-n/--limit <LIMIT> [default: 50]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket deployment environment variable query [<environment>] [--environment <ENVIRONMENT>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket deployment environments query [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
@@ -80,10 +86,18 @@ atlx bitbucket pull-requests tasks (hidden) <ID> (required) [-w/--workspace <WOR
 atlx bitbucket pull-requests unapprove <ID> (required) [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket pull-requests update --pull-request <PULL_REQUEST> (required) [--title <TITLE>] [--description <DESCRIPTION>] [--description-file/--desc-file <DESCRIPTION_FILE>] --clear-description [--dest <DEST>] [--reviewer <REVIEWER>,...] [--reviewer-account-id <REVIEWER_ACCOUNT_ID>,...] [--reviewer-uuid <REVIEWER_UUID>,...] [--add-reviewer <ADD_REVIEWER>,...] [--add-reviewer-account-id <ADD_REVIEWER_ACCOUNT_ID>,...] [--add-reviewer-uuid <ADD_REVIEWER_UUID>,...] [--remove-reviewer <REMOVE_REVIEWER>,...] [--remove-reviewer-account-id <REMOVE_REVIEWER_ACCOUNT_ID>,...] [--remove-reviewer-uuid <REMOVE_REVIEWER_UUID>,...] --clear-reviewers --close-source-branch --keep-source-branch --draft --ready [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket repo branches (hidden) [--query <QUERY>] [--limit <LIMIT> [default: 25]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket repo contributors [--ref <GIT_REF>] [--range <RANGE>] [--since <SINCE>] [-n/--limit <LIMIT> [default: 10]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket repo create <SLUG> (required) [--name <NAME>] [-d/--description <DESCRIPTION>] [--language <LANGUAGE>] [--project <PROJECT>] --private --public [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket repo file <PATH> (required) [--ref <GIT_REF>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket repo get [<SLUG>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket repo list-files [--path <PATH>] [--ref <GIT_REF>] [--max-depth <MAX_DEPTH>] [-n/--limit <LIMIT> [default: 100]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket repo query [-q/--query <QUERY>] [-n/--limit <LIMIT> [default: 25]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>] [--project <PROJECT>] [--language <LANGUAGE>] [--sort <SORT> [default: -updated_on]] [--role <ROLE>]
+atlx bitbucket repo url [<SLUG>] [--path <PATH>] [--ref <GIT_REF>] [--line <LINE>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket search code <QUERY>... (required) [--workspace <WORKSPACE>] [--repo <REPO>] [--limit <LIMIT> [default: 25]]
+atlx bitbucket search prs <TEXT> (required) [--scope <SCOPE> {repo|me}] [--field <FIELD> {both|title|description} [default: both]] [--state <STATE> [default: OPEN]] [--role <ROLE> {author|reviewer|participant}] [-n/--limit <LIMIT> [default: 25]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket workspace get [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket workspace member get <MEMBER> (required) [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
+atlx bitbucket workspace member query [-q/--query <QUERY>] --include-permissions [-n/--limit <LIMIT> [default: 50]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx completion script <SHELL> {bash|elvish|fish|powershell|zsh} (required)
 atlx confluence content archive <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes --wait [--wait-timeout <WAIT_TIMEOUT> [default: 120]]
 atlx confluence content attachments delete --attachment-id <ATTACHMENT_ID> (required) --purge -y/--yes
