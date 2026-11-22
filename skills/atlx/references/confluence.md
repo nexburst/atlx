@@ -46,6 +46,8 @@ comments can be resolved.
 These need `--yes`, which needs the person's agreement:
 
 ```sh
+atlx confluence content tasks list --id 12345 --status open
+atlx confluence content status set 12345 --name Review --color '#ffc400' --yes
 atlx confluence content move 12345 --parent-id 67890 --yes
 atlx confluence content trash 12345 --yes
 atlx confluence content versions restore --id 12345 --at-version 6 --yes

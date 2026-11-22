@@ -396,7 +396,7 @@ inferred rows.
 | `confluence content labels unwatch` | ✅ | |
 | `confluence content labels watch` | ✅ | |
 | `confluence content list` | ✅ |  |
-| `confluence content list-available-statuses` | 📋 | #13 (unscheduled); v1 content states |
+| `confluence content list-available-statuses` | ✅ | #71 |
 | `confluence content macros resolve` | 📋 | #13 (unscheduled); v1 async body conversion, to confirm |
 | `confluence content macros resolve-status` | 📋 | #13 (unscheduled); v1 async body conversion, to confirm |
 | `confluence content move` | ✅ | #30; `--target` with `--position` is an atlx extra |
@@ -415,23 +415,23 @@ inferred rows.
 | `confluence content restriction-state set` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content set-owner` | 📋 | #13 (unscheduled); public endpoint to confirm |
 | `confluence content star` | ⛔ | starring is only in the GraphQL gateway |
-| `confluence content status get` | 📋 | #13 (unscheduled); v1 content states |
-| `confluence content status set` | 📋 | #13 (unscheduled); v1 content states |
-| `confluence content tasks complete` | 📋 | #13 (unscheduled); v2 tasks |
-| `confluence content tasks get` | 📋 | #13 (unscheduled); v2 tasks |
-| `confluence content tasks list` | 📋 | #13 (unscheduled); v2 tasks |
-| `confluence content tasks reopen` | 📋 | #13 (unscheduled); v2 tasks |
+| `confluence content status get` | ✅ | #71 |
+| `confluence content status set` | ✅ | #71; needs `--state-id` or both `--name` and `--color`; publishes a new version |
+| `confluence content tasks complete` | ✅ | #71 |
+| `confluence content tasks get` | ✅ | #71 |
+| `confluence content tasks list` | 🟡 | #71: pages and blog posts, the two `--content-type` values REST can filter by; without `--id`, every visible task |
+| `confluence content tasks reopen` | ✅ | #71 |
 | `confluence content trash` | 🟡 | #13: pages and blog posts only |
 | `confluence content unarchive` | ⛔ | no public REST endpoint |
 | `confluence content unstar` | ⛔ | starring is only in the GraphQL gateway |
 | `confluence content untrash` | 🟡 | #65: pages and blog posts only (REST v2) |
-| `confluence content unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
+| `confluence content unwatch` | ✅ | #71; watches for the caller |
 | `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#13). `--minor-edit` is sent but absent from the v2 request schema, so Confluence may ignore it (#65). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
 | `confluence content versions diff` | ✅ | computed locally from the two bodies |
 | `confluence content versions get` | ✅ | |
 | `confluence content versions list` | ✅ | |
 | `confluence content versions restore` | ✅ | v1 restore operation |
-| `confluence content watch` | 📋 | #13 (unscheduled); v1 user/watch |
+| `confluence content watch` | ✅ | #71; watches for the caller |
 | `confluence group get` | 📋 | #13 (unscheduled); v1 groups |
 | `confluence remix infographic create` | ⛔ | AI generation (Atlassian AI) |
 | `confluence remix infographic edit` | ⛔ | AI generation (Atlassian AI) |
@@ -448,8 +448,8 @@ inferred rows.
 | `confluence space instructions set` | ⛔ | Rovo space instructions |
 | `confluence space list` | ✅ | `--labels` adds a `labels` array to each space (#18) |
 | `confluence space me` | ✅ |  |
-| `confluence space permission available` | 📋 | #13 (unscheduled); v2 space permissions |
-| `confluence space permission list` | 📋 | #13 (unscheduled); v2 space permissions |
+| `confluence space permission available` | ✅ | #71 |
+| `confluence space permission list` | ✅ | #71 |
 | `confluence space role assignment list` | 📋 | #13 (unscheduled); v2 space roles |
 | `confluence space role create` | 📋 | #13 (unscheduled); v2 space roles |
 | `confluence space role get` | 📋 | #13 (unscheduled); v2 space roles |
@@ -459,11 +459,11 @@ inferred rows.
 | `confluence space star` | ⛔ | starring is only in the GraphQL gateway |
 | `confluence space unarchive` | ✅ | #30 |
 | `confluence space unstar` | ⛔ | starring is only in the GraphQL gateway |
-| `confluence space unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
+| `confluence space unwatch` | ✅ | #71; `--space-id` takes a key, ID, ARI or URL, not a name |
 | `confluence space update` | ✅ | #30; `--homepage` is an atlx extra |
-| `confluence space watch` | 📋 | #13 (unscheduled); v1 user/watch |
-| `confluence templates get` | 📋 | #13 (unscheduled); v1 templates |
-| `confluence templates list` | 📋 | #13 (unscheduled); v1 templates |
+| `confluence space watch` | ✅ | #71; `--space-id` takes a key, ID, ARI or URL, not a name |
+| `confluence templates get` | ✅ | #71 |
+| `confluence templates list` | ✅ | #71; `--query` and `--cursor` are applied client-side, as REST v1 has neither |
 | `confluence tree` | ✅ | #30; pages or whole spaces, depth 10, at most 500 nodes then `truncated`; `--type` keeps the containers of matches |
 | `confluence content children` | ➕ | direct children of a page |
 | `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge`, which need `--yes` (#30); here no confirmation is asked and `--yes` is ignored (#18) |

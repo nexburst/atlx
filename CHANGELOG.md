@@ -11,6 +11,10 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Confluence (#71): `content tasks list|get|complete|reopen`, `content
+  status get|set`, `content list-available-statuses`, `content
+  watch|unwatch`, `space watch|unwatch`, `space permission list|available`
+  and `templates list|get`.
 - Jira in bulk (#69): `jira workitem bulk-get|create-bulk|bulk-transition|
   archive|unarchive`, `jira workitem property get|query|set|delete`, and
   `user get|bulk-lookup`. A bulk transition needs `--yes`; partial results

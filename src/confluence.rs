@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 pub mod attachments;
 pub mod comments;
 pub mod edits;
+pub mod extras;
 pub mod formats;
 pub mod history;
 pub mod labels;
