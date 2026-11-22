@@ -7,8 +7,8 @@
 //! - `compat/coverage.txt`: share of twg leaf commands atlx accepts. The test
 //!   fails if coverage drops; rerun with `UPDATE_COVERAGE=1` to record a rise.
 //!
-//! The twg inventory (`compat/twg-<version>.txt`) is produced by
-//! `scripts/twg-inventory.sh` and the atlx tree by `tests/cli_tree.rs`.
+//! The inventory (`compat/twg-<version>.txt`) is kept by hand from Atlassian's
+//! public commands catalog, and the atlx tree comes from `tests/cli_tree.rs`.
 
 use atlx::cli::Cli;
 use clap::Parser;

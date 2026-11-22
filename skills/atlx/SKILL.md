@@ -51,7 +51,7 @@ More in the references, which you should open only as needed:
 3. `--yes` records the person's consent. It isn't a way past an error. If a
    command asks for it and they haven't agreed to that action, ask them.
 4. A missing confirmation doesn't mean a command is harmless. Several act at
-   once, as in twg: Jira work item, comment, sprint, version and component deletes,
+   once: Jira work item, comment, sprint, version and component deletes,
    version merge, and pull request merge and decline. Confirm those with the
    person first.
    `jsm approval approve|reject` decides as the person, and `jsm request
@@ -120,6 +120,6 @@ atlx bb pipeline get --pipeline 101 --test-reports --repo acme/api
 
 ## Exit codes
 
-`0` success, `1` failure, `2` a twg command atlx can't support, `3` a batch
+`0` success, `1` failure, `2` a command atlx can't support, `3` a batch
 read where only some inputs failed. `bb pipeline tail` also exits `1` when the
 pipeline fails. See `references/output-and-errors.md`.

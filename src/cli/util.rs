@@ -72,7 +72,7 @@ pub(crate) fn concurrency_arg(s: &str) -> std::result::Result<usize, String> {
 /// Run `f` for each input, up to `concurrency` at a time on scoped threads.
 /// One input returns its result directly; several return `{items: [{input,
 /// ok, data|error}], summary: {requested, returned, succeeded, failed,
-/// omitted, truncated}}` like twg's batch reads, in input order.
+/// omitted, truncated}}`, in input order.
 /// Without `strict`, some failures mark the run partial (exit 3); if every
 /// input fails, or any fails with `strict`, the batch is an error whose class
 /// and status are those of the first failure in input order.

@@ -354,7 +354,7 @@ pub fn normalize_site(s: &str) -> String {
         .or_else(|| s.strip_prefix("http://"))
         .unwrap_or(s);
     let s = s.trim_end_matches('/');
-    // twg accepts a bare site prefix: `acme` -> `acme.atlassian.net`.
+    // A bare site prefix is accepted: `acme` -> `acme.atlassian.net`.
     if s.contains('.') {
         s.to_string()
     } else {

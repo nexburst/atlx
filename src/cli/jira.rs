@@ -1390,11 +1390,11 @@ fn weblink(c: &client::Client, key: &str, w: &jira::Weblink) -> Result<Value> {
         .data(jira::link_remote(c, key, w)?))
 }
 
-/// Default page size of the offset-paged work item lists, as in twg.
+/// Default page size of the offset-paged work item lists.
 const PAGE: usize = 100;
 
 /// `request` for an offset-paged work item list. A numeric cursor is
-/// echoed as a number, as twg does.
+/// echoed as a number.
 fn page_request(c: &client::Client, key: &str, first: Option<usize>, after: Option<&str>) -> Value {
     let mut r = json!({"site": jira::site(c), "issueId": key});
     if let Some(f) = first {
@@ -1422,7 +1422,7 @@ fn offset_envelope(
         .data(page.data)
 }
 
-/// Add a top-level `warnings` list after `meta`, as twg prints it.
+/// Add a top-level `warnings` list after `meta`.
 fn with_warning(mut out: Value, warning: &str) -> Value {
     out["warnings"] = json!([warning]);
     out
@@ -1576,7 +1576,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             let data = batch(inputs, strict, batch_concurrency, |k| {
                 jira::get(c, k, &opts)
             })?;
-            // One work item prints as a one-element list, as in twg.
+            // One work item prints as a one-element list.
             let data = if single { json!([data]) } else { data };
             Ok(envelope("jira.workitem.get", "jira.workitem")
                 .request(request)

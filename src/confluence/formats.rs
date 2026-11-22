@@ -152,7 +152,7 @@ fn type_doc(t: GuideType) -> String {
     }
 }
 
-/// `content body-formats [format] [--content-type]`, as twg prints it:
+/// `content body-formats [format] [--content-type]`:
 /// `{format, validFormats, doc}` or `{contentType, validFormats, doc}`. An
 /// unknown format shows the index.
 pub fn guide(format: Option<&str>, content_type: Option<GuideType>) -> Result<Value> {

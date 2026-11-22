@@ -112,7 +112,7 @@ pub struct RepoQuery<'a> {
     pub limit: usize,
 }
 
-/// `bitbucket repo query`: REST repositories as a list, as twg prints them.
+/// `bitbucket repo query`: REST repositories as a list.
 pub fn repo_query(c: &Client, ws: &str, o: &RepoQuery) -> Result<Value> {
     let mut f = Vec::new();
     if let Some(q) = o.query {

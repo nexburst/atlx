@@ -9,30 +9,37 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ## [Unreleased]
 
+### Changed
+
+- atlx no longer presents itself as a twg alternative or compares itself with
+  twg. The scripts that ran twg side by side with atlx
+  (`scripts/conformance.sh`, `twg-fixtures.sh`, `twg-inventory.sh`) are
+  removed, and the command inventory is now kept by hand from Atlassian's
+  public commands catalog.
+
 ### Security
 
 - `confluence content create`, `update` and `delete` (including `--purge`)
-  wrote without confirmation where twg refuses. They now need `--yes`.
+  wrote without confirmation. They now need `--yes`.
   `update` needs `--snapshot-token`, so it can't overwrite a newer edit
   unseen, and a body needs `--format` and `--ack-body-formats`. Scripts that
   relied on the old behavior must add these flags.
 
 ### Fixed
 
-- Output that differed from twg 1.4.4 on a live site. **These shapes
-  changed:** `jira board get` (a list, `--id` repeats), `filter query` and
+- Output shapes made consistent. **These shapes changed:** `jira board get` (a list, `--id` repeats), `filter query` and
   `space versions query` (the page object), `space status query`
   (`{statuses}`), `space issue-types` (`{space, issueTypes}`), `workitem
   bulk-get` and `user bulk-lookup` (`{items, summary}`), `workitem property
   query` and `worklog changed|deleted` (bare lists).
 - `jira space query` returns 50 spaces by default, not 25.
-- JSONL prints an empty page as one row, as twg does.
+- JSONL prints an empty page as one row.
 - `user bulk-lookup` prints its result when it fails, and exits 0 on a
   partial result without `--strict`.
-- `whoami` and `user get`: `locale` is spelled `en-US`, `zoneinfo` is null as
-  in twg, and Jira's time zone is the extra key `timeZone`.
+- `whoami` and `user get`: `locale` is spelled `en-US`, `zoneinfo` is null,
+  and Jira's time zone is the extra key `timeZone`.
 - `bb repo url` also prints `workspace` and `repo`; resource types and
-  request echoes follow twg where they were seen live.
+  request echoes are made consistent.
 
 ### Added
 
@@ -60,8 +67,7 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 - Confluence lifecycle (#30): `content move|copy|trash|untrash|purge|archive|
   publish|delete-draft`, `create --private --content-width --title-emoji`,
   `space create|update|archive|unarchive|delete`, and `tree` for whole
-  spaces, with `--type`, depth 10 and a 500-node cap. Writes need `--yes`
-  where twg's do; `space delete` refuses content URLs.
+  spaces, with `--type`, depth 10 and a 500-node cap. Writes need `--yes`; `space delete` refuses content URLs.
 - Jira administration (#26): space lifecycle and lookups, versions,
   components, saved filters, and `jira workitem query --filter`. Space
   delete (to the trash), archive and restore need `--yes` and accept only an
@@ -81,7 +87,7 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   get|reply|update|delete|resolve|reopen`, inline comments with `create
   --text-selection`, and `list --include-replies --sort --status
   --resolution-status --content-type --reference-space`. `delete` needs
-  `--yes`, as in twg; resolution is for inline comments only.
+  `--yes`; resolution is for inline comments only.
 - Jira Agile (#25): `jira sprint get|create|update|start|complete|delete`,
   `jira board get|create|delete`, `board backlog|projects|quick-filter
   query`, `board quick-filter get`, and `--sprint`, `--story-points`,
@@ -90,21 +96,20 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 - Jira collaboration commands (#24): `jira workitem attachment
   query|get|download|thumbnail|upload|delete`, `worklog
   add|update|query|get|delete|changed|deleted`, `watcher query|add|remove`
-  and `vote query|add|remove`. Attachment and worklog deletes need `--yes`,
-  as in twg.
+  and `vote query|add|remove`. Attachment and worklog deletes need `--yes`.
 - Confluence versions, labels and attachments (#28): `content versions
   list|get|diff|restore` (also `content history list|get|diff`), `labels
   add|remove|watch|unwatch`, `labels list --content-type --reference-space`,
   `attachments list|get|download|upload|delete`, an offline `content
-  body-formats` guide and `content get --format url`. Commands confirm with
-  `--yes` where twg's do. A download without `--out` refuses hidden or
+  body-formats` guide and `content get --format url`. Destructive commands confirm
+  with `--yes`. A download without `--out` refuses hidden or
   otherwise unsafe file names from the server.
-- Jira triage commands with twg's names and output (#23): `jira workitem
+- Jira triage commands (#23): `jira workitem
   comment query|update|delete`, `comment create --parent-id`, `changelog
   query`, `field update-metadata`, `link query`, `unlink workitem|weblink`,
   `delete`, `types query|get`, `statuses query` and `priorities query`.
   Comment and changelog pages print `pageInfo` with the next `--after`
-  cursor. Deletes ask for no confirmation, as in twg.
+  cursor. Deletes ask for no confirmation.
 
 - Bitbucket pull request review loop (#31): `comment create --reply-to
   --pending` and inline anchors (`--path` with `--line`, `--from-line` or a
@@ -112,25 +117,25 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   `comment query|get|update|delete|resolve|reopen`; `task
   create|get|update|delete|resolve|reopen`; `diffstat`, `commits`, `patch`;
   and `diff-line`, which finds diff lines by text and gives the line numbers
-  an inline comment needs. Comment and task `delete` need `--yes`, as in twg.
+  an inline comment needs. Comment and task `delete` need `--yes`.
 
 - Confluence section reads and targeted edits (#27): `content get --detail
   outline` (headings with level, anchor, ADF `localId` and word count),
   `--section <heading>` (repeatable; Markdown by default, the exact storage
   slice with `--format html`), the atlx-extra `--format adf`, and
-  `content update --edits`/`--edits-file` with twg's `localId` operations
+  `content update --edits`/`--edits-file` with `localId` operations
   plus heading- and text-based extras. Edits apply all-or-nothing to the ADF
   body, honour `--snapshot-token`, and `--dry-run` prints the resulting HTML
   and a unified diff without writing.
 
-- twg's global output controls: `--select` (dot-path projection with
+- Global output controls: `--select` (dot-path projection with
   `@compact`, `@evidence` and `@rows` presets), `--output-file`,
   `--output-summary [none|stats|auto|inline]` with its YAML envelope,
   `--agent-fields`, and `--api-version v2`. `confluence content get
   --body-only --output-file` keeps the snapshot token on stdout (#19).
 
 - `atlx completion script <bash|zsh|fish|powershell|elvish>` prints a shell
-  completion script, using the same command shape as twg (#35).
+  completion script (#35).
 - Man pages generated from the command tree, shipped in release archives (#35).
 - Release workflow: tagged cross-platform builds for Linux (gnu and static
   musl, x86_64 and aarch64), macOS (x86_64 and Apple silicon) and Windows
@@ -152,7 +157,7 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   run lazily with a 10 s timeout. `whoami` and `doctor` report the active
   profile and token source (#20).
 
-- twg 1.4.4 command names and flags for commands that had drifted (#18):
+- Command names and flags aligned with twg 1.4.4's command paths (#18):
   `jira space query|list|get`, `jira board query`, `jira board sprints query`,
   `jira sprint workitems query`, `jira workitem field create-metadata` (also
   `custom-fields`), `jira workitem link-types query`, `jira workitem link
@@ -170,34 +175,29 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   pull-requests get` and `bb pull-requests activity`: batch reads now run in
   parallel on scoped threads and keep the input order (#18).
 
-- `scripts/conformance.sh` compares twg's and atlx's JSON on a live site
-  (read-only; outputs stay in the git-ignored `target/conformance/`), and
-  `scripts/twg-fixtures.sh` turns a run into the synthetic fixtures behind
-  `tests/twg_shapes.rs` (#21).
-- twg commands that need Teamwork Graph, Rovo or the GraphQL gateway (`rovo`,
+- Commands that need Teamwork Graph, Rovo or the GraphQL gateway (`rovo`,
   `work`, `context`, `jira board cells query`, ...) fail with "not supported
-  by atlx (requires Teamwork Graph)" in twg's error envelope and exit code 2.
-  Planned twg commands fail with a pointer to their issue (#21).
+  by atlx (requires Teamwork Graph)" and exit code 2.
+  Planned commands fail with a pointer to their issue (#21).
 - `user search --compact` (#21).
 
 ### Changed
 
-- **JSON output now matches twg** (#21). Jira, Confluence, user and account
-  commands print twg's envelope (`apiVersion`, `command`, `request`, `data`,
-  `pageInfo`, `meta`) with twg's key names, which are mostly the REST APIs'
-  own: `jira workitem get` prints `data: [<issue>]` with REST fields next to
+- **New JSON output envelope** (#21). Jira, Confluence, user and account
+  commands print an envelope (`apiVersion`, `command`, `request`, `data`,
+  `pageInfo`, `meta`) with key names that are mostly the REST APIs' own: `jira workitem get` prints `data: [<issue>]` with REST fields next to
   `key`, `query`/`search` print `data.issues` rows and `pageInfo.nextCursor`
   instead of `next_cursor`, `transitions query` prints `{id, name, toName,
   category}`, `space query` prints `projects`, `board query` `boards`, and
-  `whoami` twg's profile fields. Bitbucket commands print Bitbucket's REST
-  objects without an envelope, as twg does. Batches gain `returned`,
-  `omitted` and `truncated` counts. `-o jsonl` adds twg's `_twg` locator to
+  `whoami` profile fields. Bitbucket commands print Bitbucket's REST
+  objects without an envelope. Batches gain `returned`,
+  `omitted` and `truncated` counts. `-o jsonl` adds a `_twg` locator to
   each row. The old snake_case summary keys are gone, and `--select` presets
   no longer carry fallbacks for them.
-- `user search` returns 20 users by default, as twg does (was 25).
-- `jira space query` sorts by key unless `--sort-by` is given, as twg does.
-- Merge and decline no longer require `--yes`,
-  matching twg; `--yes` is still accepted and ignored (#18).
+- `user search` returns 20 users by default (was 25).
+- `jira space query` sorts by key unless `--sort-by` is given.
+- Merge and decline no longer require `--yes`;
+  `--yes` is still accepted and ignored (#18).
 - The 0.1 names (`jira project`, `jira board list`, `jira sprint list|issues`,
   `jira workitem create-meta`, `jira workitem link types|create|remote`, `bb
   repo branches`, `bb pull-requests tasks`, positional `labels`/`comments`/
@@ -205,11 +205,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   work but are hidden from help. In text mode on a terminal they print a
   one-line note naming the new form; they will be removed in 0.3 (#18).
 - `atlx logout` removes only the selected profile (the whole file only when
-  nothing else is left), as twg does (#20).
+  nothing else is left) (#20).
 - `login` and `setup bitbucket` accept `-f` for `--force`, and `setup bb` is an
-  alias of `setup bitbucket`, matching twg (#20).
+  alias of `setup bitbucket` (#20).
 
-- Errors follow twg: in JSON modes an `{"ok": false, "error": {...}}` envelope
+- Structured errors: in JSON modes an `{"ok": false, "error": {...}}` envelope
   goes to stdout and a readable report to stderr. Every failure exits 1
   (clap argument errors included, previously 2), and a partly failed batch
   read exits 3. Batch items now carry structured errors plus a `summary`, and
@@ -244,7 +244,7 @@ First release.
 
 ### Added
 
-- twg-compatible commands for Jira (`jira workitem get/search/query/create/
+- Commands for Jira (`jira workitem get/search/query/create/
   update/comment create/transition/transitions query`), Confluence (`confluence
   search query/text`, `content get/create/update/list`, `space get`) and
   Bitbucket (`bb repo`, `bb pull-requests`, `bb pipeline`), on the public REST
@@ -260,8 +260,7 @@ First release.
 - Bitbucket PR diff, activity and tasks; approve, request changes, merge and
   decline; repository files and branches; code search (#5).
 - `atlx doctor` for config, permission and connectivity checks; GitHub Actions
-  CI on Linux, macOS and Windows; `cargo binstall` metadata; twg compatibility
-  notes in the README (#6).
+  CI on Linux, macOS and Windows; `cargo binstall` metadata (#6).
 - Offline mock-HTTP integration tests and opt-in live smoke tests (#2).
 
 ### Fixed

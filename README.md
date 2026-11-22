@@ -1,38 +1,36 @@
 # atlx
 
-An open, agent-friendly CLI for **Jira**, **Confluence** and **Bitbucket** Cloud.
-A community alternative to Atlassian's [`twg`](https://github.com/atlassian/twg-cli)
-built only on the public REST APIs: no Teamwork Graph, Rovo credits or early-access
-program needed, just an API token.
-
-**Follows twg's command tree.** atlx uses twg's command paths and flag names for
-Jira, Confluence and Bitbucket, and the goal is that any twg invocation for those
-products works unchanged with `atlx`:
+An open, agent-friendly CLI for **Jira**, **Confluence** and **Bitbucket** Cloud,
+built only on Atlassian's public REST APIs. All it needs is an API token.
 
 ```sh
-twg  jira workitem get PROJ-1 --comments -o json
 atlx jira workitem get PROJ-1 --comments -o json
+atlx confluence content get 12345 --detail full --format md
+atlx bb pull-requests query --repo acme/web --state OPEN
 ```
 
-Coverage is not complete yet. [COMPAT.md](COMPAT.md) lists every twg 1.4.4
-command with its status in atlx, and CI checks it against the parser.
+**Familiar command names.** Commands are grouped by product and resource, and
+use the same command paths and flag names as Atlassian's `twg` CLI where both
+cover a feature, so people who know one find their way in the other.
+[COMPAT.md](COMPAT.md) lists, for each command path in twg 1.4.4's command
+tree, whether atlx has it. atlx is independent: it is not a twg replacement,
+and it makes no claim about how twg behaves.
 
-Global flags match too: `-o/--output text|json|jsonl`, `-s/--site` (prefix like
-`acme` or a hostname), `-u/--user`, `-p/--profile`, `--timeout-ms`, and the
-output controls `--select`, `--agent-fields`, `--output-file`,
-`--output-summary` and `--api-version` (see [Output controls](#output-controls)).
-When stdout is piped, atlx defaults to JSON.
-
-**Prints twg's JSON.** Output uses twg's envelope and key names (see
-[JSON output](#json-output)), so jq paths and `--select` presets written for
-twg, such as `.data.issues[].key`, work on atlx output as they are.
+Global flags: `-o/--output text|json|jsonl`, `-s/--site` (prefix like `acme`
+or a hostname), `-u/--user`, `-p/--profile`, `--timeout-ms`, and the output
+controls `--select`, `--agent-fields`, `--output-file`, `--output-summary` and
+`--api-version` (see [Output controls](#output-controls)). When stdout is
+piped, atlx defaults to JSON, in a stable envelope (see
+[JSON output](#json-output)).
 
 ## Install
 
-Prebuilt binaries are published on the
-[releases page](https://github.com/nexburst/atlx/releases) for Linux
+**No release has been published yet**, so for now install from source (see
+the end of this section). The first release will publish prebuilt binaries on
+the [releases page](https://github.com/nexburst/atlx/releases) for Linux
 (x86_64 and aarch64 glibc, plus a static x86_64 musl build), macOS (Intel and
-Apple silicon) and Windows (x86_64 and ARM64).
+Apple silicon) and Windows (x86_64 and ARM64), and the crate on crates.io.
+The commands below apply from then on.
 
 **cargo-binstall** downloads the matching archive without compiling anything:
 
@@ -117,7 +115,7 @@ Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
 ### Profiles
 
 Several sites or workspaces can live side by side as named profiles, chosen
-with `-p/--profile <name>` or `ATLX_PROFILE` (as with twg, `-p default` means
+with `-p/--profile <name>` or `ATLX_PROFILE` (`-p default` means
 the saved default):
 
 ```sh
@@ -161,7 +159,7 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 
 ## Commands
 
-| twg-compatible command | Notes |
+| Command | Notes |
 | --- | --- |
 | `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth; `-p/--profile`, `login --new-profile`, `--token-cmd` (atlx extra) |
 | `auth profile list`, `auth profile default`, `auth profile rename`, `auth profile migrate` | Profiles in `config.toml`; `list` never shows tokens |
@@ -194,11 +192,11 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira board get\|create\|delete`, `jira board backlog\|projects\|quick-filter query` | `get` prints a list (`--id` repeats) and adds columns and estimation; backlog takes `--active-quick-filters`, `--jql`, `--limit`; `delete` needs `--yes` |
 | `jira workitem create\|update` planning flags | `--sprint <id\|name\|none>`, `--story-points`, `--original-estimate`, `--remaining-estimate` (durations, or seconds), `--team <id\|none>` |
 | `jira space create\|update\|delete\|archive\|restore` | `delete` (to the trash), `archive` and `restore` need `--yes` and an exact key, ID, ARI or `/projects/` URL |
-| `jira space versions query`, `jira space version create\|get\|update\|delete\|merge\|move\|counts`, `jira space component query\|get\|create\|update\|delete\|counts` | deletes and merges ask for no confirmation, as in twg |
+| `jira space versions query`, `jira space version create\|get\|update\|delete\|merge\|move\|counts`, `jira space component query\|get\|create\|update\|delete\|counts` | deletes and merges ask for no confirmation |
 | `jira space issue-types`, `status query`, `types query`, `notification-scheme get` | lookups by space |
 | `jira filter query\|get\|create\|update\|delete`, favourites, `columns`, `share`, `subscription query` | filters by ID, URL or exact name; `delete`, `reset-columns` and `share remove` need `--yes`; `jira workitem query --filter <id\|name>` runs one |
 | `jsm request create\|validate\|get\|query`, `comment list\|create`, `participant list\|add\|remove`, `transition query\|create` | `--answer "Question=value"` takes option labels; `validate` creates nothing; comments are **public to customers** unless `--internal`; participant `remove` needs `--yes` |
-| `jsm approval list\|get\|approve\|reject`, `jsm sla get`, `jsm queue query`, `jsm queue workitems query` | approve and reject act as you, without a confirmation, as in twg |
+| `jsm approval list\|get\|approve\|reject`, `jsm sla get`, `jsm queue query`, `jsm queue workitems query` | approve and reject act as you, without a confirmation |
 | `jsm portal query` / `servicedesk query`, `jsm request-type query\|field get\|form get`, `jsm knowledge-article query` | service desks by ID, project key or exact name |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
@@ -209,14 +207,14 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `confluence content labels add\|remove --id --label a,b`, `labels watch\|unwatch --name` | `--prefix`; `remove`, `watch` and `unwatch` need `--yes` |
 | `confluence content attachments list\|get\|download\|upload\|delete` | `download --out --at-version --force`; `upload --file` (repeatable) `--comment --minor-edit`; `delete --purge`; `upload` and `delete` need `--yes` |
 | `confluence content body-formats [format]` | offline guide to what each body format reads, writes and loses; `content get --format url` prints just the web address |
-| `confluence content move\|copy\|trash\|untrash\|purge\|archive\|publish\|delete-draft` | all need `--yes`, as in twg; `purge` only deletes what is in the trash; `create` also takes `--private`, `--content-width`, `--title-emoji` |
+| `confluence content move\|copy\|trash\|untrash\|purge\|archive\|publish\|delete-draft` | all need `--yes`; `purge` only deletes what is in the trash; `create` also takes `--private`, `--content-width`, `--title-emoji` |
 | `confluence content tasks list\|get\|complete\|reopen`, `confluence content status get\|set`, `confluence content list-available-statuses` | `tasks list --id --status open`; `--task-id`; `status set <id>` takes `--state-id` or `--name --color`, and `--yes` |
 | `confluence content watch\|unwatch`, `confluence space watch\|unwatch`, `confluence space permission list\|available`, `confluence templates list\|get` | watches need `--yes`; `--key` or `--space-id`; `templates list --space-id --scope --query` |
 | `confluence space create\|update\|archive\|unarchive\|delete` | all need `--yes`; `delete` is permanent and takes only an exact key, ID, ARI or space URL; `create --dry-run` |
 | `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
 | `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |
 | `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |
-| `bb pull-requests comment create\|query\|get\|update\|delete\|resolve\|reopen`, `task create\|get\|update\|delete\|resolve\|reopen`, `diffstat\|commits\|patch\|diff-line` | `--reply-to`, `--pending`, inline `--path` with `--line`/`--from-line` or `--start-line --end-line`/`--start-from-line --end-from-line`; `diff-line --text [--path]` finds the line numbers to comment on; comment and task `delete` need `--yes`, as in twg |
+| `bb pull-requests comment create\|query\|get\|update\|delete\|resolve\|reopen`, `task create\|get\|update\|delete\|resolve\|reopen`, `diffstat\|commits\|patch\|diff-line` | `--reply-to`, `--pending`, inline `--path` with `--line`/`--from-line` or `--start-line --end-line`/`--start-from-line --end-from-line`; `diff-line --text [--path]` finds the line numbers to comment on; comment and task `delete` need `--yes` |
 | `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `merge --pull-request`, `--merge-strategy merge_commit\|squash\|fast_forward`, `--merge-message`, `--close-source-branch`/`--keep-source-branch`; no confirmation prompt |
 | `bb pull-requests update`, `create --reviewer` | reviewers by name, nickname, account ID, `{uuid}` or `me`; `--add-reviewer`, `--remove-reviewer`, `--clear-reviewers`, `--draft`/`--ready`; `create --default-reviewers` |
 | `bb pull-requests mergeability\|merge-status\|conflicts\|for-commit\|remove-request-changes` | `merge --wait [--wait-timeout 90]`; mergeability lists `blockers`, and what it could not check as `unchecked` |
@@ -237,8 +235,8 @@ positional forms of `confluence content labels`, `comments list|create` and
 `pull-requests merge`, and the `--inline`, `--format`, `--strategy` and
 `--message` flags they used) still work but are hidden from help. In text mode
 on a terminal they print a one-line note naming the new form; JSON and piped
-output stay clean. They will be removed in 0.3. Like twg, merge and decline
-ask for no confirmation, and `confluence content create`, `update` and `delete`
+output stay clean. They will be removed in 0.3. Merge and decline ask for
+no confirmation, and `confluence content create`, `update` and `delete`
 refuse to write without `--yes`.
 
 atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
@@ -263,7 +261,7 @@ it can't drift from the CLI.
 
 ### Body formats
 
-Like twg, bodies default to `html` and accept `markdown` and `plain`. Confluence
+Bodies default to `html` and accept `markdown` and `plain`. Confluence
 stores HTML as-is. Jira descriptions/comments are converted to ADF: headings,
 nested lists, task lists, tables, code blocks, quotes, links, images, line
 breaks and bold/italic/underline/strikethrough/code marks survive. Reads
@@ -275,15 +273,12 @@ reported inline (`{"error": ...}`) so the other results still come through.
 
 ## Output controls
 
-These global flags behave as in twg, so agent workflows written for twg work
-unchanged.
-
 - **`--select <paths>`** keeps only the listed comma-separated dot paths of the
   JSON or JSONL output, e.g. `--select data.issues.key,data.issues.status.name`. A step that
   meets an array applies to every element, and the result keeps the original
   nesting. Paths that don't exist are skipped; if none matches, the full output
   is printed with a warning on stderr. A leading `data.` is optional, and
-  the envelope's `apiVersion`, `command` and `meta` are kept, as in twg.
+  the envelope's `apiVersion`, `command` and `meta` are kept.
   `@compact`, `@evidence` and `@rows` expand to a
   per-command list (Jira work items, Confluence pages and search, Bitbucket
   repositories, pull requests and pipelines, user search); an unknown preset is
@@ -312,8 +307,7 @@ unchanged.
 
 ## JSON output
 
-JSON output follows twg 1.4.4. Jira, Confluence, user and account commands
-print an envelope:
+Jira, Confluence, user and account commands print an envelope:
 
 ```json
 {
@@ -326,24 +320,22 @@ print an envelope:
 }
 ```
 
-- `command` is twg's operation name, which is not always the CLI path
+- `command` is the operation name, which is not always the CLI path
   (`jira.workitem.transitions` for `transitions query`, `user-search.query`
   for `user search`, `user.get` for `whoami`). `request` echoes the inputs.
   `pageInfo` appears only when there is another page (Jira comment and
-  changelog pages always print it, as twg does); pass its `nextCursor` to
+  changelog pages always print it); pass its `nextCursor` to
   `--after`.
-- `data` holds twg's key names. Most are Jira's and Confluence's own REST
-  names: `jira workitem get` prints the REST issue with its fields next to
+- `data` mostly keeps Jira's and Confluence's own REST key names: `jira workitem get` prints the REST issue with its fields next to
   `key` (`.data[0].status.name`, `.data[0].description` as ADF), `query` and
   `search` print compact rows (`.data.issues[]`), `space query` prints
   `projects`, `board query` prints `boards`. Avatar and icon URLs are left
-  out, as twg does.
+  out.
 - Reading several IDs at once (`jira workitem get A B`, `confluence content
   get 1 2`) gives `data: {items: [{input, ok, data | error}], summary:
   {requested, returned, succeeded, failed, omitted, truncated}}`, mirrored in
   `meta.acquisition`.
-- Bitbucket commands print Bitbucket's REST objects without an envelope, as
-  twg does: `repo query` is a list of repositories, `pull-requests query` is
+- Bitbucket commands print Bitbucket's REST objects without an envelope: `repo query` is a list of repositories, `pull-requests query` is
   `{values, page, pagelen, returned, hasNextPage, hasMore}`, `pull-requests
   get --comments --diff --statuses` adds `_comments`, `_diffstat` and
   `_statuses`, `pipeline query` adds `_repo`, and `pipeline get --logs`
@@ -355,30 +347,24 @@ print an envelope:
   locator `{command, resourceType, collection, index}`.
 - Text output shows the `data` part as fields and tables.
 
-[COMPAT.md](COMPAT.md#json-output-shapes) records which shapes were compared
-with twg on a live site and which were inferred.
+## Scope
 
-## Compatibility with twg
-
-The target is for `atlx` to behave exactly like `twg` for Jira, Confluence and
-Bitbucket Cloud: the same command names, flags, JSON output and confirmation
-behavior. [COMPAT.md](COMPAT.md) tracks how far along that is, command by
-command. These are the intentional differences:
-
-- **API token authentication**: `atlx` uses Atlassian and Bitbucket API tokens
+- **API token authentication**: atlx uses Atlassian and Bitbucket API tokens
   with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
-  environment variables) instead of `twg`'s OAuth flow.
-- **No Teamwork Graph / Rovo commands**: `twg` commands backed by Atlassian's
-  private graph/Rovo APIs (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
-  are intentionally excluded; `atlx` uses only the public REST APIs (with
-  `atlx search` as a cross-product alternative). COMPAT.md marks these ⛔.
-  Running one fails with "not supported by atlx (requires Teamwork Graph)" in
-  twg's error envelope and exit code 2; a twg command that is planned but not
-  built yet fails with a pointer to its issue.
+  environment variables). There is no OAuth flow.
+- **Public REST APIs only**: features that need Atlassian's Teamwork Graph,
+  GraphQL gateway or Rovo (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
+  are out of scope; `atlx search` covers cross-product search over REST.
+  COMPAT.md marks these ⛔. Running one fails with "not supported by atlx
+  (requires Teamwork Graph)" and exit code 2; a command that is planned but
+  not built yet fails with a pointer to its issue.
+- **Not affiliated with Atlassian**, and not a replacement for twg. Shared
+  command names are a convenience; atlx's behavior is defined by this README
+  and its tests, not by another tool.
 
 ## Errors and exit codes
 
-Errors follow `twg`. In `json` and `jsonl` mode (set with `-o`, or the default
+In `json` and `jsonl` mode (set with `-o`, or the default
 when stdout is piped), a failed command prints an error envelope on **stdout**
 (on one line for `jsonl`). A readable report always goes to **stderr**.
 
@@ -400,13 +386,14 @@ when stdout is piped), a failed command prints an error envelope on **stdout**
 }
 ```
 
-- `code` uses twg's codes. `TWG_RATE_LIMITED` (429) and
+- `code` is one of a fixed set, all with a `TWG_` prefix that stays stable
+  for scripts that match on it. `TWG_RATE_LIMITED` (429) and
   `TWG_UPSTREAM_UNAVAILABLE` (502, 503, 504) come with `retry_with_backoff`.
   `TWG_NETWORK_ERROR` and `TWG_REQUEST_TIMEOUT` come with `retry_later`. The
   other codes are `TWG_UPSTREAM_FAILURE` (other 5xx),
   `TWG_TOOL_EXECUTION_FAILED` (other HTTP errors) and `TWG_COMMAND_FAILED`
   (local failures). `kind` is `code` in lower case.
-- `statusCode` is the HTTP status. As in twg, local failures report 400
+- `statusCode` is the HTTP status. Local failures report 400
   (invalid arguments) or 401 (missing credentials). `downstreamError` appears
   only when a server actually answered.
 - `category` (atlx extra) is a stable class: `auth` (401), `forbidden` (403),
@@ -435,7 +422,7 @@ With `--strict`, any failure makes the whole command fail.
 | --- | --- |
 | `0` | Success |
 | `1` | Any failure: API, network, configuration or argument errors (unknown flags included), a `--strict` batch with a failed input, or a batch where every input failed |
-| `2` | A twg command atlx doesn't support because it needs Teamwork Graph, Rovo or the GraphQL gateway (`category: "unsupported"`) |
+| `2` | A command atlx doesn't support because it needs Teamwork Graph, Rovo or the GraphQL gateway (`category: "unsupported"`) |
 | `3` | Partial batch: some, but not all, inputs of a multi-ID read failed. The output is still printed |
 
 `atlx doctor --strict` keeps its own non-zero exit when checks fail. To tell
@@ -446,7 +433,7 @@ failures apart, use the envelope's `category`, `statusCode` and `retry`.
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
 module layout, the "adding a command" checklist and conventions, and
 [AGENTS.md](AGENTS.md) for a condensed version aimed at coding agents. Each
-product's API calls live in `src/<product>.rs`; its twg-shaped commands live in
+product's API calls live in `src/<product>.rs`; its commands live in
 `src/cli/<product>.rs`.
 
 ### Testing

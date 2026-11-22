@@ -1,5 +1,5 @@
-//! Output shapes and exit codes seen when atlx and twg 1.4.4 were run side
-//! by side on a live site, replayed here with synthetic values.
+//! Output shapes and exit codes atlx commits to, checked against mock
+//! responses with synthetic values.
 
 mod common;
 

@@ -196,7 +196,7 @@ impl Shaping {
     }
 
     fn deliver(&self, text: &str, payload: Option<&Value>) {
-        // Like twg, a JSON document written to a file has no final newline.
+        // A JSON document written to a file has no final newline.
         let text = match (self.fmt, payload) {
             (Format::Json, Some(_)) if self.output_file.is_some() || self.summary.is_some() => {
                 text.strip_suffix('\n').unwrap_or(text)

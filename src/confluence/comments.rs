@@ -37,7 +37,7 @@ impl Surface {
 }
 
 /// `--resolution-status`. `Open` also takes in reopened comments and those
-/// whose anchor text was lost, as in twg.
+/// whose anchor text was lost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Resolution {
     Open,

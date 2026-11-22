@@ -469,7 +469,7 @@ pub(super) fn worklog(c: &Client, cmd: WorklogCmd) -> Result<Value> {
     }
 }
 
-/// twg prints the IDs as `data` and where the page ends as `meta.sync`.
+/// The IDs go in `data` and where the page ends as `meta.sync`.
 fn feed_out(kind: &str, site: impl Into<Value>, since: Option<i64>, page: Value) -> Value {
     let sync = json!({
         "type": kind,
