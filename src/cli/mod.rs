@@ -129,6 +129,11 @@ pub(crate) enum Out {
         body: String,
         full: Value,
     },
+    /// Text mode prints `text`; JSON and JSONL print `full`.
+    Doc {
+        text: String,
+        full: Value,
+    },
     /// Print structured output, then exit with a non-zero status code.
     Exit(Value, i32),
 }
@@ -323,6 +328,9 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Jira { cmd } => jira::jira_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::User { cmd } => user::user_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Confluence { cmd } => {
+            if let Some(out) = confluence::offline(&cmd) {
+                return out;
+            }
             return confluence::confluence_cmd(&g.config()?.confluence()?, cmd);
         }
         Cmd::Bitbucket { cmd } => return bitbucket::bb_cmd(&g.config()?, cmd),
