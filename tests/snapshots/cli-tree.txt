@@ -177,6 +177,22 @@ atlx jira board query [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--iss
 atlx jira board quick-filter get --board-id <BOARD_ID> (required) --quick-filter-id <QUICK_FILTER_ID> (required)
 atlx jira board quick-filter query --board-id <BOARD_ID> (required) [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira board sprints query [--id <ID>] [--board-id <BOARD_ID>] [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--issue <ISSUE>] [--state <STATE>] --current [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
+atlx jira dashboard bulk-edit --id <ID>... (required) --action <ACTION> {changeOwner|changePermission|addPermission|removePermission} (required) [--change-owner-details-json <CHANGE_OWNER_DETAILS_JSON>] [--permission-details-json <PERMISSION_DETAILS_JSON>] [--extend-admin-permissions <BOOL> {true|false}] -y/--yes
+atlx jira dashboard copy --id <ID> (required) [--name <NAME>] [--description <DESCRIPTION>] [--share-permissions-json <SHARE_PERMISSIONS_JSON>] [--edit-permissions-json <EDIT_PERMISSIONS_JSON>] [--extend-admin-permissions <BOOL> {true|false}]
+atlx jira dashboard create [--name <NAME>] [--description <DESCRIPTION>] [--share-permissions-json <SHARE_PERMISSIONS_JSON>] [--edit-permissions-json <EDIT_PERMISSIONS_JSON>] [--extend-admin-permissions <BOOL> {true|false}]
+atlx jira dashboard delete --id <ID> (required) -y/--yes
+atlx jira dashboard gadget add --dashboard-id <DASHBOARD_ID> (required) [--module-key <MODULE_KEY>] [--uri <URI>] [--ignore-uri-and-module-key-validation <BOOL> {true|false}] [--gadget-json <GADGET_JSON>] [--title <TITLE>] [--color <COLOR>] [--row <ROW>] [--column <COLUMN>]
+atlx jira dashboard gadget catalog query
+atlx jira dashboard gadget delete --dashboard-id <DASHBOARD_ID> (required) --gadget-id <GADGET_ID> (required) -y/--yes
+atlx jira dashboard gadget query --dashboard-id <DASHBOARD_ID> (required) [--gadget-id <GADGET_ID>...] [--module-key <MODULE_KEY>...] [--uri <URI>...]
+atlx jira dashboard gadget update --dashboard-id <DASHBOARD_ID> (required) --gadget-id <GADGET_ID> (required) [--gadget-json <GADGET_JSON>] [--title <TITLE>] [--color <COLOR>] [--row <ROW>] [--column <COLUMN>]
+atlx jira dashboard get <ID> (required)
+atlx jira dashboard item-property delete --dashboard-id <DASHBOARD_ID> (required) --item-id <ITEM_ID> (required) --property-key <PROPERTY_KEY> (required) -y/--yes
+atlx jira dashboard item-property get --dashboard-id <DASHBOARD_ID> (required) --item-id <ITEM_ID> (required) --property-key <PROPERTY_KEY> (required)
+atlx jira dashboard item-property query --dashboard-id <DASHBOARD_ID> (required) --item-id <ITEM_ID> (required)
+atlx jira dashboard item-property set --dashboard-id <DASHBOARD_ID> (required) --item-id <ITEM_ID> (required) --property-key <PROPERTY_KEY> (required) --value-json <VALUE_JSON> (required)
+atlx jira dashboard query [--dashboard-name <DASHBOARD_NAME>] [--account-id <ACCOUNT_ID>] [--owner <OWNER>] [--group-name <GROUP_NAME>] [--group-id <GROUP_ID>] [--project-id <PROJECT_ID>] [--order-by <ORDER_BY>] [--expand <EXPAND>] [--first <FIRST> [default: 50]] [--start-at <START_AT> [default: 0]]
+atlx jira dashboard update --id <ID> (required) [--name <NAME>] [--description <DESCRIPTION>] [--share-permissions-json <SHARE_PERMISSIONS_JSON>] [--edit-permissions-json <EDIT_PERMISSIONS_JSON>] [--extend-admin-permissions <BOOL> {true|false}]
 atlx jira field list [--query <QUERY>] --custom-only
 atlx jira filter add-favourite --id <ID> (required)
 atlx jira filter change-owner --id <ID> (required) --account-id <ACCOUNT_ID> (required)

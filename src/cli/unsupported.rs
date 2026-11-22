@@ -200,7 +200,7 @@ mod tests {
         );
         assert!(e.message.contains("GraphQL gateway"), "{}", e.message);
 
-        let e = explain(&args("--site acme jira dashboard query")).unwrap();
+        let e = explain(&args("--site acme confluence content analytics 12345")).unwrap();
         assert_eq!(e.kind, ErrorKind::Usage);
         assert!(e.message.contains("planned"), "{}", e.message);
 
