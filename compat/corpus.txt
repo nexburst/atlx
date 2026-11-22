@@ -272,3 +272,11 @@ ok jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop
 ok jsm request comment list --request SD-1
 ok jsm request-type query --portal-id 1
 ok jsm approval list --request SD-1
+
+# --- bulk work items, properties and users (#69) ---
+ok jira workitem bulk-get PROJ-1 PROJ-2 --fields summary,status
+ok jira workitem bulk-transition --ids PROJ-1,PROJ-2 --transition-id 31 --yes
+ok jira workitem archive --id PROJ-1 --id PROJ-2
+ok jira workitem property set --issue-id PROJ-1 --property-key k --value-json '{"a":1}'
+ok user get 5b10ac8d82e05b22cc7d4ef5
+ok user bulk-lookup --email alice@example.com --strict

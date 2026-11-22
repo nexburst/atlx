@@ -247,15 +247,15 @@ inferred rows.
 | `jira sprint start` | ✅ | #25; the start defaults to now and the end is required, or `--duration` (atlx extra); GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira sprint update` | ✅ | #25; partial update; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira sprint workitems query` | ✅ | #18; GraphQL-only `--variables-json` not planned |
-| `jira workitem archive` | 📋 | #13 (unscheduled); REST v3 issue archival |
+| `jira workitem archive` | ✅ | #69; needs an admin on Premium or Enterprise; GraphQL-only `--input-json`, `--source`, `--variables-json` not planned |
 | `jira workitem attachment delete` | ✅ | #24; GraphQL-only `--variables-json` not planned |
 | `jira workitem attachment download` | ✅ | #24; `--out` and `--force` are atlx extras; unsafe server file names need `--output-path`; GraphQL-only `--variables-json` not planned |
 | `jira workitem attachment get` | ✅ | #24; GraphQL-only `--variables-json` not planned |
 | `jira workitem attachment query` | ✅ | #24; GraphQL-only `--variables-json` not planned |
 | `jira workitem attachment thumbnail` | ✅ | #24; `--out` and `--force` are atlx extras; GraphQL-only `--variables-json` not planned |
 | `jira workitem attachment upload` | ✅ | #24; GraphQL-only `--variables-json` not planned |
-| `jira workitem bulk-get` | 📋 | #13 (unscheduled); REST v3 bulkfetch |
-| `jira workitem bulk-transition` | 📋 | #13 (unscheduled); REST v3 bulk transition |
+| `jira workitem bulk-get` | ✅ | #69; 100 per request; prints `issues`, `missing` and `errors` (shape inferred); GraphQL-only `--variables-json` not planned |
+| `jira workitem bulk-transition` | ✅ | #69; returns the task to poll with `atlx api`; notifications are off unless `--send-notifications` |
 | `jira workitem changelog query` | ✅ | #23; one REST page per call, `--after` takes the previous page's `pageInfo.nextCursor`; GraphQL-only `--variables-json` not planned |
 | `jira workitem clone` | 📋 | #13 (unscheduled); read then create |
 | `jira workitem comment create` | ✅ | `--parent-id` sends REST `parentId` (#23; inferred, not checked live); GraphQL-only `--variables-json` not planned |
@@ -263,7 +263,7 @@ inferred rows.
 | `jira workitem comment query` | ✅ | #23; one REST page per call, `--after` takes the previous page's `pageInfo.nextCursor`; GraphQL-only `--variables-json` not planned |
 | `jira workitem comment update` | ✅ | #23; GraphQL-only `--variables-json` not planned |
 | `jira workitem create` | ✅ | GraphQL-only `--variables-json` not planned |
-| `jira workitem create-bulk` | 📋 | #13 (unscheduled); REST v3 bulk create |
+| `jira workitem create-bulk` | 🟡 | #69: `--input-json` takes the REST body (`issueUpdates` or an array), where twg takes GraphQL input; `--board-id`, `--fields`, `--issue-type-id`, `--jql-contexts`, `--kanban-destination`, `--project-id`, `--rank`, `--variables-json` not planned |
 | `jira workitem delete` | ✅ | #23; REST v3 issue delete, no confirmation as in twg; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira workitem field create-metadata` | ✅ | #18; also reachable as `jira workitem custom-fields create-metadata` |
 | `jira workitem field update-metadata` | ✅ | #23; REST v3 editmeta, custom fields unless `--include-system-fields` |
@@ -286,10 +286,10 @@ inferred rows.
 | `jira workitem link-types query` | ✅ | #18; REST returns every link type at once, so the GraphQL paging flags `--after`, `--before`, `--first`, `--last` and `--cloud-id`, `--variables-json` are not planned |
 | `jira workitem priorities query` | ✅ | #23; GraphQL-only `--variables-json` not planned |
 | `jira workitem project-link-candidates query` | ⛔ | Atlassian Projects relationship (Teamwork Graph) |
-| `jira workitem property delete` | 📋 | #13 (unscheduled); REST v3 issue properties |
-| `jira workitem property get` | 📋 | #13 (unscheduled); REST v3 issue properties |
-| `jira workitem property query` | 📋 | #13 (unscheduled); REST v3 issue properties |
-| `jira workitem property set` | 📋 | #13 (unscheduled); REST v3 issue properties |
+| `jira workitem property delete` | ✅ | #69; GraphQL-only `--variables-json` not planned |
+| `jira workitem property get` | ✅ | #69; GraphQL-only `--variables-json` not planned |
+| `jira workitem property query` | ✅ | #69; GraphQL-only `--variables-json` not planned |
+| `jira workitem property set` | ✅ | #69; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira workitem query` | 🟡 | `--before` and `--last` parse but return a usage error: REST search only pages forward (#18); GraphQL-only `--cloud-id`, `--field-sets-input`, `--issue-search-input`, `--namespace`, `--options`, `--save-jqlto-user-history`, `--scope`, `--variables-json`, `--view-config-input` not planned |
 | `jira workitem search` | ✅ |  |
 | `jira workitem similar` | ⛔ | semantic similarity needs Atlassian AI |
@@ -298,7 +298,7 @@ inferred rows.
 | `jira workitem transitions query` | ✅ |  |
 | `jira workitem types get` | ✅ | #23; GraphQL-only `--variables-json` not planned |
 | `jira workitem types query` | ✅ | #23; REST v3 `issuetype/project`; `--id` looks types up as `types get` does; GraphQL-only `--variables-json` not planned |
-| `jira workitem unarchive` | 📋 | #13 (unscheduled); REST v3 issue archival |
+| `jira workitem unarchive` | ✅ | #69; needs an admin on Premium or Enterprise; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira workitem unlink artifact` | 📋 | #13 (unscheduled); delete a remote link (REST v3 remotelink) |
 | `jira workitem unlink branch` | 📋 | #13 (unscheduled); delete a remote link (REST v3 remotelink) |
 | `jira workitem unlink build` | 📋 | #13 (unscheduled); delete a remote link (REST v3 remotelink) |
@@ -563,9 +563,9 @@ inferred rows.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
-| `user bulk-lookup` | 📋 | #13 (unscheduled); REST v3 user/bulk |
+| `user bulk-lookup` | 🟡 | #69: no `--legacy-username` (removed from Jira Cloud REST for privacy); emails match only when visible and exact |
 | `user direct-reports` | ⛔ | reporting lines come from the Teamwork Graph |
-| `user get` | 📋 | #13 (unscheduled); REST v3 user / myself |
+| `user get` | ✅ | #69; profile fields Jira REST has no value for are null |
 | `user manager` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user manager-chain` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user peers` | ⛔ | reporting lines come from the Teamwork Graph |

@@ -11,6 +11,10 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira in bulk (#69): `jira workitem bulk-get|create-bulk|bulk-transition|
+  archive|unarchive`, `jira workitem property get|query|set|delete`, and
+  `user get|bulk-lookup`. A bulk transition needs `--yes`; partial results
+  exit 3.
 - Jira Service Management over the public Service Desk API (#37): `jsm
   request`, `request-type`, `approval`, `portal`/`servicedesk`, `queue`,
   `sla get` and `knowledge-article query`. Request comments are public to

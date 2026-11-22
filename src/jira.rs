@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 pub mod admin;
 pub mod agile;
 pub mod attachments;
+pub mod bulk;
 pub mod people;
 pub mod worklogs;
 
