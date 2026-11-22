@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 mod admin;
 mod agile;
+mod bulk;
 mod collab;
 
 #[derive(Subcommand)]
@@ -589,6 +590,21 @@ pub(crate) enum WorkitemCmd {
     Vote {
         #[command(subcommand)]
         cmd: collab::VoteCmd,
+    },
+    /// Get many work items in one request
+    BulkGet(bulk::GetArgs),
+    /// Create up to 50 work items in one request
+    CreateBulk(bulk::CreateArgs),
+    /// Queue one transition for many work items
+    BulkTransition(bulk::TransitionArgs),
+    /// Archive work items (admins, on Premium or Enterprise)
+    Archive(bulk::ArchiveArgs),
+    /// Bring archived work items back
+    Unarchive(bulk::ArchiveArgs),
+    /// Entity properties on a work item
+    Property {
+        #[command(subcommand)]
+        cmd: bulk::PropertyCmd,
     },
 }
 
@@ -1884,6 +1900,12 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
         WorkitemCmd::Worklog { cmd } => collab::worklog(c, cmd),
         WorkitemCmd::Watcher { cmd } => collab::watcher(c, cmd),
         WorkitemCmd::Vote { cmd } => collab::vote(c, cmd),
+        WorkitemCmd::BulkGet(a) => bulk::get(c, a),
+        WorkitemCmd::CreateBulk(a) => bulk::create(c, a),
+        WorkitemCmd::BulkTransition(a) => bulk::transition(c, a),
+        WorkitemCmd::Archive(a) => bulk::archive(c, a, true),
+        WorkitemCmd::Unarchive(a) => bulk::archive(c, a, false),
+        WorkitemCmd::Property { cmd } => bulk::property(c, cmd),
         WorkitemCmd::Priorities {
             cmd: PrioritiesCmd::Query { id },
         } => {

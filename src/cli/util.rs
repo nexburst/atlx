@@ -41,6 +41,11 @@ pub(crate) fn take_partial() -> bool {
     PARTIAL.swap(false, Ordering::SeqCst)
 }
 
+/// Makes the run exit as partial after its result is printed.
+pub(crate) fn mark_partial() {
+    PARTIAL.store(true, Ordering::SeqCst);
+}
+
 /// Default for `--batch-concurrency`.
 pub(crate) const DEFAULT_CONCURRENCY: usize = 5;
 

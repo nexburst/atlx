@@ -165,7 +165,8 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | --- | --- |
 | `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth; `-p/--profile`, `login --new-profile`, `--token-cmd` (atlx extra) |
 | `auth profile list`, `auth profile default`, `auth profile rename`, `auth profile migrate` | Profiles in `config.toml`; `list` never shows tokens |
-| `user search [name...]` | `--name`/`--query`, `--email`, `--account-id`, `-n/--limit`; returns `account_id`, `display_name`, `email`, `active`, `account_type` |
+| `user search [name...]` | `--name`/`--query`, `--email`, `--account-id`, `-n/--limit`; returns `accountId`, `userAri`, `name` and `email` when visible |
+| `user get [account-id]`, `user bulk-lookup [id\|email...]` | profile of one user (you by default); many users by account ID or exact email, `--strict` |
 | `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches fetched `--batch-concurrency` at a time (default 5, max 20), in input order |
 | `jira workitem search <text...>` | `text ~ "…" ORDER BY updated DESC`; `--limit`, `--after` |
 | `jira workitem query --jql` | `-n/--limit`, `--first`, `--after` (cursor), `--fields`; `--last`/`--before` are rejected (REST pages forward only) |
@@ -183,6 +184,8 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira workitem attachment query\|get\|download\|thumbnail\|upload\|delete` | `download --output-path` (or `--out`) `--force`; `upload --file` (repeatable); `delete` needs `--yes` |
 | `jira workitem worklog add\|update\|query\|get\|delete\|changed\|deleted` | `--time-spent "1h 30m"`, `--started`, `--adjust-estimate`; times take epoch ms, dates, timestamps or ages like `7d`; `delete` needs `--yes` |
 | `jira workitem watcher query\|add\|remove`, `jira workitem vote query\|add\|remove` | `--watcher-id` takes an ID, email, name or `me` (the default) |
+| `jira workitem bulk-get\|create-bulk\|bulk-transition` | `bulk-get` takes keys, `--fields`, `--full`, `--strict`; `create-bulk --input-json` takes the REST `issueUpdates`; `bulk-transition --ids --transition-id` has `--dry-run`, needs `--yes`, and returns a task |
+| `jira workitem archive\|unarchive`, `jira workitem property get\|query\|set\|delete` | `--id` (repeatable; archiving needs an admin on Premium or Enterprise); `--issue-id --property-key --value-json` |
 | `jira field list` | `--query`, `--custom-only` |
 | `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
 | `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |
