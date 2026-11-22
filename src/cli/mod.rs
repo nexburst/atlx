@@ -13,6 +13,7 @@ mod doctor;
 mod jira;
 mod search;
 mod shape;
+mod skill;
 mod unsupported;
 mod user;
 mod util;
@@ -115,6 +116,11 @@ enum Cmd {
     /// Generate man pages (used by the release build)
     #[command(hide = true)]
     Man(completion::ManArgs),
+    /// The agent skill that ships with atlx (atlx extra)
+    Skill {
+        #[command(subcommand)]
+        cmd: skill::SkillCmd,
+    },
 }
 
 // --- runtime ---------------------------------------------------------------------
@@ -280,6 +286,7 @@ fn wrap(path: &str, out: Out) -> Out {
     let kind = match first {
         "doctor" => "doctor",
         "search" => "search-result",
+        "skill" => "skill",
         _ => "auth",
     };
     let env = |v: Value| {
@@ -342,6 +349,7 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Api(a) => api::run(&g.config()?, a)?,
         Cmd::Completion { cmd } => return completion::completion_cmd(cmd),
         Cmd::Man(a) => return completion::man(a),
+        Cmd::Skill { cmd } => return skill::run(cmd),
     };
     Ok(Out::Data(data))
 }

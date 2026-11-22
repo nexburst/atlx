@@ -236,6 +236,21 @@ Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +
 Confluence + Bitbucket in parallel) and `atlx api <jira|confluence|bitbucket>
 <path>` for any REST endpoint not wrapped yet.
 
+### Agent skill
+
+[`skills/atlx`](skills/atlx/SKILL.md) teaches coding agents which command to
+use, how to write safely and how to read errors. It is built into the binary:
+
+```sh
+atlx skill install                  # ~/.claude/skills/atlx
+atlx skill install --target agents  # .agents/skills/atlx in this directory
+atlx skill print                    # SKILL.md on stdout
+```
+
+`--dir` picks another directory. Installing again is safe: files that differ
+are only replaced with `--force`. A test parses every command in the skill, so
+it can't drift from the CLI.
+
 ### Body formats
 
 Like twg, bodies default to `html` and accept `markdown` and `plain`. Confluence

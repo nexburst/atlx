@@ -268,5 +268,7 @@ atlx man (hidden) [--dir <DIR>]
 atlx search <QUERY> (required) [--limit <LIMIT> [default: 10]] [--only <ONLY>,... {jira|confluence|bitbucket}]
 atlx setup bitbucket [--workspace <WORKSPACE>] [--token <TOKEN>] [--token-cmd <CMD>] [--email <EMAIL>] -f/--force --no-verify
 atlx setup default-site [<SITE>]
+atlx skill install [--dir <DIR>] [--target <TARGET> {claude|agents} [default: claude]] --force
+atlx skill print
 atlx user search [<name>...] [--name <NAME>] [--query <QUERY_FLAG>] [--email <EMAIL>] [--account-id <ACCOUNT_ID>] --compact [-n/--limit <LIMIT> [default: 20]]
 atlx whoami

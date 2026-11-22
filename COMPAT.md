@@ -728,3 +728,5 @@ inferred rows.
 | `completion script` | ➕ | shell completions |
 | `man` | ➕ | man page |
 | `search` | ➕ | Jira, Confluence and Bitbucket in one call |
+| `skill install` | ➕ | installs the agent skill in `skills/atlx` (#36) |
+| `skill print` | ➕ | prints it (#36) |
