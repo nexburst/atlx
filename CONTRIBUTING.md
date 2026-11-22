@@ -1,8 +1,7 @@
 # Contributing to atlx
 
-Thanks for helping. atlx aims to be a drop-in, open alternative to Atlassian's
-`twg` CLI for Jira, Confluence and Bitbucket Cloud, built only on public REST
-APIs. This guide covers how the code is laid out, how to add a command, and
+Thanks for helping. atlx is an open CLI for Jira, Confluence and Bitbucket
+Cloud, built only on Atlassian's public REST APIs. This guide covers how the code is laid out, how to add a command, and
 the conventions every change follows. Coding agents should also read
 [AGENTS.md](AGENTS.md).
 
@@ -25,7 +24,7 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `src/main.rs` | A few lines that call `atlx::cli::main()` |
 | `src/lib.rs` | Module list and the shared `Product` enum |
 | `src/client.rs`, `src/config.rs`, `src/output.rs`, `src/markup.rs`, `src/time.rs` | HTTP client, config and credentials, output formats, body-format conversion, date helpers |
-| `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return the `data` part of twg's output as a `serde_json::Value` |
+| `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return the `data` part of the output as a `serde_json::Value` |
 | `src/cli/mod.rs` | `Cli` with the global flags, the top-level `Cmd`, `Globals`, `Out`, dispatch and `main()` |
 | `src/cli/<product>.rs` (`jira`, `confluence`, `bitbucket`) | That product's clap enums and its dispatch function, plus parse tests |
 | `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs`, `completion.rs` | The non-product commands (`completion.rs` also holds the hidden `man` generator) |
@@ -33,11 +32,11 @@ real site are `#[ignore]`d; see the README's Testing section.
 | `tests/common/mod.rs` | Offline mock HTTP server (`MockServer`, `MockResponse`, `RecordedRequest`) |
 | `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
 | `tests/cli_tree.rs` + `tests/snapshots/cli-tree.txt` | Snapshot of the full command tree |
-| `tests/twg_shapes.rs` + `tests/fixtures/twg/` | atlx's JSON against synthetic copies of twg's output shapes (made by `scripts/twg-fixtures.sh`) |
-| `scripts/conformance.sh` | Side-by-side live run of twg and atlx (read-only), reporting shape differences into the git-ignored `target/conformance/` |
+| `tests/twg_shapes.rs` + `tests/fixtures/twg/` | Frozen output shapes, checked against mock REST responses |
+| `tests/output_contract.rs` | Output shapes and exit codes for edge cases (empty pages, partial batches) |
 | `tests/live_smoke.rs` | Opt-in live checks (`#[ignore]`) |
 | `tests/twg_compat.rs` | Checks `compat/corpus.txt`, `COMPAT.md` and `compat/coverage.txt` against the parser |
-| `compat/twg-<version>.txt` | twg's command tree (paths, positionals, flag names), made by `scripts/twg-inventory.sh` |
+| `compat/twg-<version>.txt` | Command paths, positionals and flag names from twg 1.4.4, kept by hand |
 
 The split is deliberate: clap code never calls `ureq` directly, and API
 functions never parse arguments. That keeps API functions testable against
@@ -46,16 +45,17 @@ the mock server and keeps product PRs out of each other's files.
 ## Adding a command
 
 1. **Clap variant**: add it to the product's enum in `src/cli/<product>.rs`,
-   using twg's command path and flag names (check `twg <cmd> --help`).
+   using the command path and flag names from `compat/twg-1.4.4.txt` or the
+   public commands catalog when the command is listed there.
 2. **API function**: add it to `src/<product>.rs`. It takes a `&Client` and
-   typed arguments, and returns twg's `data` for the command as a `Value`.
+   typed arguments, and returns the command's `data` as a `Value`.
 3. **Dispatch**: wire the variant to the function in the product's dispatch
    function in `src/cli/<product>.rs`, wrapping Jira, Confluence and user
-   results in `envelope("<twg command>", "<resourceType>")` with a `request`
+   results in `envelope("<operation>", "<resourceType>")` with a `request`
    echo of the inputs.
 4. **Mock-HTTP test** in `tests/<product>.rs`: assert the method, path, query
    and body sent, and the output keys.
-5. **Parse test**: add the twg-style invocation to the `tests` module in
+5. **Parse test**: add the invocation to the `tests` module in
    `src/cli/<product>.rs` (or to `parses_twg_style_invocations` in
    `src/cli/mod.rs`).
 6. **Regenerate the CLI snapshot** and review the diff:
@@ -64,30 +64,30 @@ the mock server and keeps product PRs out of each other's files.
 8. **`COMPAT.md` and the corpus**: set the command's row in `COMPAT.md`, flip
    the matching `gap #N` lines in `compat/corpus.txt` to `ok`, add a corpus
    line for any new invocation, and record the new coverage with
-   `UPDATE_COVERAGE=1 cargo test --test twg_compat`. See "twg compatibility"
+   `UPDATE_COVERAGE=1 cargo test --test twg_compat`. See "Command coverage"
    below.
 
 ## Conventions
 
-- **twg naming.** If twg has the command or flag, use its exact path and
-  spelling. atlx-only commands are labelled "(atlx extra)" in their help.
-- **Output.** JSON follows twg: Jira, Confluence, user and account commands
-  return `output::envelope::envelope(<twg command>, <resourceType>)` around
-  data with twg's key names (usually the REST payload's own names), and
-  Bitbucket commands return the REST objects unwrapped. Check new shapes
-  against twg with `scripts/conformance.sh` when you can. Text on a
+- **Naming.** If the inventory or catalog has the command or flag, use its
+  exact path and spelling. atlx-only commands are labelled "(atlx extra)" in their help.
+- **Output.** Jira, Confluence, user and account commands return
+  `output::envelope::envelope(<operation>, <resourceType>)` around data that
+  keeps the REST payload's own key names, and Bitbucket commands return the
+  REST objects unwrapped. Existing shapes are a contract: change them only on
+  purpose, with a changelog entry. Text on a
   terminal, JSON when piped, and always overridable with `-o text|json|jsonl`.
 - **Errors.** Return them as `anyhow::Error`. For a classified failure, return
   a `client::ApiError` (`ApiError::usage(..)` for bad arguments,
   `ApiError::config(..)` for missing setup; the client produces HTTP and network
   errors itself). `main` prints them as described in the README's "Errors and
   exit codes" section. Commands never print errors themselves.
-- **Confirmation** matches twg: a command requires `--yes` only when twg's
-  does. Otherwise `--yes` is accepted as a hidden no-op and nothing prompts
-  (merge, decline and content delete work this way). Add `--dry-run` where it
+- **Confirmation.** Follow the command family's existing policy, which the
+  README documents: some families require `--yes`, others (Jira deletes,
+  merge, decline) don't, and scripts rely on both. Where `--yes` isn't
+  required it is accepted as a hidden no-op. Nothing prompts. Add `--dry-run` where it
   is feasible to show the request without sending it.
-- **Renames.** When an atlx name drifts from twg's, the twg name becomes the
-  visible one and the old spelling stays as a hidden command or flag that calls
+- **Renames.** When a command is renamed, the new name becomes the visible one and the old spelling stays as a hidden command or flag that calls
   `util::deprecated(old, new)`. The note prints only in text mode on a
   terminal, never in JSON or piped output.
 - **Dependencies.** Don't add a crate without a justification in the PR. HTTP
@@ -97,32 +97,47 @@ the mock server and keeps product PRs out of each other's files.
   lacks an endpoint), Bitbucket 2.0. Features that need Teamwork Graph, the
   GraphQL gateway or Rovo are out of scope.
 
-## twg compatibility
+## Independence from twg
 
-The goal is for atlx to behave exactly like twg for Jira, Confluence and
-Bitbucket: same command paths, flags, `{"data": ...}` output envelope, and no
-confirmation gates twg doesn't have. Three files keep this measurable, and
-`tests/twg_compat.rs` checks all three offline:
+atlx is built from Atlassian's public REST documentation and API specs, not
+from twg. Keep it that way:
 
-- **`COMPAT.md`** has one row per twg leaf command in the inventory. Statuses:
+- Don't run twg to develop or test atlx, and don't record, commit or publish
+  twg's output.
+- Don't publish comparisons, benchmarks or other assessments of twg (in
+  issues, PRs, docs or commit messages).
+- Command paths and flag names may match twg's. Take them from
+  `compat/twg-1.4.4.txt` or Atlassian's public
+  [commands catalog](https://developer.atlassian.com/cloud/twg-cli/commands/commands-catalog/)
+  and changelog. Behavior and output follow the REST APIs and atlx's own
+  docs.
+- Never copy twg's help text, descriptions, docs or skill files; they are
+  "All rights reserved". Write every help string and doc in your own words.
+
+## Command coverage
+
+Three files track which command paths atlx has, and `tests/twg_compat.rs`
+checks all three offline:
+
+- **`COMPAT.md`** has one row per command path in the inventory. Statuses:
   ✅ supported, 🟡 partial, 🔁 accepted through an alias, ➕ atlx-only, 📋
   planned, ⛔ out of scope. The test checks each status against the CLI tree
   snapshot: ✅/🟡 paths must exist, 🔁 paths must exist only through an alias,
   📋/⛔ paths must not parse. 🟡 and 📋 rows must link an issue.
-- **`compat/corpus.txt`** has twg-style invocations, each tagged `ok` (must
+- **`compat/corpus.txt`** has invocations, each tagged `ok` (must
   parse) or `gap #<issue>` (must fail to parse). When your change makes a gap
   line parse, the test fails until you flip it to `ok`. Every flag on a
-  line must exist for that command in the twg inventory. Write lines yourself
+  line must exist for that command in the inventory. Write lines yourself
   with placeholders (`PROJ-1`, `12345`, `ENG`, `acme`, `api`); never copy
-  examples from twg's help or skills. Tag a gap with the issue that will
+  examples from twg's help, docs or skills. Tag a gap with the issue that will
   close it; use `#13` for public-REST work that has no issue yet.
-- **`compat/coverage.txt`** is the share of twg commands atlx accepts. The
+- **`compat/coverage.txt`** is the share of inventory commands atlx accepts. The
   test fails if it drops; `UPDATE_COVERAGE=1 cargo test --test twg_compat`
   records a rise.
 
-After a twg upgrade, run `scripts/twg-inventory.sh` (CI has no twg), commit
-the new `compat/twg-<version>.txt` and point `INVENTORY` in
-`tests/twg_compat.rs` at it.
+To add command paths that appear later, edit `compat/twg-1.4.4.txt` by hand
+from the public commands catalog or changelog. Don't regenerate it by running
+twg.
 
 ## Parallel work
 
@@ -166,8 +181,3 @@ publish jobs. Pull requests that edit the workflow run it the same way.
 Archive names must keep matching `pkg-url` in `[package.metadata.binstall]`:
 `atlx-vX.Y.Z-<target>.tgz`, or `.zip` on Windows, with the binary at the root.
 
-## twg text
-
-Never copy twg's help text, descriptions or skill files into this repository;
-they are "All rights reserved". Command paths and flag names are interface
-facts and may be reused. Write every help string and doc in your own words.

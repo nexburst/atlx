@@ -1,59 +1,59 @@
-# twg compatibility
+# Command coverage
 
-**Goal: atlx behaves exactly like twg** for Jira, Confluence, Bitbucket, users
-and Jira Service Management. That means the same command paths, positional
-arguments and flag names, the same `{"data": ...}` JSON envelope and key names,
-and no confirmation gates where twg has none (`--yes` stays accepted as a
-no-op). Commands that need Atlassian's Teamwork Graph, the GraphQL gateway or
-Rovo are out of scope; atlx is built only on the public REST APIs. These rules
-come from the maintainer decisions on
-[#18](https://github.com/nexburst/atlx/issues/18) and
-[#21](https://github.com/nexburst/atlx/issues/21).
+atlx is an independent CLI built on Atlassian's public REST APIs. Where it
+covers the same feature as Atlassian's `twg` CLI, it uses the same command
+path, positionals and flag names, so the names are familiar. This page lists
+each twg 1.4.4 command path and whether atlx has it. It records what atlx
+does; it makes no claim about twg's behavior or output, and nothing here was
+established by running twg against a site.
 
-This page compares atlx with **twg 1.4.4**. The twg side comes from
-[`compat/twg-1.4.4.txt`](compat/twg-1.4.4.txt), made by
-[`scripts/twg-inventory.sh`](scripts/twg-inventory.sh), which records command
-paths, positionals and flag names only. Coverage per product is in
+The list of command paths and flag names is
+[`compat/twg-1.4.4.txt`](compat/twg-1.4.4.txt). It records names only, and it
+is no longer regenerated: new twg commands are added by hand from Atlassian's
+public [commands catalog](https://developer.atlassian.com/cloud/twg-cli/commands/commands-catalog/)
+and changelog. Coverage per product is in
 [`compat/coverage.txt`](compat/coverage.txt).
 
 ## Status values
 
 | Status | Meaning |
 | --- | --- |
-| ✅ | Supported under twg's path, with all of twg's flags that apply |
-| 🟡 | Supported under twg's path, but flags or behavior are missing (listed, with the issue) |
-| 🔁 | Accepted under twg's path through an alias of a differently named atlx command |
-| ➕ | atlx only; twg 1.4.4 has no such command |
+| ✅ | atlx has the command under this path, with the flags listed in the inventory that apply to it |
+| 🟡 | atlx has the command, but flags or behavior are missing (listed, with the issue) |
+| 🔁 | Accepted under this path through an alias of a differently named atlx command |
+| ➕ | atlx only; not in the twg 1.4.4 inventory |
 | 📋 | Planned; the note links the issue. `#13 (unscheduled)` means public REST covers it but no issue is open yet |
-| ⛔ | Out of scope: needs Teamwork Graph, the GraphQL gateway, Rovo or Atlassian AI, or is specific to twg's OAuth setup |
+| ⛔ | Out of scope: needs Teamwork Graph, the GraphQL gateway, Rovo or Atlassian AI, or is specific to OAuth setup |
 
-Flags that only feed twg's GraphQL transport (`--variables-json`,
-`--cloud-id`, `--*-input`, ...) are listed as "not planned" and do not make a
-row 🟡. Bitbucket's `--workspace`/`--repo`, which twg declares on the
-`bitbucket` group, are accepted on every atlx Bitbucket command.
+✅ means the command parses and is tested against mock REST responses. It is
+not a statement that its output matches any other tool.
+
+Flags that only feed a GraphQL transport (`--variables-json`, `--cloud-id`,
+`--*-input`, ...) are listed as "not planned" and do not make a row 🟡.
+Bitbucket's `--workspace`/`--repo` are accepted on every atlx Bitbucket
+command.
 
 ## How this page is kept accurate
 
 `cargo test --test twg_compat` runs offline on every CI platform and checks:
 
-- **This table against the parser.** Every twg leaf command in the inventory
+- **This table against the parser.** Every command path in the inventory
   needs a row. ✅ and 🟡 commands must exist in
   [`tests/snapshots/cli-tree.txt`](tests/snapshots/cli-tree.txt), 🔁 commands
   must exist only through an alias, and 📋 and ⛔ commands must not parse.
-- **The parse corpus**, [`compat/corpus.txt`](compat/corpus.txt): twg-style
-  invocations tagged `ok` (must parse) or `gap #<issue>` (must fail to parse).
-  When a change makes a gap line parse, the test fails until the line is
-  flipped to `ok` and the row here is updated.
+- **The parse corpus**, [`compat/corpus.txt`](compat/corpus.txt): invocations
+  tagged `ok` (must parse) or `gap #<issue>` (must fail to parse). When a
+  change makes a gap line parse, the test fails until the line is flipped to
+  `ok` and the row here is updated.
 - **Coverage**, which may only go up. Record a rise with
   `UPDATE_COVERAGE=1 cargo test --test twg_compat`.
 
-These checks are about parsing. Output shapes are covered by
-[`tests/twg_shapes.rs`](tests/twg_shapes.rs) and the
-[JSON output shapes](#json-output-shapes) section below.
+Output is covered by atlx's own tests against mock REST responses
+(`tests/twg_shapes.rs`, `tests/output_contract.rs` and the per-product tests).
 
 ## Global flags and behavior
 
-| twg | atlx | Notes |
+| Flag or behavior | atlx | Notes |
 | --- | --- | --- |
 | `-o, --output text\|json\|jsonl` | ✅ | atlx defaults to JSON when stdout is piped |
 | `-s, --site` | ✅ | |
@@ -62,56 +62,18 @@ These checks are about parsing. Output shapes are covered by
 | `-p, --profile` | ✅ | named profiles ([#20](https://github.com/nexburst/atlx/issues/20)) |
 | `--select`, `--agent-fields`, `--output-summary` | ✅ | output controls ([#19](https://github.com/nexburst/atlx/issues/19)); see the README |
 | `--api-version` | ✅ | `v2` is accepted and other versions are rejected ([#19](https://github.com/nexburst/atlx/issues/19)) |
-| `--output-file` | ➕ | twg 1.4.4 lists no such global flag; atlx writes stdout to a file |
+| `--output-file` | ➕ | atlx writes stdout to a file |
 | `--usage-counts` | ⛔ | usage counts come from the GraphQL gateway |
 | `--output-shape` | ⛔ | the shapes reshape Teamwork Graph relationships |
-| `{"data": ...}` JSON envelope and key names | ✅ | `apiVersion`, `command`, `request`, `data`, `pageInfo`, `meta` as twg prints them; Bitbucket unwrapped, as in twg ([#21](https://github.com/nexburst/atlx/issues/21)); see [JSON output shapes](#json-output-shapes) |
-| JSONL rows with `_twg` locators | ✅ | one line per element of the main collection ([#21](https://github.com/nexburst/atlx/issues/21)) |
-| Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)" in twg's error envelope, `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue ([#21](https://github.com/nexburst/atlx/issues/21)) |
+| JSON envelope | ✅ | `apiVersion`, `command`, `request`, `data`, `pageInfo`, `meta`; Bitbucket unwrapped; see the README's JSON output section |
+| JSONL rows with `_twg` locators | ✅ | one line per element of the main collection |
+| Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)", `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue |
 | Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/nexburst/atlx/issues/17) |
-| No `--yes` on merge and decline | ✅ | `--yes` is still accepted and ignored ([#18](https://github.com/nexburst/atlx/issues/18)) |
-| Confluence write guards | ✅ | `content create`, `update` and `delete` refuse without `--yes`; `update` also needs `--snapshot-token` (with `--dry-run` too), and a body needs `--format` and `--ack-body-formats`. Checked against twg 1.4.4 with no network |
-| API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
+| No `--yes` on merge and decline | ✅ | `--yes` is still accepted and ignored |
+| Confluence write guards | ✅ | `content create`, `update` and `delete` refuse without `--yes`; `update` also needs `--snapshot-token` (with `--dry-run` too), and a body needs `--format` and `--ack-body-formats` |
+| API-token auth | ➕ | Atlassian and Bitbucket API tokens; no OAuth |
 
-## JSON output shapes
-
-Maintainer decision on [#21](https://github.com/nexburst/atlx/issues/21):
-**atlx behaves as twg.** The default JSON and JSONL output uses twg's
-envelope and key names; there is no separate compatibility mode. Commands
-that need Teamwork Graph or Rovo fail with "not supported by atlx (requires
-Teamwork Graph)".
-
-`scripts/conformance.sh` runs read-only commands through twg 1.4.4 and atlx
-against the same site and reports every key path only one side prints. The
-run for #21 used a site with Jira but no Confluence and no Bitbucket
-repositories, so:
-
-| Area | How the shape was established | Result |
-| --- | --- | --- |
-| `whoami`, `user search` (with and without `--compact`) | Live side by side | Same key paths. `whoami` data comes from Jira's `myself`: `zoneinfo` is `null` as in twg, with the Jira time zone as the extra key `timeZone`, and `extendedProfile` is all `null`; profile, site and token source are in `meta` |
-| Jira `workitem get` (default, `--comments`, `--fields`, `--full`, several IDs), `workitem query` (rows, `--fields`, paging), `workitem search`, `transitions query`, `field create-metadata`, `link-types query`, `space query`, `space get`, `board query` | Live side by side | Same key paths and types. Differences in values only: `self` links use the site URL (twg goes through `api.atlassian.com`), and `meta` describes atlx's REST source instead of twg's backend |
-| Jira `board sprints query`, `sprint workitems query` | Inferred: the site has no sprints. Follows the pattern twg uses for the other Agile lists (REST page, `values` renamed `sprints`; work item rows as in `workitem query`) | Not verified |
-| Jira `board get`, `filter query`, `dashboard query`, `space versions query\|issue-types\|status query`, `workitem bulk-get\|property query\|worklog changed\|deleted`, `user bulk-lookup` | Live side by side | Same `data` shape. Filters, versions, properties and worklog IDs were empty on the site, so their rows are inferred. `meta.backend`, `meta.sourceMode` and nested `meta.meta` still differ from twg on most commands |
-| Jira `workitem comment query`, `changelog query` (default, `--first`, `--after`, `--order-by`), `field update-metadata` (with and without `--include-system-fields`), `types query` (`--project`, `--issue --level -n`, `--id`), `types get`, `statuses query`, `priorities query` (all, and by `--id`) | Live side by side ([#23](https://github.com/nexburst/atlx/issues/23)) | Same key paths, and the same `data` values once the `self` host is normalised. Comment and changelog pages print `pageInfo` on the last page too (`hasNextPage: false`, `nextCursor: null`); `types query` adds top-level `warnings` when `--limit` cut the list or `--id` was used |
-| Jira `workitem attachment`, `worklog`, `watcher`, `vote` | Inferred, not run live ([#24](https://github.com/nexburst/atlx/issues/24)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Jira `sprint` lifecycle, `board get\|create\|delete\|backlog\|projects\|quick-filter` | Inferred, not run live ([#25](https://github.com/nexburst/atlx/issues/25)) | Built from the public Agile 1.0 payloads and tested against mock responses only; key paths have not been compared with twg |
-| Jira `space` administration, `filter` | Inferred, not run live ([#26](https://github.com/nexburst/atlx/issues/26)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Confluence content and space lifecycle, space `tree` | Inferred, not run live ([#30](https://github.com/nexburst/atlx/issues/30)) | Built from the public REST payloads and tested against mock responses only; the width and emoji property values are unverified too |
-| Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Bitbucket `pipeline` actions, `deployment` | Inferred, not run live ([#34](https://github.com/nexburst/atlx/issues/34)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Bitbucket branch and commit writes, workspaces, repository extras | Inferred, not run live ([#33](https://github.com/nexburst/atlx/issues/33)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Jira Service Management `jsm` | Inferred, not run live ([#37](https://github.com/nexburst/atlx/issues/37)) | Built from the public Service Desk REST payloads and tested against mock responses only; key paths have not been compared with twg |
-| Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
-| Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
-| Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
-| Confluence `content update --edits` | Inferred from twg's help: the dry run's `data.body.value` holds the resulting HTML | Not verified; atlx's dry run also has `fromVersion`, `request` and a unified `diff` |
-| Other Confluence commands | Inferred: REST v2 objects with `externalUrl` and `snapshotToken`, lists as `{results, nextCursor}` | Not verified |
-| Bitbucket `pull-requests comment ...`, `task ...`, `diffstat`, `commits`, `diff-line` (#31) | Inferred; no Bitbucket workspace was available. REST 2.0 comment, task, diffstat and commit objects, lists bare as in `task query`. Deletes and `comment reopen`, which Bitbucket answers with 204, print `{id, pullRequest, deleted: true}` or `{id, pullRequest, resolved: false}`. `diff-line` prints a list of `{path, type, line, fromLine, text, hunk}` (plus `oldPath` on renames): `line` goes to `--line`, `fromLine` to `--from-line` | Not verified |
-| Bitbucket | Partly live: twg printed `repo query` as a bare list and a failed batch `pull-requests get` as `{workspace, repository, items, summary, partial}`, both without an envelope. The rest is inferred from the presets: REST 2.0 objects plus `_comments`, `_statuses`, `_repo` and the step log fields | Not verified with data. One known difference: when every ID of a Bitbucket batch fails, twg still prints the batch object (exit 1) while atlx prints the error envelope (exit 1) |
-| Account commands (`login`, `logout`, `auth profile ...`, `setup ...`, `doctor`) and `atlx search` | Envelope only. twg's data here describes its OAuth token store, which atlx doesn't have, so the data keeps atlx's own keys | Intentional |
-| Errors | The error envelope from #17; JSONL error lines get `_twg: {collection: "root", index: 0}` as in twg | Live |
+## Notes on specific commands
 
 ### Confluence targeted edits
 
@@ -133,16 +95,14 @@ diff without a PUT.
 | insertNodeBefore, insertNodeAfter | `localId`, `value` | Same shaping as `replaceNode` |
 | deleteNode | `localId` | |
 | removeNodes | `arguments.localIds` | All IDs must exist |
-| moveNode | `arguments.{localId, targetLocalId, position}` | `position` is `before` or `after` (default); twg's other positions, if any, are unknown |
+| moveNode | `arguments.{localId, targetLocalId, position}` | `position` is `before` or `after` (default) |
 | appendNodeToEnd | `value` | Appended to the end of the document |
 | setAttrs | `localId`, `arguments.attrs` | Merged into the node's `attrs` |
 
 Fields may sit at the top level or under `arguments`. Node `localId`s come
 from `content get --detail outline` (headings) or the atlx extra
-`content get --detail full --format adf` (every node). In twg the IDs come
-from a full read; atlx's `--format html` is the storage format, which doesn't
-carry ADF IDs, hence `adf`. The operation list is taken from twg's help and
-has not been checked against a live site.
+`content get --detail full --format adf` (every node). atlx's `--format html` is the storage format, which doesn't carry ADF IDs,
+hence `adf`.
 
 atlx extras, for pages whose nodes lack `localId`s, use `op` (or `name`) and
 work on top-level headings. A heading query matches case-insensitively,
@@ -156,11 +116,6 @@ exact text first, and must select one heading:
 | deleteSection | `heading`. Removes the heading too |
 | insertSectionAfter | `heading`, `newHeading`, `level` (default: the anchor heading's), `value`, `format` |
 
-`tests/twg_shapes.rs` replays the live-verified commands against synthetic
-fixtures (`tests/fixtures/twg/`, made by `scripts/twg-fixtures.sh`, values
-replaced and key names kept) so the shapes can't drift. Re-run the
-conformance script on a site with Confluence and Bitbucket data to verify the
-inferred rows.
 
 ## Jira
 
@@ -219,7 +174,7 @@ inferred rows.
 | `jira space archive` | ✅ | #26; takes only a key, ID, ARI or /projects/ URL, never a name; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
 | `jira space component counts` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space component create` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
-| `jira space component delete` | ✅ | #26; no confirmation, as in twg; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component delete` | ✅ | #26; no confirmation; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space component get` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space component query` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space component update` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
@@ -235,7 +190,7 @@ inferred rows.
 | `jira space update` | ✅ | #26; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
 | `jira space version counts` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space version create` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
-| `jira space version delete` | ✅ | #26; uses `removeAndSwap`; no confirmation, as in twg; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version delete` | ✅ | #26; uses `removeAndSwap`; no confirmation; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space version get` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space version merge` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space version move` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
@@ -266,7 +221,7 @@ inferred rows.
 | `jira workitem comment update` | ✅ | #23; GraphQL-only `--variables-json` not planned |
 | `jira workitem create` | ✅ | GraphQL-only `--variables-json` not planned |
 | `jira workitem create-bulk` | 🟡 | #69: `--input-json` takes the REST body (`issueUpdates` or an array), where twg takes GraphQL input; `--board-id`, `--fields`, `--issue-type-id`, `--jql-contexts`, `--kanban-destination`, `--project-id`, `--rank`, `--variables-json` not planned |
-| `jira workitem delete` | ✅ | #23; REST v3 issue delete, no confirmation as in twg; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira workitem delete` | ✅ | #23; REST v3 issue delete, no confirmation; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira workitem field create-metadata` | ✅ | #18; also reachable as `jira workitem custom-fields create-metadata` |
 | `jira workitem field update-metadata` | ✅ | #23; REST v3 editmeta, custom fields unless `--include-system-fields` |
 | `jira workitem get` | ✅ | `--batch-concurrency` fetches in parallel and keeps input order (#18); GraphQL-only `--variables-json` not planned |
@@ -374,7 +329,7 @@ inferred rows.
 | `confluence content comments create` | ✅ | #29; inline with `--text-selection`; the match count is counted when not given. The old positional `<ref>` and `--format` still work (hidden, deprecated) |
 | `confluence content comments delete` | ✅ | #29 |
 | `confluence content comments get` | ✅ | #29; up to 500 replies, then `repliesTruncated` |
-| `confluence content comments list` | 🟡 | #13: lists footer comments unless `--comment-type inline` (twg detects both), and REST filters `--resolution-status` on inline comments only. The old positional `<ref>`, `--inline` and `--format` still work (hidden, deprecated) |
+| `confluence content comments list` | 🟡 | #13: lists footer comments unless `--comment-type inline`, and REST filters `--resolution-status` on inline comments only. The old positional `<ref>`, `--inline` and `--format` still work (hidden, deprecated) |
 | `confluence content comments reopen` | 🟡 | #13: inline comments only; REST has no resolution for footer comments |
 | `confluence content comments reply` | ✅ | #29 |
 | `confluence content comments resolve` | 🟡 | #13: inline comments only; REST has no resolution for footer comments |
@@ -468,7 +423,7 @@ inferred rows.
 | `confluence templates list` | ✅ | #71; `--query` and `--cursor` are applied client-side, as REST v1 has neither |
 | `confluence tree` | ✅ | #30; pages or whole spaces, depth 10, at most 500 nodes then `truncated`; `--type` keeps the containers of matches |
 | `confluence content children` | ➕ | direct children of a page |
-| `confluence content delete` | ➕ | a hidden command in twg 1.4.4, so not in the inventory; needs `--yes` as in twg. Missing twg's `--content-type` and `--reference-space` |
+| `confluence content delete` | ➕ | not in the inventory; needs `--yes`. Missing twg's `--content-type` and `--reference-space` |
 | `confluence content labels` | ➕ | old form `labels <ref>` of `confluence content labels list --id <ref>` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 
 ## Bitbucket
@@ -502,13 +457,13 @@ inferred rows.
 | `bitbucket pipeline latest-failure` | ✅ | #34; searches the 100 most recent runs |
 | `bitbucket pipeline query` | ✅ | #34 added `--pattern` |
 | `bitbucket pipeline rerun-failed` | 🟡 | #13: REST has no rerun of failed steps only, so this starts the whole pipeline again and needs `--whole-pipeline` (atlx extra) to say so |
-| `bitbucket pipeline run` | ✅ | #34; `--secured-variable KEY` reads the environment, as in twg |
+| `bitbucket pipeline run` | ✅ | #34; `--secured-variable KEY` reads the environment |
 | `bitbucket pipeline tail` | ✅ | #34; polls (`--no-ws` is a no-op); follows every step unless `--step`; exits 1 when the pipeline fails |
 | `bitbucket pipeline trigger` | ✅ | #34; same as `run` |
 | `bitbucket pull-requests activity` | ✅ | takes several ids as a batch, with `--strict` and `--batch-concurrency` (#18) |
 | `bitbucket pull-requests approve` | ✅ |  |
 | `bitbucket pull-requests comment create` | 🟡 | missing `--image`, `--image-name` (#13 (unscheduled); upload through Downloads). `--reply-to`, `--pending` and the inline `--path`/`--line`/`--from-line`/range flags work (#31) |
-| `bitbucket pull-requests comment delete` | ✅ | needs `--yes`, as in twg (#31) |
+| `bitbucket pull-requests comment delete` | ✅ | needs `--yes` (#31) |
 | `bitbucket pull-requests comment get` | ✅ | #31 |
 | `bitbucket pull-requests comment query` | ✅ | deleted comments are left out, oldest first (#31) |
 | `bitbucket pull-requests comment reopen` | ✅ | #31 |
@@ -536,7 +491,7 @@ inferred rows.
 | `bitbucket pull-requests remove-request-changes` | ✅ | #32 |
 | `bitbucket pull-requests request-changes` | ✅ |  |
 | `bitbucket pull-requests task create` | ✅ | #31 |
-| `bitbucket pull-requests task delete` | ✅ | needs `--yes`, as in twg (#31) |
+| `bitbucket pull-requests task delete` | ✅ | needs `--yes` (#31) |
 | `bitbucket pull-requests task get` | ✅ | #31 |
 | `bitbucket pull-requests task query` | ✅ | #18 |
 | `bitbucket pull-requests task reopen` | ✅ | #31 |
@@ -571,7 +526,7 @@ inferred rows.
 | `user manager` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user manager-chain` | ⛔ | reporting lines come from the Teamwork Graph |
 | `user peers` | ⛔ | reporting lines come from the Teamwork Graph |
-| `user search` | ✅ | `--compact` is accepted; the JSON is the same either way, as in twg (#21). `--name`, `--query` and `--email` all use Jira's user search, so `sources` is always `["jira-rest"]` (#18); GraphQL-only `--include-slack` not planned |
+| `user search` | ✅ | `--compact` is accepted; the JSON is the same either way (#21). `--name`, `--query` and `--email` all use Jira's user search, so `sources` is always `["jira-rest"]` (#18); GraphQL-only `--include-slack` not planned |
 
 ## Accounts and setup
 
@@ -702,7 +657,7 @@ inferred rows.
 | `jsm post-incident-review query` | 📋 | #13 (unscheduled); PIRs are Jira work items |
 | `jsm post-incident-review unlink incident` | 📋 | #13 (unscheduled); PIRs are Jira work items |
 | `jsm post-incident-review update` | 📋 | #13 (unscheduled); PIRs are Jira work items |
-| `jsm request comment create` | ✅ | #37; public unless `--internal`, as in twg |
+| `jsm request comment create` | ✅ | #37; public unless `--internal` |
 | `jsm request comment list` | ✅ | #37 |
 | `jsm request create` | ✅ | #37 |
 | `jsm request participant add` | ✅ | #37 |

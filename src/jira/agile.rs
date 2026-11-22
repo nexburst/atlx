@@ -509,7 +509,7 @@ fn project_of<'p>(c: &Client, on: On, cache: &'p mut Option<String>) -> Result<&
     Ok(cache.as_deref().unwrap_or_default())
 }
 
-/// A Jira duration. Plain numbers are seconds, as in twg; Jira itself would
+/// A Jira duration. Plain numbers are seconds; Jira itself would
 /// read them in the site's default unit, so they are sent as minutes.
 fn estimate(v: &str) -> Result<String> {
     let v = v.trim();

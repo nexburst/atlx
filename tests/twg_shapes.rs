@@ -1,12 +1,13 @@
-//! atlx's JSON output has twg's shape: the same envelope, `command` and
-//! data key paths, for the commands checked live against twg 1.4.4.
+//! Frozen output shapes: for each command, the envelope, `command` and data
+//! key paths atlx prints.
 //!
-//! `tests/fixtures/twg/*.json` are twg outputs and `tests/fixtures/twg/rest/`
-//! the REST responses behind them, both made synthetic by
-//! `scripts/twg-fixtures.sh` (values replaced, key names kept). The mock
-//! server answers with the REST fixtures, and each atlx result must have
-//! the same key paths and types as twg's fixture. `request` and `meta` are
-//! left out: they echo twg's OAuth and Teamwork Graph setup.
+//! `tests/fixtures/twg/*.json` hold the expected shapes and
+//! `tests/fixtures/twg/rest/` the REST responses behind them, with every value
+//! replaced by a placeholder. The mock server answers with the REST fixtures,
+//! and each atlx result must have the same key paths and types as the
+//! expected fixture. `request` and `meta` are left out. The fixtures are no
+//! longer regenerated: change one only together with a deliberate output
+//! change, and say so in the changelog.
 
 mod common;
 
@@ -242,7 +243,7 @@ fn jira_and_user_output_matches_twg_shapes() {
         problems.extend(
             diff(&twg, &ours)
                 .into_iter()
-                // An atlx extra: twg prints `zoneinfo: null`.
+                // An atlx extra; `zoneinfo` stays null.
                 .filter(|d| !(*name == "whoami" && d == "only atlx: data.timeZone"))
                 .map(|d| format!("{name}: {d}")),
         );

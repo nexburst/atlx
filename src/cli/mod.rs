@@ -207,7 +207,7 @@ pub fn main() {
 }
 
 /// clap errors: help and version go to stdout with exit 0; argument errors go
-/// to stderr with exit 1, as in twg. A twg command atlx doesn't offer gets a
+/// to stderr with exit 1. A twg command atlx doesn't offer gets a
 /// twg error envelope instead (see [`unsupported`]).
 fn exit_clap(e: clap::Error) -> ! {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -278,9 +278,9 @@ fn report_error(e: &anyhow::Error, fmt: Format, path: &str, shaping: &shape::Sha
     api.exit_code()
 }
 
-/// Put results that are not already in twg's envelope into one, as twg does
+/// Put results that are not already in an envelope into one
 /// for every command outside Bitbucket. The command name is the dotted CLI
-/// path (twg calls `doctor` `doctor.get`). Bitbucket payloads, raw text and
+/// path (`doctor` is `doctor.get`). Bitbucket payloads, raw text and
 /// the atlx-only `api`, `completion` and `man` output stay as they are.
 fn wrap(path: &str, out: Out) -> Out {
     let first = path.split('.').next().unwrap_or_default();

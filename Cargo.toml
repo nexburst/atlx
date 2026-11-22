@@ -2,7 +2,7 @@
 name = "atlx"
 version = "0.1.0"
 edition = "2024"
-description = "Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud, compatible with twg's command syntax"
+description = "Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud, built on the public REST APIs"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nexburst/atlx"
 readme = "README.md"

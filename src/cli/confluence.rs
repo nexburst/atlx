@@ -1117,7 +1117,7 @@ pub(crate) fn offline(cmd: &ConfCmd) -> Option<Result<Out>> {
     }
 }
 
-/// `content body-formats`: printed without an envelope, as twg does; text
+/// `content body-formats`: printed without an envelope; text
 /// output is the guide itself.
 fn body_formats(
     format: Option<&str>,

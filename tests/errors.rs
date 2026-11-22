@@ -299,7 +299,7 @@ fn usage_errors_exit_1() {
     );
     assert_no_secret(&o);
 
-    // clap argument errors: stderr only, exit 1 like twg.
+    // clap argument errors: stderr only, exit 1.
     let o = atlx(None, None, &["jira", "workitem", "get", "--bogus"]);
     assert_eq!(o.status.code(), Some(1));
     assert_eq!(stdout(&o), "");

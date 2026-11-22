@@ -14,7 +14,7 @@ pub mod dashboards;
 pub mod people;
 pub mod worklogs;
 
-/// Fields `jira workitem get` fetches by default, as twg does.
+/// Fields `jira workitem get` fetches by default.
 pub const GET_FIELDS: &[&str] = &[
     "summary",
     "issuetype",
@@ -76,7 +76,7 @@ pub fn csv(s: &str) -> Vec<String> {
 }
 
 /// Merge `--fields-json` and repeated `--field KEY=VALUE` (values parse as JSON
-/// when valid, else stay strings). The same key twice is an error, as in twg.
+/// when valid, else stay strings). The same key twice is an error.
 pub fn extra_fields(fields_json: Option<&str>, field: &[String]) -> Result<Map<String, Value>> {
     let mut out = match fields_json {
         Some(j) => {
@@ -109,7 +109,7 @@ pub fn site(c: &Client) -> String {
         .to_string()
 }
 
-/// Remove avatar and icon URLs at any depth, as twg does in JSON output.
+/// Remove avatar and icon URLs at any depth in JSON output.
 pub fn strip_media(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -226,7 +226,7 @@ impl GetOpts {
     }
 }
 
-/// `jira workitem get`: the REST issue, flattened as twg prints it. With
+/// `jira workitem get`: the REST issue, flattened. With
 /// `--comments` (or `--full`) the complete `comments` list is added, and
 /// with `--remote-links` (or `--full`) the `remoteLinks`.
 pub fn get(c: &Client, key: &str, o: &GetOpts) -> Result<Value> {
@@ -276,7 +276,7 @@ fn comments(c: &Client, key: &str) -> Result<Value> {
 /// Work item results: `{"issues": [...]}` and the cursor of the next page.
 pub struct Found {
     pub data: Value,
-    /// Jira's `nextPageToken`, which twg prints as `pageInfo.nextCursor`.
+    /// Jira's `nextPageToken`, printed as `pageInfo.nextCursor`.
     pub next: Option<String>,
 }
 
@@ -821,7 +821,7 @@ pub struct Paged {
 }
 
 impl Paged {
-    /// The REST page envelope twg prints, with the list under `collection`
+    /// The REST page envelope, with the list under `collection`
     /// (`projects`, `boards`, `sprints`): `{collection, total, startAt,
     /// maxResults, isLast}`.
     pub fn to_value(&self, collection: &str) -> Value {
@@ -908,14 +908,14 @@ pub struct SpaceQuery<'a> {
     pub status: Option<&'a str>,
     pub properties: &'a [String],
     pub property_query: Option<&'a str>,
-    /// Defaults to `key`, as in twg.
+    /// Defaults to `key`.
     pub order_by: Option<&'a str>,
     pub start: usize,
     pub limit: usize,
 }
 
 /// `jira space query` (and the old `jira project list`): REST
-/// `project/search` with its `values` renamed `projects`, as twg prints it.
+/// `project/search` with its `values` renamed `projects`.
 pub fn space_query(c: &Client, o: &SpaceQuery) -> Result<Value> {
     let mut q = Vec::new();
     if let Some(s) = o.query.map(str::trim).filter(|s| !s.is_empty()) {
@@ -942,7 +942,7 @@ pub fn space_query(c: &Client, o: &SpaceQuery) -> Result<Value> {
 }
 
 /// `jira space get` (and the old `jira project get`): a one-element list
-/// with the project's main fields, lead and issue types, as twg prints it.
+/// with the project's main fields, lead and issue types.
 pub fn project(c: &Client, key_or_id: &str) -> Result<Value> {
     let v = c.get(&format!("/rest/api/3/project/{}", enc(key_or_id)), &[])?;
     let mut out = Map::new();
@@ -1043,7 +1043,7 @@ fn accepted_input(schema: &Value) -> &'static str {
 
 /// The custom fields of a create screen, in twg's shape: REST's field
 /// metadata plus `acceptedInput` and an `example` `--field` argument.
-/// Standard fields have their own flags, so they are left out, as in twg.
+/// Standard fields have their own flags, so they are left out.
 fn create_fields(fields: &[Value]) -> Vec<Value> {
     let mut custom: Vec<&Value> = fields
         .iter()
@@ -1095,7 +1095,7 @@ fn create_fields(fields: &[Value]) -> Vec<Value> {
 }
 
 /// `jira workitem field create-metadata`: with an issue type,
-/// `{"fields": [...]}` (custom fields, as twg prints them); without one,
+/// `{"fields": [...]}` (custom fields); without one,
 /// `{"issueTypes": [...]}` for the space.
 pub fn create_meta(c: &Client, space: &str, issue_type: Option<&str>) -> Result<Value> {
     let types_path = format!("/rest/api/3/issue/createmeta/{}/issuetypes", enc(space));
@@ -1343,7 +1343,7 @@ pub fn unlink_weblink(c: &Client, key: &str, r: WeblinkRef) -> Result<Value> {
 
 // --- comments, changelog, delete ---------------------------------------------
 
-/// One offset page of a REST list, with what twg prints around it.
+/// One offset page of a REST list, with the fields printed around it.
 pub struct OffsetPage {
     pub data: Value,
     /// The page's own URL, when Jira gives one.
@@ -1361,7 +1361,7 @@ impl OffsetPage {
         json!({"hasNextPage": self.next.is_some(), "nextCursor": self.next})
     }
 
-    /// The page as twg prints Jira's searches: the list under `key`, beside
+    /// The page as Jira's searches print: the list under `key`, beside
     /// the paging fields.
     pub fn named(&self, key: &str) -> Value {
         let mut v = json!({});
@@ -1717,7 +1717,7 @@ fn board_values(c: &Client, o: &BoardQuery) -> Result<Paged> {
 }
 
 /// `jira board query` (and the old `jira board list`): Agile REST's board
-/// page with `values` renamed `boards`, as twg prints it.
+/// page with `values` renamed `boards`.
 pub fn board_query(c: &Client, o: &BoardQuery) -> Result<Value> {
     Ok(board_values(c, o)?.to_value("boards"))
 }

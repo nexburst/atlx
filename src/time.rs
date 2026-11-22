@@ -1,4 +1,4 @@
-//! Relative/absolute date filters as twg accepts them: `YYYY-MM-DD`, an ISO
+//! Relative/absolute date filters accepted by filters: `YYYY-MM-DD`, an ISO
 //! timestamp, or a duration ago such as `7d`, `2w`, `1m` (months), `1y`.
 
 use anyhow::{Result, bail};

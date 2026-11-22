@@ -83,7 +83,7 @@ fn select_projects_json_output() {
     );
     assert!(o.status.success(), "{}", stderr(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    // As in twg: the envelope keys stay, `request` and `pageInfo` go.
+    // The envelope keys stay, `request` and `pageInfo` go.
     assert_eq!(
         v,
         json!({

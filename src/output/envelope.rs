@@ -41,8 +41,8 @@ pub fn envelope(command: &str, resource_type: &str) -> Envelope {
 }
 
 impl Envelope {
-    /// Echo the command's inputs, as twg does. Null values are kept: twg
-    /// prints options that were not given as `null`.
+    /// Echo the command's inputs. Null values are kept, so
+    /// options that were not given print as `null`.
     pub fn request(mut self, request: Value) -> Self {
         self.request = Some(request);
         self
@@ -70,7 +70,7 @@ impl Envelope {
     }
 
     /// Finish the envelope around `data`. A batch result (`{items, summary}`)
-    /// also gets `meta.acquisition`, as in twg.
+    /// also gets `meta.acquisition`.
     pub fn data(mut self, data: Value) -> Value {
         if let Some(summary) = batch_summary(&data) {
             self.meta.insert("acquisition".into(), summary);
