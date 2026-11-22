@@ -38,6 +38,15 @@ pub struct Bytes {
     pub content_type: Option<String>,
 }
 
+/// A JSON response with the parts of its head some commands act on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub status: u16,
+    /// The raw `Location` header, e.g. of a `202 Accepted`.
+    pub location: Option<String>,
+    pub body: Value,
+}
+
 /// One part of a `multipart/form-data` request body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
@@ -185,6 +194,31 @@ impl Client {
         let payload = body.map_or(Payload::Empty, Payload::Json);
         let (resp, desc) = self.execute(method, path, query, payload, &opts)?;
         Ok(parse_value(self.read_body(resp, &desc)?))
+    }
+
+    /// Like [`Client::request`], for endpoints where the status or the
+    /// `Location` header matters (`202 Accepted` and its task URL).
+    pub fn request_response(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<Response> {
+        let opts = Opts {
+            headers: &[],
+            default_accept: "application/json",
+            overall_timeout: true,
+        };
+        let payload = body.map_or(Payload::Empty, Payload::Json);
+        let (resp, desc) = self.execute(method, path, query, payload, &opts)?;
+        let status = resp.status();
+        let location = resp.header("Location").map(String::from);
+        Ok(Response {
+            status,
+            location,
+            body: parse_value(self.read_body(resp, &desc)?),
+        })
     }
 
     /// GET a raw (binary) body into memory, subject to the body cap.

@@ -11,6 +11,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Bitbucket pull request lifecycle (#32): `pull-requests update`, reviewers
+  by name on `create`, `merge --wait`, `merge-status`, `mergeability`,
+  `conflicts`, `for-commit`, `remove-request-changes`, default reviewers,
+  `query --reviewer --page --merged-since --merged-before --scope me`, and
+  `bb inbox`.
 - Confluence comment threads (#29): `content comments
   get|reply|update|delete|resolve|reopen`, inline comments with `create
   --text-selection`, and `list --include-replies --sort --status

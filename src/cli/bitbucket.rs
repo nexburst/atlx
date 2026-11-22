@@ -4,12 +4,14 @@ use super::Out;
 use super::util::{
     DEFAULT_CONCURRENCY, batch, body_arg, concurrency_arg, deprecated, require_yes, text_arg,
 };
+use crate::bitbucket;
 use crate::client::{ApiError, Client};
 use crate::config::Config;
-use crate::{bitbucket, jira};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
+
+mod lifecycle;
 
 #[derive(Args)]
 pub(crate) struct RepoArgs {
@@ -22,6 +24,7 @@ pub(crate) struct RepoArgs {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum BbCmd {
     /// Repositories
     Repo {
@@ -44,6 +47,12 @@ pub(crate) enum BbCmd {
         #[command(subcommand)]
         cmd: PipelineCmd,
     },
+    /// Pull requests waiting on you
+    ///
+    /// Bitbucket has no workspace-wide reviewer query, so this scans your
+    /// most recently updated repositories (25 unless --repo-limit says
+    /// otherwise), at one request or more each.
+    Inbox(lifecycle::InboxArgs),
     /// Search code in a workspace
     Search {
         #[command(subcommand)]
@@ -164,7 +173,25 @@ pub(crate) enum PrCmd {
         updated_since: Option<String>,
         #[arg(long)]
         updated_before: Option<String>,
-        #[arg(long, default_value_t = 25)]
+        /// Nickname, account ID, {uuid} or me
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Merged on or after this day; reads each candidate's activity
+        #[arg(long)]
+        merged_since: Option<String>,
+        /// Merged before this day; reads each candidate's activity
+        #[arg(long)]
+        merged_before: Option<String>,
+        /// repo (default), or me: yours across recently updated repositories
+        #[arg(long, value_enum)]
+        scope: Option<lifecycle::QueryScope>,
+        /// Your part in them, with --scope me (default author)
+        #[arg(long, value_enum)]
+        role: Option<bitbucket::lifecycle::Role>,
+        /// One page, counted from 1
+        #[arg(long, value_parser = positive_limit)]
+        page: Option<usize>,
+        #[arg(long, short = 'n', default_value_t = 25)]
         limit: usize,
         #[command(flatten)]
         repo: RepoArgs,
@@ -204,6 +231,12 @@ pub(crate) enum PrCmd {
         description: Option<String>,
         #[arg(long, visible_alias = "desc-file")]
         description_file: Option<String>,
+        /// Reviewers: names, nicknames, account IDs, {uuid}s or me
+        #[arg(long, num_args = 1.., value_delimiter = ',')]
+        reviewer: Vec<String>,
+        /// Add the repository's default reviewers (atlx extra)
+        #[arg(long)]
+        default_reviewers: bool,
         /// Comma-separated Bitbucket user UUIDs
         #[arg(long)]
         reviewer_uuid: Option<String>,
@@ -322,6 +355,28 @@ pub(crate) enum PrCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
+    /// Change a pull request's fields and reviewers
+    Update(lifecycle::UpdateArgs),
+    /// Withdraw your request for changes
+    RemoveRequestChanges(lifecycle::PrArgs),
+    /// What blocks a merge, as far as the REST API tells
+    Mergeability(lifecycle::MergeabilityArgs),
+    /// The state of a merge still in progress
+    MergeStatus(lifecycle::MergeStatusArgs),
+    /// Files with merge conflicts
+    Conflicts(lifecycle::ConflictsArgs),
+    /// Pull requests that contain a commit
+    ForCommit(lifecycle::ForCommitArgs),
+    /// Default reviewers of a repository
+    DefaultReviewer {
+        #[command(subcommand)]
+        cmd: lifecycle::DefaultReviewerCmd,
+    },
+    /// Default reviewers, inherited ones included
+    EffectiveDefaultReviewer {
+        #[command(subcommand)]
+        cmd: lifecycle::EffectiveDefaultReviewerCmd,
+    },
     /// Merge a pull request
     Merge {
         /// Pull request number or URL
@@ -342,6 +397,12 @@ pub(crate) enum PrCmd {
         /// Keep the source branch even if the pull request was set to close it
         #[arg(long)]
         keep_source_branch: bool,
+        /// Wait until the merge has finished
+        #[arg(long)]
+        wait: bool,
+        /// Seconds --wait may take [default: 90]
+        #[arg(long, requires = "wait", visible_alias = "timeout")]
+        wait_timeout: Option<u64>,
         /// Old form of --merge-strategy
         #[arg(long, value_enum, hide = true)]
         strategy: Option<bitbucket::MergeStrategy>,
@@ -704,6 +765,7 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 },
             )?
         }
+        BbCmd::Inbox(a) => lifecycle::inbox(&c, &|r| path(r, None), dws, a)?,
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
                 text,
@@ -716,6 +778,12 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 created_before,
                 updated_since,
                 updated_before,
+                reviewer,
+                merged_since,
+                merged_before,
+                scope,
+                role,
+                page,
                 limit,
                 repo,
             } => {
@@ -730,9 +798,35 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     created_before: created_before.as_deref(),
                     updated_since: updated_since.as_deref(),
                     updated_before: updated_before.as_deref(),
+                    reviewer: reviewer.as_deref(),
+                    page,
                     limit,
                 };
-                bitbucket::pr_query(&c, &path(&repo, None)?, &q)?
+                let merged = merged_since.is_some() || merged_before.is_some();
+                if scope == Some(lifecycle::QueryScope::Me) {
+                    lifecycle::query_mine(&c, &repo, dws, role, &q, merged)?
+                } else {
+                    if role.is_some() {
+                        return Err(ApiError::usage("--role goes with --scope me").into());
+                    }
+                    let p = path(&repo, None)?;
+                    let me = match q.reviewer {
+                        Some(r) if r.eq_ignore_ascii_case("me") => {
+                            Some(bitbucket::lifecycle::my_uuid(&c)?)
+                        }
+                        _ => None,
+                    };
+                    let q = bitbucket::PrQuery {
+                        reviewer: me.as_deref().or(q.reviewer),
+                        ..q
+                    };
+                    if merged {
+                        let (since, before) = (merged_since.as_deref(), merged_before.as_deref());
+                        bitbucket::lifecycle::merged(&c, &p, &q, since, before)?
+                    } else {
+                        bitbucket::pr_query(&c, &p, &q)?
+                    }
+                }
             }
             PrCmd::Get {
                 ids,
@@ -763,6 +857,8 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 dest,
                 description,
                 description_file,
+                reviewer,
+                default_reviewers,
                 reviewer_uuid,
                 reviewer_account_id,
                 close_source_branch,
@@ -770,19 +866,25 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 repo,
             } => {
                 let description = body_arg(description, description_file)?;
+                let p = path(&repo, None)?;
+                let (reviewer_uuids, reviewer_account_ids) = lifecycle::reviewers(
+                    &c,
+                    &p,
+                    &reviewer,
+                    reviewer_account_id.as_deref(),
+                    reviewer_uuid.as_deref(),
+                    default_reviewers,
+                )?;
                 bitbucket::pr_create(
                     &c,
-                    &path(&repo, None)?,
+                    &p,
                     bitbucket::NewPr {
                         title: &title,
                         source: &source,
                         dest: dest.as_deref(),
                         description: description.as_deref(),
-                        reviewer_uuids: reviewer_uuid.as_deref().map(jira::csv).unwrap_or_default(),
-                        reviewer_account_ids: reviewer_account_id
-                            .as_deref()
-                            .map(jira::csv)
-                            .unwrap_or_default(),
+                        reviewer_uuids,
+                        reviewer_account_ids,
                         close_source_branch,
                         draft,
                     },
@@ -871,6 +973,8 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 merge_message,
                 close_source_branch,
                 keep_source_branch,
+                wait,
+                wait_timeout,
                 strategy,
                 message,
                 yes: _,
@@ -899,7 +1003,26 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     keep_source_branch,
                     message: message.as_deref(),
                 };
-                bitbucket::pr_merge(&c, &path(&repo, None)?, pr_id, &o)?
+                let defaults = bitbucket::lifecycle::Wait::default();
+                let wait = wait.then(|| bitbucket::lifecycle::Wait {
+                    timeout: wait_timeout.map_or(defaults.timeout, std::time::Duration::from_secs),
+                    ..defaults
+                });
+                bitbucket::lifecycle::merge(&c, &path(&repo, None)?, pr_id, &o, wait)?
+            }
+            PrCmd::Update(a) => lifecycle::update(&c, &|r| path(r, None), a)?,
+            PrCmd::RemoveRequestChanges(a) => {
+                lifecycle::remove_request_changes(&c, &|r| path(r, None), a)?
+            }
+            PrCmd::Mergeability(a) => lifecycle::mergeability(&c, &|r| path(r, None), a)?,
+            PrCmd::MergeStatus(a) => lifecycle::merge_status(&c, &|r| path(r, None), a)?,
+            PrCmd::Conflicts(a) => lifecycle::conflicts(&c, &|r| path(r, None), a)?,
+            PrCmd::ForCommit(a) => lifecycle::for_commit(&c, &|r| path(r, None), a)?,
+            PrCmd::DefaultReviewer { cmd } => {
+                lifecycle::default_reviewer(&c, &|r| path(r, None), cmd)?
+            }
+            PrCmd::EffectiveDefaultReviewer { cmd } => {
+                lifecycle::effective_default_reviewer(&c, &|r| path(r, None), cmd)?
             }
             PrCmd::Decline { id, yes: _, repo } => {
                 let pr_id = bitbucket::pr_number(&id)?;
@@ -1145,6 +1268,42 @@ mod tests {
     use crate::cli::Cli;
     use crate::cli::tests::shell_words;
     use clap::Parser;
+
+    #[test]
+    fn parses_pull_request_lifecycle() {
+        for ok in [
+            "atlx bb pull-requests update --pull-request 4 --title x --add-reviewer ann ben --remove-reviewer-uuid {a}",
+            "atlx bb pull-requests update --pull-request 4 --clear-description --ready --keep-source-branch",
+            "atlx bb pull-requests create --title x --source b --reviewer 'Cy Lee' --default-reviewers",
+            "atlx bb pull-requests merge --pull-request 4 --wait --timeout 5",
+            "atlx bb pull-requests merge-status --pull-request 4 --task t-1",
+            "atlx bb pull-requests mergeability 4 --exclude-git-mergeability-check",
+            "atlx bb pull-requests remove-request-changes 4",
+            "atlx bb pull-requests conflicts 4",
+            "atlx bb pull-requests for-commit abc123 -n 5",
+            "atlx bb pull-requests query --scope me --role reviewer",
+            "atlx bb pull-requests query --merged-since 7d --reviewer me",
+            "atlx bb pull-requests query --page 2",
+            "atlx bb pull-requests default-reviewer add {a} --yes",
+            "atlx bb pull-requests effective-default-reviewer query",
+            "atlx bb inbox --role all --repo-limit 5 --status OPEN",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx bb pull-requests update --pull-request 4 --draft --ready",
+            "atlx bb pull-requests update --pull-request 4 --clear-reviewers --reviewer ann",
+            "atlx bb pull-requests merge --pull-request 4 --wait-timeout 5",
+            "atlx bb pull-requests query --page 0",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
 
     #[test]
     fn rejects_duplicate_bitbucket_repo_flags() {

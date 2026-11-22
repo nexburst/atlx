@@ -248,10 +248,10 @@ ok bb pull-requests task delete --pull-request 42 --task 7 -y --repo acme/api
 ok bb pull-requests task resolve --pull-request 42 --task 7 --repo acme/api
 ok bb pull-requests task reopen --pull-request 42 --task 7 --repo acme/api
 gap #13 bb pull-requests comment create --pull-request 42 --text 'See screenshot' --image shot.png --repo acme/api
-gap #32 bb pull-requests update --pull-request 42 --title 'Better title' --repo acme/api
-gap #32 bb pull-requests mergeability 42 --repo acme/api
-gap #32 bb pull-requests merge --pull-request 42 --wait --repo acme/api
-gap #32 bb inbox
+ok bb pull-requests update --pull-request 42 --title 'Better title' --repo acme/api
+ok bb pull-requests mergeability 42 --repo acme/api
+ok bb pull-requests merge --pull-request 42 --wait --repo acme/api
+ok bb inbox
 gap #33 bb commit query --repo acme/api --branch main
 gap #33 bb workspace get --workspace acme
 gap #34 bb pipeline latest-failure --repo acme/api --branch main
