@@ -93,6 +93,7 @@ repositories, so:
 | Jira `workitem comment query`, `changelog query` (default, `--first`, `--after`, `--order-by`), `field update-metadata` (with and without `--include-system-fields`), `types query` (`--project`, `--issue --level -n`, `--id`), `types get`, `statuses query`, `priorities query` (all, and by `--id`) | Live side by side ([#23](https://github.com/nexburst/atlx/issues/23)) | Same key paths, and the same `data` values once the `self` host is normalised. Comment and changelog pages print `pageInfo` on the last page too (`hasNextPage: false`, `nextCursor: null`); `types query` adds top-level `warnings` when `--limit` cut the list or `--id` was used |
 | Jira `workitem attachment`, `worklog`, `watcher`, `vote` | Inferred, not run live ([#24](https://github.com/nexburst/atlx/issues/24)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `sprint` lifecycle, `board get\|create\|delete\|backlog\|projects\|quick-filter` | Inferred, not run live ([#25](https://github.com/nexburst/atlx/issues/25)) | Built from the public Agile 1.0 payloads and tested against mock responses only; key paths have not been compared with twg |
+| Jira `space` administration, `filter` | Inferred, not run live ([#26](https://github.com/nexburst/atlx/issues/26)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
@@ -158,7 +159,7 @@ inferred rows.
 
 ## Jira
 
-161 twg commands: ✅ 61, 🟡 1, 📋 89, ⛔ 10.
+161 twg commands: ✅ 99, 🟡 1, 📋 51, ⛔ 10.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -195,46 +196,46 @@ inferred rows.
 | `jira field create` | 📋 | #13 (unscheduled); REST v3 custom field admin |
 | `jira field delete` | 📋 | #13 (unscheduled); REST v3 custom field admin |
 | `jira field update` | 📋 | #13 (unscheduled); REST v3 custom field admin |
-| `jira filter add-favourite` | 📋 | #26 |
-| `jira filter change-owner` | 📋 | #26 |
-| `jira filter columns get` | 📋 | #26 |
-| `jira filter columns set` | 📋 | #26 |
-| `jira filter create` | 📋 | #26 |
-| `jira filter delete` | 📋 | #26 |
-| `jira filter get` | 📋 | #26 |
-| `jira filter query` | 📋 | #26 |
-| `jira filter remove-favourite` | 📋 | #26 |
-| `jira filter reset-columns` | 📋 | #26 |
-| `jira filter share add` | 📋 | #26 |
-| `jira filter share query` | 📋 | #26 |
-| `jira filter share remove` | 📋 | #26 |
-| `jira filter subscription query` | 📋 | #26 |
-| `jira filter update` | 📋 | #26 |
-| `jira space archive` | 📋 | #26; REST v3 project endpoints |
-| `jira space component counts` | 📋 | #26 |
-| `jira space component create` | 📋 | #26 |
-| `jira space component delete` | 📋 | #26 |
-| `jira space component get` | 📋 | #26 |
-| `jira space component query` | 📋 | #26 |
-| `jira space component update` | 📋 | #26 |
-| `jira space create` | 📋 | #26; REST v3 project endpoints |
-| `jira space delete` | 📋 | #26; REST v3 project endpoints |
+| `jira filter add-favourite` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter change-owner` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter columns get` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter columns set` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter create` | ✅ | #26; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira filter delete` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter get` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter query` | ✅ | #26; `--favourite` is an atlx extra; `--owner` is resolved to an account ID; GraphQL-only `--variables-json` not planned |
+| `jira filter remove-favourite` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter reset-columns` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter share add` | ✅ | #26; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira filter share query` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter share remove` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter subscription query` | ✅ | #26; GraphQL-only `--variables-json` not planned |
+| `jira filter update` | ✅ | #26; reads the filter and sends unchanged fields back; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira space archive` | ✅ | #26; takes only a key, ID, ARI or /projects/ URL, never a name; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
+| `jira space component counts` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component create` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component delete` | ✅ | #26; no confirmation, as in twg; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component get` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component query` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space component update` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space create` | ✅ | #26; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
+| `jira space delete` | ✅ | #26; moves it to the trash; takes only a key, ID, ARI or /projects/ URL, never a name; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
 | `jira space get` | ✅ | #18; GraphQL-only `--cloud-id`, `--variables-json` not planned |
-| `jira space issue-types` | 📋 | #26; REST v3 project endpoints |
-| `jira space notification-scheme get` | 📋 | #26; REST v3 project endpoints |
+| `jira space issue-types` | ✅ | #26 |
+| `jira space notification-scheme get` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira space query` | ✅ | #18; `--after` takes a numeric offset (REST pages by number); GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
-| `jira space restore` | 📋 | #26; REST v3 project endpoints |
-| `jira space status query` | 📋 | #26; REST v3 project endpoints |
-| `jira space types query` | 📋 | #26; REST v3 project endpoints |
-| `jira space update` | 📋 | #26; REST v3 project endpoints |
-| `jira space version counts` | 📋 | #26 |
-| `jira space version create` | 📋 | #26 |
-| `jira space version delete` | 📋 | #26 |
-| `jira space version get` | 📋 | #26 |
-| `jira space version merge` | 📋 | #26 |
-| `jira space version move` | 📋 | #26 |
-| `jira space version update` | 📋 | #26 |
-| `jira space versions query` | 📋 | #26 |
+| `jira space restore` | ✅ | #26; takes only a key, ID, ARI or /projects/ URL, never a name; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
+| `jira space status query` | ✅ | #26 |
+| `jira space types query` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space update` | ✅ | #26; GraphQL-only `--cloud-id`, `--input-json`, `--variables-json` not planned |
+| `jira space version counts` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version create` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version delete` | ✅ | #26; uses `removeAndSwap`; no confirmation, as in twg; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version get` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version merge` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version move` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space version update` | ✅ | #26; GraphQL-only `--cloud-id`, `--variables-json` not planned |
+| `jira space versions query` | ✅ | #26; `--after` is an offset; GraphQL-only `--cloud-id`, `--variables-json` not planned |
 | `jira sprint complete` | ✅ | #25; moves unfinished work (not subtasks) first when given a destination; `--move-open-to` is an alias; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira sprint create` | ✅ | #25; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira sprint delete` | ✅ | #25; GraphQL-only `--input-json`, `--variables-json` not planned |

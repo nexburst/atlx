@@ -189,6 +189,10 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira sprint get\|create\|update\|start\|complete\|delete` | `start` needs `--end-date` or `--duration 2w` unless the sprint has an end; `complete --incomplete-issues-destination-id <sprint>\|backlog` moves unfinished work first; names need `--board-id` |
 | `jira board get\|create\|delete`, `jira board backlog\|projects\|quick-filter query` | `get` adds columns and estimation; backlog takes `--active-quick-filters`, `--jql`, `--limit`; `delete` needs `--yes` |
 | `jira workitem create\|update` planning flags | `--sprint <id\|name\|none>`, `--story-points`, `--original-estimate`, `--remaining-estimate` (durations, or seconds), `--team <id\|none>` |
+| `jira space create\|update\|delete\|archive\|restore` | `delete` (to the trash), `archive` and `restore` need `--yes` and an exact key, ID, ARI or `/projects/` URL |
+| `jira space versions query`, `jira space version create\|get\|update\|delete\|merge\|move\|counts`, `jira space component query\|get\|create\|update\|delete\|counts` | deletes and merges ask for no confirmation, as in twg |
+| `jira space issue-types`, `status query`, `types query`, `notification-scheme get` | lookups by space |
+| `jira filter query\|get\|create\|update\|delete`, favourites, `columns`, `share`, `subscription query` | filters by ID, URL or exact name; `delete`, `reset-columns` and `share remove` need `--yes`; `jira workitem query --filter <id\|name>` runs one |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
 | `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` (atlx extra) moves to the trash, or `--purge` |

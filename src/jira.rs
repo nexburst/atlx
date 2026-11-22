@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 
+pub mod admin;
 pub mod agile;
 pub mod attachments;
 pub mod people;
