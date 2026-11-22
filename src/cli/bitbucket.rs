@@ -1,8 +1,10 @@
 //! `atlx bitbucket` (alias `bb`): clap definitions and dispatch.
 
 use super::Out;
-use super::util::{DEFAULT_CONCURRENCY, batch, body_arg, concurrency_arg, deprecated, text_arg};
-use crate::client::ApiError;
+use super::util::{
+    DEFAULT_CONCURRENCY, batch, body_arg, concurrency_arg, deprecated, require_yes, text_arg,
+};
+use crate::client::{ApiError, Client};
 use crate::config::Config;
 use crate::{bitbucket, jira};
 use anyhow::Result;
@@ -227,6 +229,45 @@ pub(crate) enum PrCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
+    /// Find lines in a pull request diff and the line numbers to comment on
+    DiffLine {
+        /// Pull request number or URL
+        id: String,
+        /// Text the diff line must contain
+        #[arg(long)]
+        text: String,
+        /// Only look in this file
+        #[arg(long)]
+        path: Option<String>,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Files changed by a pull request, with lines added and removed
+    Diffstat {
+        /// Pull request number or URL
+        id: String,
+        #[arg(long, short = 'n', default_value_t = 100, value_parser = positive_limit)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Commits in a pull request
+    Commits {
+        /// Pull request number or URL
+        #[arg(value_name = "pullRequest")]
+        pull_request: String,
+        #[arg(long, short = 'n', default_value_t = 50, value_parser = positive_limit)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Pull request as an mbox patch (for `git am`)
+    Patch {
+        /// Pull request number or URL
+        id: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
     /// Activity feed for one or more pull requests
     Activity {
         /// Pull request numbers or URLs
@@ -325,6 +366,18 @@ pub(crate) enum PrCmd {
     },
 }
 
+/// A whole number of 1 or more (ids, line numbers, limits).
+fn positive(s: &str) -> std::result::Result<u64, String> {
+    match s.trim().parse::<u64>() {
+        Ok(n) if n >= 1 => Ok(n),
+        _ => Err("expected a whole number of 1 or more".into()),
+    }
+}
+
+fn positive_limit(s: &str) -> std::result::Result<usize, String> {
+    positive(s).map(|n| usize::try_from(n).unwrap_or(usize::MAX))
+}
+
 #[derive(Subcommand)]
 pub(crate) enum PrTaskCmd {
     /// List the tasks on a pull request
@@ -337,11 +390,105 @@ pub(crate) enum PrTaskCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
+    /// Add a task to a pull request, optionally tied to a comment
+    Create {
+        /// Pull request number or URL
+        #[arg(long)]
+        pull_request: String,
+        /// Task text; `-` reads stdin
+        #[arg(long)]
+        text: String,
+        /// Comment id to attach the task to
+        #[arg(long, value_name = "commentId", value_parser = positive)]
+        comment: Option<u64>,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Show one task
+    Get {
+        /// Pull request number or URL
+        #[arg(value_name = "pullRequest")]
+        pull_request: String,
+        /// Task id
+        #[arg(long, value_parser = positive)]
+        task: u64,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Change a task's text and/or state
+    Update {
+        /// Pull request number or URL
+        #[arg(long)]
+        pull_request: String,
+        /// Task id
+        #[arg(long, value_parser = positive)]
+        task: u64,
+        /// New task text; `-` reads stdin
+        #[arg(long, required_unless_present_any = ["resolve", "reopen"])]
+        text: Option<String>,
+        /// Mark the task done
+        #[arg(long, conflicts_with = "reopen")]
+        resolve: bool,
+        /// Mark the task open again
+        #[arg(long)]
+        reopen: bool,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Delete a task (needs --yes)
+    Delete {
+        /// Pull request number or URL
+        #[arg(long)]
+        pull_request: String,
+        /// Task id
+        #[arg(long, value_parser = positive)]
+        task: u64,
+        /// Confirm the deletion
+        #[arg(long, short)]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Mark a task done
+    Resolve {
+        /// Pull request number or URL
+        #[arg(long)]
+        pull_request: String,
+        /// Task id
+        #[arg(long, value_parser = positive)]
+        task: u64,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Mark a done task open again
+    Reopen {
+        /// Pull request number or URL
+        #[arg(long)]
+        pull_request: String,
+        /// Task id
+        #[arg(long, value_parser = positive)]
+        task: u64,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+}
+
+/// The pull request and comment a comment command acts on.
+#[derive(Args)]
+pub(crate) struct CommentRef {
+    /// Pull request number or URL
+    #[arg(long)]
+    pull_request: String,
+    /// Comment id
+    #[arg(long, value_parser = positive)]
+    comment: u64,
+    #[command(flatten)]
+    repo: RepoArgs,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum PrCommentCmd {
-    /// Add a general, reply, or inline comment
+    /// Add a general, reply, pending, or inline comment
     Create {
         /// Pull request number or URL
         #[arg(long)]
@@ -349,15 +496,84 @@ pub(crate) enum PrCommentCmd {
         /// `-` reads stdin
         #[arg(long)]
         text: String,
-        #[arg(long)]
+        /// Comment id this one answers
+        #[arg(long, value_name = "commentId", value_parser = positive)]
         reply_to: Option<u64>,
+        /// Keep the comment unpublished until the review is finished in Bitbucket
+        #[arg(long)]
+        pending: bool,
         /// Inline comment on this file path
         #[arg(long)]
         path: Option<String>,
-        #[arg(long, requires = "path")]
+        /// New-side line number
+        #[arg(long, requires = "path", value_parser = positive,
+              conflicts_with_all = ["start_line", "end_line", "start_from_line", "end_from_line"])]
         line: Option<u64>,
+        /// First new-side line of a range (with --end-line)
+        #[arg(long, requires_all = ["path", "end_line"], value_parser = positive)]
+        start_line: Option<u64>,
+        /// Last new-side line of a range (with --start-line)
+        #[arg(long, requires_all = ["path", "start_line"], value_parser = positive)]
+        end_line: Option<u64>,
+        /// Old-side line number
+        #[arg(long, requires = "path", value_parser = positive,
+              conflicts_with_all = ["start_line", "end_line", "start_from_line", "end_from_line"])]
+        from_line: Option<u64>,
+        /// First old-side line of a range (with --end-from-line)
+        #[arg(long, requires_all = ["path", "end_from_line"], value_parser = positive)]
+        start_from_line: Option<u64>,
+        /// Last old-side line of a range (with --start-from-line)
+        #[arg(long, requires_all = ["path", "start_from_line"], value_parser = positive)]
+        end_from_line: Option<u64>,
         #[command(flatten)]
         repo: RepoArgs,
+    },
+    /// List the comments on a pull request
+    Query {
+        /// Pull request number or URL
+        #[arg(value_name = "pullRequest")]
+        pull_request: String,
+        #[arg(long, short = 'n', default_value_t = 50, value_parser = positive_limit)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Show one comment
+    Get {
+        /// Pull request number or URL
+        #[arg(value_name = "pullRequest")]
+        pull_request: String,
+        /// Comment id
+        #[arg(long, value_parser = positive)]
+        comment: u64,
+        #[command(flatten)]
+        repo: RepoArgs,
+    },
+    /// Replace a comment's text
+    Update {
+        #[command(flatten)]
+        target: CommentRef,
+        /// New comment text; `-` reads stdin
+        #[arg(long)]
+        text: String,
+    },
+    /// Delete a comment (needs --yes)
+    Delete {
+        #[command(flatten)]
+        target: CommentRef,
+        /// Confirm the deletion
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Mark a comment thread resolved
+    Resolve {
+        #[command(flatten)]
+        target: CommentRef,
+    },
+    /// Reopen a resolved comment thread
+    Reopen {
+        #[command(flatten)]
+        target: CommentRef,
     },
 }
 
@@ -572,29 +788,38 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     },
                 )?
             }
-            PrCmd::Comment {
-                cmd:
-                    PrCommentCmd::Create {
-                        pull_request,
-                        text,
-                        reply_to,
-                        path: file,
-                        line,
-                        repo,
-                    },
-            } => {
-                let text = text_arg(text)?;
-                bitbucket::pr_comment(
+            PrCmd::Comment { cmd } => comment_cmd(&c, &|r| path(r, None), cmd)?,
+            PrCmd::DiffLine {
+                id,
+                text,
+                path: file,
+                repo,
+            } => bitbucket::pr_diff_line(
+                &c,
+                &path(&repo, None)?,
+                bitbucket::pr_number(&id)?,
+                &text,
+                file.as_deref(),
+            )?,
+            PrCmd::Diffstat { id, limit, repo } => {
+                bitbucket::pr_diffstat(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?, limit)?
+            }
+            PrCmd::Commits {
+                pull_request,
+                limit,
+                repo,
+            } => bitbucket::pr_commits(
+                &c,
+                &path(&repo, None)?,
+                bitbucket::pr_number(&pull_request)?,
+                limit,
+            )?,
+            PrCmd::Patch { id, repo } => {
+                return Ok(Out::Raw(bitbucket::pr_patch(
                     &c,
                     &path(&repo, None)?,
-                    bitbucket::pr_number(&pull_request)?,
-                    bitbucket::NewComment {
-                        text: &text,
-                        reply_to,
-                        path: file.as_deref(),
-                        line,
-                    },
-                )?
+                    bitbucket::pr_number(&id)?,
+                )?));
             }
             PrCmd::Diff { id, repo } => {
                 return Ok(Out::Raw(bitbucket::pr_diff(
@@ -625,19 +850,7 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                     })?,
                 )
             }
-            PrCmd::Task {
-                cmd:
-                    PrTaskCmd::Query {
-                        pull_request,
-                        limit,
-                        repo,
-                    },
-            } => bitbucket::pr_tasks(
-                &c,
-                &path(&repo, None)?,
-                bitbucket::pr_number(&pull_request)?,
-                limit,
-            )?,
+            PrCmd::Task { cmd } => task_cmd(&c, &|r| path(r, None), cmd)?,
             PrCmd::Tasks { id, repo } => {
                 deprecated("bb pull-requests tasks", "bb pull-requests task query");
                 bitbucket::pr_tasks(&c, &path(&repo, None)?, bitbucket::pr_number(&id)?, 500)?
@@ -748,6 +961,158 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
     Ok(Out::Data(data))
 }
 
+type RepoPath<'a> = &'a dyn Fn(&RepoArgs) -> Result<String>;
+
+/// `bb pull-requests comment ...`
+fn comment_cmd(c: &Client, path: RepoPath, cmd: PrCommentCmd) -> Result<Value> {
+    let pr = |s: &str| bitbucket::pr_number(s);
+    match cmd {
+        PrCommentCmd::Create {
+            pull_request,
+            text,
+            reply_to,
+            pending,
+            path: file,
+            line,
+            start_line,
+            end_line,
+            from_line,
+            start_from_line,
+            end_from_line,
+            repo,
+        } => {
+            let text = text_arg(text)?;
+            let n = bitbucket::NewComment {
+                text: &text,
+                reply_to,
+                pending,
+                path: file.as_deref(),
+                anchor: bitbucket::Anchor {
+                    line,
+                    from_line,
+                    start_line,
+                    end_line,
+                    start_from_line,
+                    end_from_line,
+                },
+            };
+            // Check the anchor before resolving the repository or sending.
+            bitbucket::comment_body(&n)?;
+            bitbucket::pr_comment(c, &path(&repo)?, pr(&pull_request)?, n)
+        }
+        PrCommentCmd::Query {
+            pull_request,
+            limit,
+            repo,
+        } => bitbucket::pr_comment_query(c, &path(&repo)?, pr(&pull_request)?, limit),
+        PrCommentCmd::Get {
+            pull_request,
+            comment,
+            repo,
+        } => bitbucket::pr_comment_get(c, &path(&repo)?, pr(&pull_request)?, comment),
+        PrCommentCmd::Update { target: t, text } => {
+            let text = text_arg(text)?;
+            bitbucket::pr_comment_update(c, &path(&t.repo)?, pr(&t.pull_request)?, t.comment, &text)
+        }
+        PrCommentCmd::Delete { target: t, yes } => {
+            require_yes(yes, "deleting the comment")?;
+            bitbucket::pr_comment_delete(c, &path(&t.repo)?, pr(&t.pull_request)?, t.comment)
+        }
+        PrCommentCmd::Resolve { target: t } => {
+            bitbucket::pr_comment_resolve(c, &path(&t.repo)?, pr(&t.pull_request)?, t.comment)
+        }
+        PrCommentCmd::Reopen { target: t } => {
+            bitbucket::pr_comment_reopen(c, &path(&t.repo)?, pr(&t.pull_request)?, t.comment)
+        }
+    }
+}
+
+/// `bb pull-requests task ...`
+fn task_cmd(c: &Client, path: RepoPath, cmd: PrTaskCmd) -> Result<Value> {
+    let pr = |s: &str| bitbucket::pr_number(s);
+    let change = |c: &Client, repo: &RepoArgs, id: &str, task, t: bitbucket::TaskChange| {
+        bitbucket::pr_task_update(c, &path(repo)?, pr(id)?, task, &t)
+    };
+    match cmd {
+        PrTaskCmd::Query {
+            pull_request,
+            limit,
+            repo,
+        } => bitbucket::pr_tasks(c, &path(&repo)?, pr(&pull_request)?, limit),
+        PrTaskCmd::Create {
+            pull_request,
+            text,
+            comment,
+            repo,
+        } => {
+            let text = text_arg(text)?;
+            bitbucket::pr_task_create(c, &path(&repo)?, pr(&pull_request)?, &text, comment)
+        }
+        PrTaskCmd::Get {
+            pull_request,
+            task,
+            repo,
+        } => bitbucket::pr_task_get(c, &path(&repo)?, pr(&pull_request)?, task),
+        PrTaskCmd::Update {
+            pull_request,
+            task,
+            text,
+            resolve,
+            reopen,
+            repo,
+        } => {
+            let text = text.map(text_arg).transpose()?;
+            let resolved = match (resolve, reopen) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            let t = bitbucket::TaskChange {
+                text: text.as_deref(),
+                resolved,
+            };
+            change(c, &repo, &pull_request, task, t)
+        }
+        PrTaskCmd::Delete {
+            pull_request,
+            task,
+            yes,
+            repo,
+        } => {
+            require_yes(yes, "deleting the task")?;
+            bitbucket::pr_task_delete(c, &path(&repo)?, pr(&pull_request)?, task)
+        }
+        PrTaskCmd::Resolve {
+            pull_request,
+            task,
+            repo,
+        } => change(
+            c,
+            &repo,
+            &pull_request,
+            task,
+            bitbucket::TaskChange {
+                text: None,
+                resolved: Some(true),
+            },
+        ),
+        PrTaskCmd::Reopen {
+            pull_request,
+            task,
+            repo,
+        } => change(
+            c,
+            &repo,
+            &pull_request,
+            task,
+            bitbucket::TaskChange {
+                text: None,
+                resolved: Some(false),
+            },
+        ),
+    }
+}
+
 /// twg's Bitbucket batch shape: `{workspace, repository, items, summary:
 /// {requested, succeeded, failed}, partial}`, with no `data` envelope.
 /// A single result passes through unchanged.
@@ -787,6 +1152,68 @@ mod tests {
             "atlx bb repo get --repo api --repo web",
             "atlx bb prs query --repo api --repo web",
             "atlx bb pipeline query --repo api --repo web",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn bb_review_loop_commands_parse() {
+        for ok in [
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --reply-to 7 --pending -r acme/api",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path src/a.rs -r api",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path src/a.rs --line 3 --from-line 2 -r api",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --start-line 1 --end-line 4 --start-from-line 1 --end-from-line 3 -r api",
+            "atlx bb pull-requests comment query 42 -n 10 -r api",
+            "atlx bb pull-requests comment get 42 --comment 9 -r api",
+            "atlx bb pull-requests comment update --pull-request 42 --comment 9 --text new -r api",
+            "atlx bb pull-requests comment delete --pull-request 42 --comment 9 --yes -r api",
+            "atlx bb pull-requests comment delete --pull-request 42 --comment 9 -r api",
+            "atlx bb pull-requests comment resolve --pull-request 42 --comment 9 -r api",
+            "atlx bb pull-requests comment reopen --pull-request 42 --comment 9 -r api",
+            "atlx bb pull-requests task create --pull-request 42 --text t --comment 9 -r api",
+            "atlx bb pull-requests task get 42 --task 6 -r api",
+            "atlx bb pull-requests task update --pull-request 42 --task 6 --text t --resolve -r api",
+            "atlx bb pull-requests task update --pull-request 42 --task 6 --reopen -r api",
+            "atlx bb pull-requests task delete --pull-request 42 --task 6 -y -r api",
+            "atlx bb pull-requests task resolve --pull-request 42 --task 6 -r api",
+            "atlx bb pull-requests task reopen --pull-request 42 --task 6 -r api",
+            "atlx bb pull-requests diffstat 42 -n 5 -r api",
+            "atlx bb pull-requests commits 42 --limit 5 -r api",
+            "atlx bb pull-requests patch 42 -r api",
+            "atlx bb pull-requests diff-line 42 --text validate --path src/a.rs -r api",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            // Inline flags need --path.
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --line 3",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --start-from-line 3 --end-from-line 4",
+            // A single line and a range don't mix.
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --line 3 --start-line 1 --end-line 4",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --from-line 3 --start-from-line 1 --end-from-line 4",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --line 3 --end-from-line 4",
+            // Ranges need both ends.
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --start-line 3",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --end-from-line 3",
+            // Ids and line numbers are positive.
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --path a --line 0",
+            "atlx bb pull-requests comment create --pull-request 42 --text hi --reply-to abc",
+            "atlx bb pull-requests comment get 42 --comment x",
+            "atlx bb pull-requests comment query 42 -n 0",
+            "atlx bb pull-requests comment get 42",
+            "atlx bb pull-requests comment update --pull-request 42 --comment 9",
+            "atlx bb pull-requests task create --pull-request 42",
+            "atlx bb pull-requests task update --pull-request 42 --task 6",
+            "atlx bb pull-requests task update --pull-request 42 --task 6 --resolve --reopen",
+            "atlx bb pull-requests task get 42 --task 0",
+            "atlx bb pull-requests diffstat 42 -n 0",
+            "atlx bb pull-requests diff-line 42",
         ] {
             assert!(
                 Cli::try_parse_from(shell_words(bad)).is_err(),

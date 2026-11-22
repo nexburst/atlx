@@ -96,6 +96,7 @@ repositories, so:
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
 | Confluence `content update --edits` | Inferred from twg's help: the dry run's `data.body.value` holds the resulting HTML | Not verified; atlx's dry run also has `fromVersion`, `request` and a unified `diff` |
 | Other Confluence commands | Inferred: REST v2 objects with `externalUrl` and `snapshotToken`, lists as `{results, nextCursor}` | Not verified |
+| Bitbucket `pull-requests comment ...`, `task ...`, `diffstat`, `commits`, `diff-line` (#31) | Inferred; no Bitbucket workspace was available. REST 2.0 comment, task, diffstat and commit objects, lists bare as in `task query`. Deletes and `comment reopen`, which Bitbucket answers with 204, print `{id, pullRequest, deleted: true}` or `{id, pullRequest, resolved: false}`. `diff-line` prints a list of `{path, type, line, fromLine, text, hunk}` (plus `oldPath` on renames): `line` goes to `--line`, `fromLine` to `--from-line` | Not verified |
 | Bitbucket | Partly live: twg printed `repo query` as a bare list and a failed batch `pull-requests get` as `{workspace, repository, items, summary, partial}`, both without an envelope. The rest is inferred from the presets: REST 2.0 objects plus `_comments`, `_statuses`, `_repo` and the step log fields | Not verified with data. One known difference: when every ID of a Bitbucket batch fails, twg still prints the batch object (exit 1) while atlx prints the error envelope (exit 1) |
 | Account commands (`login`, `logout`, `auth profile ...`, `setup ...`, `doctor`) and `atlx search` | Envelope only. twg's data here describes its OAuth token store, which atlx doesn't have, so the data keeps atlx's own keys | Intentional |
 | Errors | The error envelope from #17; JSONL error lines get `_twg: {collection: "root", index: 0}` as in twg | Live |
@@ -460,7 +461,7 @@ inferred rows.
 
 ## Bitbucket
 
-78 twg commands: ✅ 12, 🟡 6, 📋 60.
+78 twg commands: ✅ 28, 🟡 6, 📋 44.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -494,14 +495,14 @@ inferred rows.
 | `bitbucket pipeline trigger` | 📋 | #34 |
 | `bitbucket pull-requests activity` | ✅ | takes several ids as a batch, with `--strict` and `--batch-concurrency` (#18) |
 | `bitbucket pull-requests approve` | ✅ |  |
-| `bitbucket pull-requests comment create` | 🟡 | missing `--end-from-line`, `--end-line`, `--from-line`, `--image`, `--image-name`, `--pending`, `--start-from-line`, `--start-line` (#31) |
-| `bitbucket pull-requests comment delete` | 📋 | #31 |
-| `bitbucket pull-requests comment get` | 📋 | #31 |
-| `bitbucket pull-requests comment query` | 📋 | #31 |
-| `bitbucket pull-requests comment reopen` | 📋 | #31 |
-| `bitbucket pull-requests comment resolve` | 📋 | #31 |
-| `bitbucket pull-requests comment update` | 📋 | #31 |
-| `bitbucket pull-requests commits` | 📋 | #31 |
+| `bitbucket pull-requests comment create` | 🟡 | missing `--image`, `--image-name` (#13 (unscheduled); upload through Downloads). `--reply-to`, `--pending` and the inline `--path`/`--line`/`--from-line`/range flags work (#31) |
+| `bitbucket pull-requests comment delete` | ✅ | needs `--yes`, as in twg (#31) |
+| `bitbucket pull-requests comment get` | ✅ | #31 |
+| `bitbucket pull-requests comment query` | ✅ | deleted comments are left out, oldest first (#31) |
+| `bitbucket pull-requests comment reopen` | ✅ | #31 |
+| `bitbucket pull-requests comment resolve` | ✅ | #31 |
+| `bitbucket pull-requests comment update` | ✅ | #31 |
+| `bitbucket pull-requests commits` | ✅ | #31 |
 | `bitbucket pull-requests conflicts` | 📋 | #32 |
 | `bitbucket pull-requests create` | 🟡 | missing `--image`, `--image-name`, `--reviewer` (#32) |
 | `bitbucket pull-requests decline` | ✅ | no confirmation is asked; `--yes` is ignored (#18) |
@@ -510,25 +511,25 @@ inferred rows.
 | `bitbucket pull-requests default-reviewer query` | 📋 | #32 |
 | `bitbucket pull-requests default-reviewer remove` | 📋 | #32 |
 | `bitbucket pull-requests diff` | ✅ |  |
-| `bitbucket pull-requests diff-line` | 📋 | #31 |
-| `bitbucket pull-requests diffstat` | 📋 | #31 |
+| `bitbucket pull-requests diff-line` | ✅ | atlx finds the matches in the REST diff (#31); output shape inferred, see [JSON output shapes](#json-output-shapes) |
+| `bitbucket pull-requests diffstat` | ✅ | #31 |
 | `bitbucket pull-requests effective-default-reviewer query` | 📋 | #32 |
 | `bitbucket pull-requests for-commit` | 📋 | #32 |
 | `bitbucket pull-requests get` | ✅ | `--batch-concurrency` fetches in parallel and keeps input order (#18) |
 | `bitbucket pull-requests merge` | 🟡 | missing `--timeout`, `--wait`, `--wait-timeout` (#32); no confirmation is asked. The old positional id, `--strategy`, `--message` and `--yes` still work (hidden, deprecated) |
 | `bitbucket pull-requests merge-status` | 📋 | #32 |
 | `bitbucket pull-requests mergeability` | 📋 | #32 |
-| `bitbucket pull-requests patch` | 📋 | #31 |
+| `bitbucket pull-requests patch` | ✅ | raw text, as `diff` (#31) |
 | `bitbucket pull-requests query` | 🟡 | missing `--merged-before`, `--merged-since`, `--page`, `--reviewer`, `--role` (#32); GraphQL-only `--scope` not planned |
 | `bitbucket pull-requests remove-request-changes` | 📋 | #32 |
 | `bitbucket pull-requests request-changes` | ✅ |  |
-| `bitbucket pull-requests task create` | 📋 | #31 |
-| `bitbucket pull-requests task delete` | 📋 | #31 |
-| `bitbucket pull-requests task get` | 📋 | #31 |
+| `bitbucket pull-requests task create` | ✅ | #31 |
+| `bitbucket pull-requests task delete` | ✅ | needs `--yes`, as in twg (#31) |
+| `bitbucket pull-requests task get` | ✅ | #31 |
 | `bitbucket pull-requests task query` | ✅ | #18 |
-| `bitbucket pull-requests task reopen` | 📋 | #31 |
-| `bitbucket pull-requests task resolve` | 📋 | #31 |
-| `bitbucket pull-requests task update` | 📋 | #31 |
+| `bitbucket pull-requests task reopen` | ✅ | #31 |
+| `bitbucket pull-requests task resolve` | ✅ | #31 |
+| `bitbucket pull-requests task update` | ✅ | #31 |
 | `bitbucket pull-requests unapprove` | ✅ |  |
 | `bitbucket pull-requests update` | 📋 | #32 |
 | `bitbucket repo contributors` | 📋 | #33 |
