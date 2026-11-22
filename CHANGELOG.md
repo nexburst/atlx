@@ -11,6 +11,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Confluence lifecycle (#30): `content move|copy|trash|untrash|purge|archive|
+  publish|delete-draft`, `create --private --content-width --title-emoji`,
+  `space create|update|archive|unarchive|delete`, and `tree` for whole
+  spaces, with `--type`, depth 10 and a 500-node cap. Writes need `--yes`
+  where twg's do; `space delete` refuses content URLs.
 - Jira administration (#26): space lifecycle and lookups, versions,
   components, saved filters, and `jira workitem query --filter`. Space
   delete (to the trash), archive and restore need `--yes` and accept only an

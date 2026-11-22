@@ -85,6 +85,7 @@ atlx bitbucket repo get [<SLUG>] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>]
 atlx bitbucket repo query [-q/--query <QUERY>] [-n/--limit <LIMIT> [default: 25]] [-w/--workspace <WORKSPACE>] [-r/--repo <REPO>] [--project <PROJECT>] [--language <LANGUAGE>] [--sort <SORT> [default: -updated_on]] [--role <ROLE>]
 atlx bitbucket search code <QUERY>... (required) [--workspace <WORKSPACE>] [--repo <REPO>] [--limit <LIMIT> [default: 25]]
 atlx completion script <SHELL> {bash|elvish|fish|powershell|zsh} (required)
+atlx confluence content archive <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes --wait [--wait-timeout <WAIT_TIMEOUT> [default: 120]]
 atlx confluence content attachments delete --attachment-id <ATTACHMENT_ID> (required) --purge -y/--yes
 atlx confluence content attachments download --attachment-id <ATTACHMENT_ID> (required) [--out <OUT>] [--at-version <AT_VERSION>] --force
 atlx confluence content attachments get --attachment-id <ATTACHMENT_ID> (required) [--at-version <AT_VERSION>]
@@ -100,8 +101,10 @@ atlx confluence content comments reopen --comment-id <COMMENT_ID> (required) [--
 atlx confluence content comments reply --comment-id <COMMENT_ID> (required) [--body <BODY>] [--body-file <BODY_FILE>] [--body-format <BODY_FORMAT> {html|markdown|plain}]
 atlx confluence content comments resolve --comment-id <COMMENT_ID> (required) [--comment-type <COMMENT_TYPE> {footer|inline}]
 atlx confluence content comments update --comment-id <COMMENT_ID> (required) [--comment-type <COMMENT_TYPE> {footer|inline}] [--body <BODY>] [--body-file <BODY_FILE>] [--body-format <BODY_FORMAT> {html|markdown|plain}] [--expected-version <EXPECTED_VERSION>]
-atlx confluence content create --space-id <SPACE_ID> (required) [--parent-id <PARENT_ID>] --content-type <CONTENT_TYPE> {page|blogpost} (required) --title <TITLE> (required) [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --draft -y/--yes --ack-body-formats
+atlx confluence content copy <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--parent-content-id/--destination-page <PARENT_CONTENT_ID>] [--space-key/--destination-space <SPACE_KEY>] [--title <TITLE>] --copy-attachments --copy-labels --copy-permissions
+atlx confluence content create --space-id <SPACE_ID> (required) [--parent-id <PARENT_ID>] --content-type <CONTENT_TYPE> {page|blogpost} (required) --title <TITLE> (required) [--body <BODY>] [--body-file <BODY_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --draft --private [--content-width <CONTENT_WIDTH> {narrow|wide|max}] [--title-emoji <TITLE_EMOJI>] [--reference-space <REFERENCE_SPACE>] -y/--yes --ack-body-formats
 atlx confluence content delete <REFERENCE> (required) -y/--yes (hidden) --purge
+atlx confluence content delete-draft <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--content-type <CONTENT_TYPE> {page|blogpost}]
 atlx confluence content get [<REFS>...] [--id <ID_FLAGS>...] [--detail <DETAIL> {summary|outline|full}] [--format <FORMAT> {html|md|url}] [--section <heading>...] --body-only --draft [--reference-space <REFERENCE_SPACE>] --include-metadata --strict
 atlx confluence content history diff --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --from <FROM> (required) --to <TO> (required) [--format <FORMAT> {html|md} [default: md]]
 atlx confluence content history get --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --at-version <AT_VERSION> (required) [--format <FORMAT> {html|md}]
@@ -113,6 +116,11 @@ atlx confluence content labels remove --id <ID> (required) [--reference-space <R
 atlx confluence content labels unwatch --name <NAME> (required) -y/--yes
 atlx confluence content labels watch --name <NAME> (required) -y/--yes
 atlx confluence content list --space <SPACE> (required) [--content-type <CONTENT_TYPE> {page|blogpost} [default: page]] [--status <STATUS> [default: current]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence content move <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--parent-id <PARENT_ID>] [--before <BEFORE>] [--after <AFTER>] [--target <TARGET>] [--position <POSITION> {append|before|after}]
+atlx confluence content publish <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--content-type <CONTENT_TYPE> {page|blogpost}] [--title <TITLE>]
+atlx confluence content purge <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
+atlx confluence content trash <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
+atlx confluence content untrash <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
 atlx confluence content update [<REFERENCE>] [--id <ID>] [--snapshot-token <SNAPSHOT_TOKEN>] [--title <TITLE>] [--version-message <VERSION_MESSAGE>] --minor-edit [--body <BODY>] [--body-file <BODY_FILE>] [--edits <EDITS>] [--edits-file <EDITS_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --dry-run --draft -y/--yes --ack-body-formats
 atlx confluence content versions diff --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --from <FROM> (required) --to <TO> (required) [--format <FORMAT> {html|md} [default: md]]
 atlx confluence content versions get --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --at-version <AT_VERSION> (required) [--format <FORMAT> {html|md}]
@@ -120,10 +128,15 @@ atlx confluence content versions list --id <ID> (required) [--reference-space <R
 atlx confluence content versions restore --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --at-version <AT_VERSION> (required) [--message <MESSAGE>] --restore-title -y/--yes
 atlx confluence search query [<CQL_ARG>...] [--cql <CQL>] [--limit <LIMIT> [default: 25]] --excerpt [--cursor <CURSOR>]
 atlx confluence search text [<TEXT>...] [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--updated-since/--since <UPDATED_SINCE>] [--created-since <CREATED_SINCE>] --excerpt [--cursor <CURSOR>]
+atlx confluence space archive [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
+atlx confluence space create --key <KEY> (required) --name <NAME> (required) [--description <DESCRIPTION>] --private --dry-run -y/--yes
+atlx confluence space delete [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
 atlx confluence space get [<IDENTIFIER>] [--key <KEY> (hidden)] --labels
 atlx confluence space list [--type <KIND>] [--status <STATUS>] [--keys <KEYS>] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>] --labels
 atlx confluence space me
-atlx confluence tree [<ref>] [--target <TARGET>] [--depth <DEPTH> [default: 2]]
+atlx confluence space unarchive [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
+atlx confluence space update [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes [--name <NAME>] [--description <DESCRIPTION>] [--type <KIND> {global|personal}] [--status <STATUS> {current|archived}] [--homepage <HOMEPAGE>]
+atlx confluence tree [<ref>] [--target <TARGET>] [--depth <DEPTH> [default: 2]] [--type <NODE_TYPE> {page|whiteboard|database}]
 atlx doctor --strict
 atlx jira board backlog query [--id <ID>] [--board-id <BOARD_ID>] [--active-quick-filters <ACTIVE_QUICK_FILTERS>] [--jql <JQL>] [--limit <LIMIT> [default: 50]]
 atlx jira board create --name <NAME> (required) --filter-id <FILTER_ID> (required) --type <BOARD_TYPE> {scrum|kanban} (required)

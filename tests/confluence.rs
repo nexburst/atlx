@@ -213,6 +213,7 @@ fn confluence_search_query_and_list_extract_next_cursor() {
     let created = confluence::create(
         &client,
         NewContent {
+            private: false,
             space: "999",
             content_type: ContentType::Page,
             title: "Created",
