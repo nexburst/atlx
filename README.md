@@ -30,7 +30,7 @@ twg, such as `.data.issues[].key`, work on atlx output as they are.
 ## Install
 
 Prebuilt binaries are published on the
-[releases page](https://github.com/pedrosanzmtz/atlx/releases) for Linux
+[releases page](https://github.com/nexburst/atlx/releases) for Linux
 (x86_64 and aarch64 glibc, plus a static x86_64 musl build), macOS (Intel and
 Apple silicon) and Windows (x86_64 and ARM64).
 
@@ -46,8 +46,8 @@ README, the changelog, shell completions in `completions/` and man pages in
 `man/`. Check the download against `SHA256SUMS` from the same release:
 
 ```sh
-curl -LO https://github.com/pedrosanzmtz/atlx/releases/download/v0.1.0/atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
-curl -LO https://github.com/pedrosanzmtz/atlx/releases/download/v0.1.0/SHA256SUMS
+curl -LO https://github.com/nexburst/atlx/releases/download/v0.1.0/atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
+curl -LO https://github.com/nexburst/atlx/releases/download/v0.1.0/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz atlx
 install -m 755 atlx ~/.local/bin/
@@ -62,7 +62,7 @@ cargo install atlx --locked
 **From source:**
 
 ```sh
-git clone https://github.com/pedrosanzmtz/atlx && cd atlx
+git clone https://github.com/nexburst/atlx && cd atlx
 cargo install --path . --locked
 ```
 

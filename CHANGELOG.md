@@ -160,5 +160,5 @@ First release.
 
 - Argument validation, pagination and auth-origin edge cases (#1).
 
-[Unreleased]: https://github.com/pedrosanzmtz/atlx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/pedrosanzmtz/atlx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nexburst/atlx/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nexburst/atlx/releases/tag/v0.1.0

@@ -7,8 +7,8 @@ and no confirmation gates where twg has none (`--yes` stays accepted as a
 no-op). Commands that need Atlassian's Teamwork Graph, the GraphQL gateway or
 Rovo are out of scope; atlx is built only on the public REST APIs. These rules
 come from the maintainer decisions on
-[#18](https://github.com/pedrosanzmtz/atlx/issues/18) and
-[#21](https://github.com/pedrosanzmtz/atlx/issues/21).
+[#18](https://github.com/nexburst/atlx/issues/18) and
+[#21](https://github.com/nexburst/atlx/issues/21).
 
 This page compares atlx with **twg 1.4.4**. The twg side comes from
 [`compat/twg-1.4.4.txt`](compat/twg-1.4.4.txt), made by
@@ -59,22 +59,22 @@ These checks are about parsing. Output shapes are covered by
 | `-s, --site` | ✅ | |
 | `-u, --user` | ✅ | |
 | `--timeout-ms` | ✅ | |
-| `-p, --profile` | ✅ | named profiles ([#20](https://github.com/pedrosanzmtz/atlx/issues/20)) |
-| `--select`, `--agent-fields`, `--output-summary` | ✅ | output controls ([#19](https://github.com/pedrosanzmtz/atlx/issues/19)); see the README |
-| `--api-version` | ✅ | `v2` is accepted and other versions are rejected ([#19](https://github.com/pedrosanzmtz/atlx/issues/19)) |
+| `-p, --profile` | ✅ | named profiles ([#20](https://github.com/nexburst/atlx/issues/20)) |
+| `--select`, `--agent-fields`, `--output-summary` | ✅ | output controls ([#19](https://github.com/nexburst/atlx/issues/19)); see the README |
+| `--api-version` | ✅ | `v2` is accepted and other versions are rejected ([#19](https://github.com/nexburst/atlx/issues/19)) |
 | `--output-file` | ➕ | twg 1.4.4 lists no such global flag; atlx writes stdout to a file |
 | `--usage-counts` | ⛔ | usage counts come from the GraphQL gateway |
 | `--output-shape` | ⛔ | the shapes reshape Teamwork Graph relationships |
-| `{"data": ...}` JSON envelope and key names | ✅ | `apiVersion`, `command`, `request`, `data`, `pageInfo`, `meta` as twg prints them; Bitbucket unwrapped, as in twg ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)); see [JSON output shapes](#json-output-shapes) |
-| JSONL rows with `_twg` locators | ✅ | one line per element of the main collection ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
-| Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)" in twg's error envelope, `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue ([#21](https://github.com/pedrosanzmtz/atlx/issues/21)) |
-| Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/pedrosanzmtz/atlx/issues/17) |
-| No `--yes` on merge, decline and content delete | ✅ | `--yes` is still accepted and ignored; nothing asks for confirmation ([#18](https://github.com/pedrosanzmtz/atlx/issues/18)) |
+| `{"data": ...}` JSON envelope and key names | ✅ | `apiVersion`, `command`, `request`, `data`, `pageInfo`, `meta` as twg prints them; Bitbucket unwrapped, as in twg ([#21](https://github.com/nexburst/atlx/issues/21)); see [JSON output shapes](#json-output-shapes) |
+| JSONL rows with `_twg` locators | ✅ | one line per element of the main collection ([#21](https://github.com/nexburst/atlx/issues/21)) |
+| Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)" in twg's error envelope, `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue ([#21](https://github.com/nexburst/atlx/issues/21)) |
+| Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/nexburst/atlx/issues/17) |
+| No `--yes` on merge, decline and content delete | ✅ | `--yes` is still accepted and ignored; nothing asks for confirmation ([#18](https://github.com/nexburst/atlx/issues/18)) |
 | API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
 
 ## JSON output shapes
 
-Maintainer decision on [#21](https://github.com/pedrosanzmtz/atlx/issues/21):
+Maintainer decision on [#21](https://github.com/nexburst/atlx/issues/21):
 **atlx behaves as twg.** The default JSON and JSONL output uses twg's
 envelope and key names; there is no separate compatibility mode. Commands
 that need Teamwork Graph or Rovo fail with "not supported by atlx (requires
