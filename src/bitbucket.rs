@@ -7,6 +7,8 @@ use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
+pub mod lifecycle;
+
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
 }
@@ -263,6 +265,10 @@ pub struct PrQuery<'a> {
     pub created_before: Option<&'a str>,
     pub updated_since: Option<&'a str>,
     pub updated_before: Option<&'a str>,
+    /// `{uuid}`, account ID, or exact nickname.
+    pub reviewer: Option<&'a str>,
+    /// One 1-based page instead of following pages up to `limit`.
+    pub page: Option<usize>,
     pub limit: usize,
 }
 
@@ -280,6 +286,16 @@ fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
                 q = quote(a)
             )
         });
+    }
+    if let Some(r) = o.reviewer {
+        let field = if r.starts_with('{') {
+            "uuid"
+        } else if r.contains(':') || (r.len() == 24 && r.bytes().all(|b| b.is_ascii_hexdigit())) {
+            "account_id"
+        } else {
+            "nickname"
+        };
+        f.push(format!("reviewers.{field} = {}", quote(r)));
     }
     if let Some(s) = o.source {
         f.push(format!("source.branch.name = {}", quote(s)));
@@ -312,7 +328,25 @@ pub fn pr_query(c: &Client, path: &str, o: &PrQuery) -> Result<Value> {
     if let Some(f) = &filter {
         q.push(("q", f));
     }
-    let (items, more) = paginate_more(c, &format!("{path}/pullrequests"), &q, o.limit)?;
+    let url = format!("{path}/pullrequests");
+    if let Some(page) = o.page {
+        let size = o.limit.clamp(1, 50);
+        let (page_s, size_s) = (page.to_string(), size.to_string());
+        q.push(("page", &page_s));
+        q.push(("pagelen", &size_s));
+        let v = c.get(&url, &q)?;
+        let items = v["values"].as_array().cloned().unwrap_or_default();
+        let more = v["next"].is_string();
+        return Ok(json!({
+            "values": items,
+            "page": page,
+            "pagelen": size,
+            "returned": items.len(),
+            "hasNextPage": more,
+            "hasMore": more,
+        }));
+    }
+    let (items, more) = paginate_more(c, &url, &q, o.limit)?;
     Ok(json!({
         "values": items,
         "page": 1,
@@ -896,8 +930,7 @@ fn pr_merge_body(o: &PrMerge) -> Value {
 
 /// `bitbucket pull-requests merge`
 pub fn pr_merge(c: &Client, path: &str, id: u64, o: &PrMerge) -> Result<Value> {
-    let req = pr_merge_body(o);
-    c.post(&format!("{path}/pullrequests/{id}/merge"), &req)
+    lifecycle::merge(c, path, id, o, None)
 }
 
 /// `bitbucket pull-requests decline`

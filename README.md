@@ -203,6 +203,10 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |
 | `bb pull-requests comment create\|query\|get\|update\|delete\|resolve\|reopen`, `task create\|get\|update\|delete\|resolve\|reopen`, `diffstat\|commits\|patch\|diff-line` | `--reply-to`, `--pending`, inline `--path` with `--line`/`--from-line` or `--start-line --end-line`/`--start-from-line --end-from-line`; `diff-line --text [--path]` finds the line numbers to comment on; comment and task `delete` need `--yes`, as in twg |
 | `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `merge --pull-request`, `--merge-strategy merge_commit\|squash\|fast_forward`, `--merge-message`, `--close-source-branch`/`--keep-source-branch`; no confirmation prompt |
+| `bb pull-requests update`, `create --reviewer` | reviewers by name, nickname, account ID, `{uuid}` or `me`; `--add-reviewer`, `--remove-reviewer`, `--clear-reviewers`, `--draft`/`--ready`; `create --default-reviewers` |
+| `bb pull-requests mergeability\|merge-status\|conflicts\|for-commit\|remove-request-changes` | `merge --wait [--wait-timeout 90]`; mergeability lists `blockers`, and what it could not check as `unchecked` |
+| `bb pull-requests default-reviewer query\|get\|add\|remove`, `effective-default-reviewer query` | `add` and `remove` need `--yes` |
+| `bb inbox`, `bb pull-requests query --scope me` | scan your 25 most recently updated repositories (`inbox --repo-limit`), one request or more each; `query` also takes `--reviewer`, `--page` and `--merged-since`/`--merged-before`, which read up to 200 pull requests' activity |
 | `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
 | `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
 

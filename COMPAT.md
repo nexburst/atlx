@@ -95,6 +95,7 @@ repositories, so:
 | Jira `sprint` lifecycle, `board get\|create\|delete\|backlog\|projects\|quick-filter` | Inferred, not run live ([#25](https://github.com/nexburst/atlx/issues/25)) | Built from the public Agile 1.0 payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -465,7 +466,7 @@ inferred rows.
 
 ## Bitbucket
 
-78 twg commands: ✅ 28, 🟡 6, 📋 44.
+78 twg commands: ✅ 39, 🟡 7, 📋 32.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -486,7 +487,7 @@ inferred rows.
 | `bitbucket deployment history get` | 📋 | #34 |
 | `bitbucket deployment history query` | 📋 | #34 |
 | `bitbucket deployment query` | 📋 | #34 |
-| `bitbucket inbox` | 📋 | #32 |
+| `bitbucket inbox` | ✅ | #32; scans the most recently updated repositories (`--repo-limit`, 25), one request or more each; `--role all` is an atlx extra |
 | `bitbucket pipeline config get` | 📋 | #34 |
 | `bitbucket pipeline config update` | 📋 | #34 |
 | `bitbucket pipeline get` | 🟡 | missing `--case-limit`, `--test-cases`, `--test-reports` (#34) |
@@ -507,25 +508,25 @@ inferred rows.
 | `bitbucket pull-requests comment resolve` | ✅ | #31 |
 | `bitbucket pull-requests comment update` | ✅ | #31 |
 | `bitbucket pull-requests commits` | ✅ | #31 |
-| `bitbucket pull-requests conflicts` | 📋 | #32 |
-| `bitbucket pull-requests create` | 🟡 | missing `--image`, `--image-name`, `--reviewer` (#32) |
+| `bitbucket pull-requests conflicts` | ✅ | #32; from the diffstat |
+| `bitbucket pull-requests create` | 🟡 | missing `--image`, `--image-name` (#13); `--default-reviewers` is an atlx extra |
 | `bitbucket pull-requests decline` | ✅ | no confirmation is asked; `--yes` is ignored (#18) |
-| `bitbucket pull-requests default-reviewer add` | 📋 | #32 |
-| `bitbucket pull-requests default-reviewer get` | 📋 | #32 |
-| `bitbucket pull-requests default-reviewer query` | 📋 | #32 |
-| `bitbucket pull-requests default-reviewer remove` | 📋 | #32 |
+| `bitbucket pull-requests default-reviewer add` | ✅ | #32 |
+| `bitbucket pull-requests default-reviewer get` | ✅ | #32 |
+| `bitbucket pull-requests default-reviewer query` | ✅ | #32 |
+| `bitbucket pull-requests default-reviewer remove` | ✅ | #32 |
 | `bitbucket pull-requests diff` | ✅ |  |
 | `bitbucket pull-requests diff-line` | ✅ | atlx finds the matches in the REST diff (#31); output shape inferred, see [JSON output shapes](#json-output-shapes) |
 | `bitbucket pull-requests diffstat` | ✅ | #31 |
-| `bitbucket pull-requests effective-default-reviewer query` | 📋 | #32 |
-| `bitbucket pull-requests for-commit` | 📋 | #32 |
+| `bitbucket pull-requests effective-default-reviewer query` | ✅ | #32 |
+| `bitbucket pull-requests for-commit` | ✅ | #32; a repository still being indexed gives an error saying so |
 | `bitbucket pull-requests get` | ✅ | `--batch-concurrency` fetches in parallel and keeps input order (#18) |
-| `bitbucket pull-requests merge` | 🟡 | missing `--timeout`, `--wait`, `--wait-timeout` (#32); no confirmation is asked. The old positional id, `--strategy`, `--message` and `--yes` still work (hidden, deprecated) |
-| `bitbucket pull-requests merge-status` | 📋 | #32 |
-| `bitbucket pull-requests mergeability` | 📋 | #32 |
+| `bitbucket pull-requests merge` | ✅ | #32; `--wait` polls the merge task; no confirmation is asked. The old positional id, `--strategy`, `--message` and `--yes` still work (hidden, deprecated) |
+| `bitbucket pull-requests merge-status` | ✅ | #32 |
+| `bitbucket pull-requests mergeability` | 🟡 | #13: computed from public endpoints; commits-behind and branching-model rules are reported as `unchecked` |
 | `bitbucket pull-requests patch` | ✅ | raw text, as `diff` (#31) |
-| `bitbucket pull-requests query` | 🟡 | missing `--merged-before`, `--merged-since`, `--page`, `--reviewer`, `--role` (#32); GraphQL-only `--scope` not planned |
-| `bitbucket pull-requests remove-request-changes` | 📋 | #32 |
+| `bitbucket pull-requests query` | 🟡 | #13: `--scope me` scans recent repositories and takes only `--state`, `--role`, `--limit`; merge dates are refined from each candidate's activity (200 at most) |
+| `bitbucket pull-requests remove-request-changes` | ✅ | #32 |
 | `bitbucket pull-requests request-changes` | ✅ |  |
 | `bitbucket pull-requests task create` | ✅ | #31 |
 | `bitbucket pull-requests task delete` | ✅ | needs `--yes`, as in twg (#31) |
@@ -535,7 +536,7 @@ inferred rows.
 | `bitbucket pull-requests task resolve` | ✅ | #31 |
 | `bitbucket pull-requests task update` | ✅ | #31 |
 | `bitbucket pull-requests unapprove` | ✅ |  |
-| `bitbucket pull-requests update` | 📋 | #32 |
+| `bitbucket pull-requests update` | 🟡 | missing `--image`, `--image-name` (#13) |
 | `bitbucket repo contributors` | 📋 | #33 |
 | `bitbucket repo create` | 📋 | #33 |
 | `bitbucket repo file` | ✅ |  |
@@ -543,7 +544,7 @@ inferred rows.
 | `bitbucket repo list-files` | 📋 | #33 |
 | `bitbucket repo query` | ✅ | `--repo workspace/slug` or a URL selects the workspace (#18) |
 | `bitbucket repo url` | 📋 | #33 |
-| `bitbucket search prs` | 📋 | #32 |
+| `bitbucket search prs` | 📋 | #33 |
 | `bitbucket workspace get` | 📋 | #33 |
 | `bitbucket workspace member get` | 📋 | #33 |
 | `bitbucket workspace member query` | 📋 | #33 |
