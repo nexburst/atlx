@@ -420,6 +420,23 @@ fn tree_stops_at_the_node_cap() {
 }
 
 #[test]
+fn tree_lists_only_pages_without_a_type() {
+    let srv = MockServer::with_responses([
+        ok(json!({"id": "10"})),
+        ok(json!({"results": []})),
+        ok(json!({"results": [{"id": "20", "type": "folder"}, {"id": "11", "type": "page"}]})),
+    ]);
+    let out = tree::tree(&srv.client(), "10", 1, None).unwrap();
+    assert_eq!(out["children"].as_array().unwrap().len(), 1);
+    assert_eq!(out["children"][0]["id"], "11");
+    assert!(
+        srv.requests()[2]
+            .path
+            .ends_with("/pages/10/direct-children")
+    );
+}
+
+#[test]
 fn tree_type_keeps_the_containers() {
     let srv = MockServer::with_responses([
         ok(json!({"id": "10"})),

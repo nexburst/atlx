@@ -1624,9 +1624,24 @@ pub fn priorities(c: &Client, ids: &[String]) -> Result<Value> {
     if !ids.is_empty() {
         return each(c, "/rest/api/3/priority", ids);
     }
-    let mut v = c.get("/rest/api/3/priority", &[])?;
-    strip_media(&mut v);
-    Ok(v)
+    let mut all: Vec<Value> = Vec::new();
+    loop {
+        let start = all.len().to_string();
+        let v = c.get(
+            "/rest/api/3/priority/search",
+            &[("startAt", start.as_str()), ("maxResults", "50")],
+        )?;
+        let page = v["values"]
+            .as_array()
+            .ok_or_else(|| anyhow!("Jira returned no priority list"))?;
+        all.extend(page.iter().cloned());
+        if page.is_empty() || v["isLast"].as_bool() != Some(false) {
+            break;
+        }
+    }
+    let mut out = Value::Array(all);
+    strip_media(&mut out);
+    Ok(out)
 }
 
 // --- agile: boards & sprints -------------------------------------------------
@@ -1878,44 +1893,56 @@ pub fn sprint_issues(c: &Client, sprint_id: u64, o: &SprintIssues) -> Result<Val
     } else {
         LIST_FIELDS.join(",")
     };
-    let mut issues = Vec::new();
-    let mut total = None;
-    while issues.len() < limit {
-        let start = (o.start + issues.len()).to_string();
-        let page_size = (limit - issues.len()).min(100).to_string();
-        let mut q = vec![
-            ("startAt", start.as_str()),
-            ("maxResults", page_size.as_str()),
-            ("fields", field_param.as_str()),
-        ];
-        if let Some(j) = o.jql {
-            q.push(("jql", j));
+    let mut q = vec![("fields", field_param.as_str())];
+    if let Some(j) = o.jql {
+        q.push(("jql", j));
+    }
+    if let Some(e) = o.expand {
+        q.push(("expand", e));
+    }
+    let path = format!("/rest/software/1.0/sprint/{sprint_id}/issue");
+    let issues: Vec<Value> = software_issues(c, &path, &q, o.start, limit)?
+        .iter()
+        .map(|i| issue_row(c, i, raw))
+        .collect();
+    Ok(json!({"issues": issues, "startAt": o.start, "maxResults": limit}))
+}
+
+/// Up to `limit` issues after the first `skip`, from a Jira Software list.
+/// These page by token only, so an offset is read and dropped. A list that
+/// can't be finished is an error: `sprint complete` moves what this returns.
+fn software_issues(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    skip: usize,
+    limit: usize,
+) -> Result<Vec<Value>> {
+    let want = skip.saturating_add(limit);
+    let mut all: Vec<Value> = Vec::new();
+    let mut token: Option<String> = None;
+    while all.len() < want {
+        let size = (want - all.len()).min(100).to_string();
+        let mut q = query.to_vec();
+        q.push(("maxResults", size.as_str()));
+        if let Some(t) = &token {
+            q.push(("nextPageToken", t.as_str()));
         }
-        if let Some(e) = o.expand {
-            q.push(("expand", e));
-        }
-        let v = c.get(&format!("/rest/agile/1.0/sprint/{sprint_id}/issue"), &q)?;
-        let batch = v["issues"].as_array().cloned().unwrap_or_default();
-        let batch_len = batch.len();
-        issues.extend(
-            batch
-                .iter()
-                .take(limit - issues.len())
-                .map(|i| issue_row(c, i, raw)),
-        );
-        total = v["total"].as_u64();
-        if batch_len == 0
-            || total.is_some_and(|t| (o.start + issues.len()) as u64 >= t)
-            || (total.is_none() && batch_len < 100)
-        {
+        let v = c.get(path, &q)?;
+        let page = v["issues"]
+            .as_array()
+            .ok_or_else(|| anyhow!("Jira returned no issue list for {path}"))?;
+        all.extend(page.iter().cloned());
+        if v["isLast"].as_bool() == Some(true) {
             break;
         }
+        match v["nextPageToken"].as_str().filter(|t| !t.is_empty()) {
+            Some(next) if token.as_deref() != Some(next) => token = Some(next.to_string()),
+            None if v["isLast"].as_bool().is_none() => break,
+            _ => bail!("Jira said there are more issues but gave no way to read them"),
+        }
     }
-    let mut out = json!({"issues": issues, "startAt": o.start, "maxResults": limit});
-    if let Some(t) = total {
-        out["total"] = t.into();
-    }
-    Ok(out)
+    Ok(all.into_iter().skip(skip).take(limit).collect())
 }
 
 #[cfg(test)]

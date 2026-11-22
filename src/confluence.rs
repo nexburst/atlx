@@ -623,7 +623,12 @@ pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>)
     if let Some(cur) = cursor {
         q.push(("cursor", cur));
     }
-    let v = c.get(&format!("/api/v2/pages/{}/children", enc(&id)), &q)?;
+    let mut v = c.get(&format!("/api/v2/pages/{}/direct-children", enc(&id)), &q)?;
+    // The list is mixed; this command lists pages, so a page of results can
+    // come back shorter than the limit and still have a cursor.
+    if let Some(items) = v["results"].as_array_mut() {
+        items.retain(|i| i["type"] == "page");
+    }
     Ok(listing(&v, |p| {
         let mut p = p.clone();
         p["externalUrl"] = optional_content_url(c, &p);
@@ -1078,7 +1083,7 @@ mod tests {
     #[test]
     fn children_and_tree_hierarchy() {
         let (c, _) = mock_client(|_, target, _| match target {
-            "/api/v2/pages/10/children?limit=5&cursor=cur1" => (
+            "/api/v2/pages/10/direct-children?limit=5&cursor=cur1" => (
                 200,
                 json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current", "spaceId": "1", "childPosition": 1}]}),
             ),
@@ -1090,15 +1095,15 @@ mod tests {
                 200,
                 json!({"results": [{"id": "1", "type": "page", "title": "Home"}]}),
             ),
-            "/api/v2/pages/10/children?limit=250" => (
+            "/api/v2/pages/10/direct-children?limit=250" => (
                 200,
                 json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current"}]}),
             ),
-            "/api/v2/pages/11/children?limit=250" => (
+            "/api/v2/pages/11/direct-children?limit=250" => (
                 200,
                 json!({"results": [{"id": "12", "type": "page", "title": "Grandchild", "status": "current"}]}),
             ),
-            "/api/v2/pages/12/children?limit=250" => (
+            "/api/v2/pages/12/direct-children?limit=250" => (
                 200,
                 json!({"results": [{"id": "13", "type": "page", "title": "Too Deep", "status": "current"}]}),
             ),

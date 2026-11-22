@@ -948,22 +948,73 @@ pub fn pr_decline(c: &Client, path: &str, id: u64) -> Result<Value> {
 
 // --- search ------------------------------------------------------------------
 
-fn code_search_query(query: &str, repo: Option<&str>) -> String {
-    match repo.map(str::trim).filter(|r| !r.is_empty()) {
-        Some(r) => {
-            let slug = r
-                .trim_end_matches('/')
-                .rsplit('/')
-                .next()
-                .unwrap_or(r)
-                .trim_end_matches(".git");
-            format!("{query} repo:{slug}")
-        }
-        None => query.to_string(),
-    }
+fn repo_slug(repo: &str) -> &str {
+    let repo = repo.trim().trim_end_matches('/');
+    let last = repo.rsplit('/').next().unwrap_or(repo);
+    last.trim_end_matches(".git")
 }
 
-/// `bitbucket search code`
+/// The search term and the filters. The modifiers the retired endpoint read
+/// from the query (`repo:`, `project:`, `path:`, `ext:`, `lang:`) become
+/// filters here; text in quotes is never read as one.
+fn code_search_query(query: &str, repo: Option<&str>) -> (String, Option<Value>) {
+    let mut filters = Vec::new();
+    if let Some(r) = repo.map(repo_slug).filter(|r| !r.is_empty()) {
+        filters.push(json!({"attribute": "repository", "eq": r}));
+    }
+    let mut words = Vec::new();
+    let mut quoted = false;
+    let mut found = false;
+    for word in query.split(' ') {
+        let modifier = word.split_once(':').and_then(|(key, value)| {
+            let attribute = match key {
+                "repo" => "repository",
+                "project" => "project",
+                "path" => "path",
+                "ext" => "extension",
+                "lang" => "language",
+                _ => return None,
+            };
+            (!quoted && !value.is_empty() && !value.contains('"')).then_some((attribute, value))
+        });
+        match modifier {
+            Some((attribute, value)) => {
+                filters.push(json!({"attribute": attribute, "eq": value}));
+                found = true;
+            }
+            None => words.push(word),
+        }
+        if word.matches('"').count() % 2 == 1 {
+            quoted = !quoted;
+        }
+    }
+    let term = if found {
+        words.join(" ").trim().to_string()
+    } else {
+        query.trim().to_string()
+    };
+    let filters = match filters.len() {
+        0 => None,
+        1 => filters.pop(),
+        _ => Some(json!({"and": filters})),
+    };
+    (term, filters)
+}
+
+/// A matched file, with the `file.path` and `content_match_count` keys of
+/// the retired endpoint.
+fn code_hit(f: &Value) -> Value {
+    json!({
+        "file": {"path": f["path"], "commit": {"hash": f["version"]}},
+        "content_match_count": f["matched_chunks"].as_array().map_or(0, Vec::len),
+        "matched_chunks": f["matched_chunks"],
+        "branch": f["branch_or_tag_name"],
+        "language": f["language"],
+        "url": f["url"],
+    })
+}
+
+/// `bitbucket search code`: `POST /workspaces/{ws}/codesearch`.
 pub fn search_code(
     c: &Client,
     ws: &str,
@@ -971,14 +1022,42 @@ pub fn search_code(
     repo: Option<&str>,
     limit: usize,
 ) -> Result<Value> {
-    let q = code_search_query(query, repo);
-    let items = paginate(
-        c,
-        &format!("/workspaces/{}/search/code", enc(ws)),
-        &[("search_query", &q)],
-        limit,
-    )?;
-    Ok(items.into())
+    let (term, filters) = code_search_query(query, repo);
+    if term.is_empty() || term.chars().count() > 1024 {
+        return Err(ApiError::usage("search needs 1 to 1024 characters of text").into());
+    }
+    let mut search = json!({"search_term": term});
+    if let Some(f) = filters {
+        search["filters"] = f;
+    }
+    let path = format!("/workspaces/{}/codesearch", enc(ws));
+    let mut hits = Vec::new();
+    let mut next: Option<(Value, Value)> = None;
+    while hits.len() < limit {
+        let mut body = json!({
+            "query": search,
+            "config": {"max_results": (limit - hits.len()).min(100)},
+        });
+        if let Some((id, cursor)) = &next {
+            body["request_id"] = id.clone();
+            body["pagination"] = json!({"next_cursor": cursor});
+        }
+        let v = c.post(&path, &body)?;
+        let files = v["matched_files"]
+            .as_array()
+            .ok_or_else(|| anyhow!("Bitbucket returned no matched_files list"))?;
+        hits.extend(files.iter().take(limit - hits.len()).map(code_hit));
+        let page = &v["pagination"];
+        if page["has_more"] != true {
+            break;
+        }
+        let following = (v["id"].clone(), page["next_cursor"].clone());
+        if following.0.is_null() || following.1.is_null() || next.as_ref() == Some(&following) {
+            bail!("Bitbucket said there are more results but gave no cursor for them");
+        }
+        next = Some(following);
+    }
+    Ok(hits.into())
 }
 
 // --- pipelines ---------------------------------------------------------------
@@ -1237,9 +1316,28 @@ mod tests {
         assert!(branch_by_author(&by("Alice Example", "557:a"), "557:a"));
         assert!(!branch_by_author(&by("Bob", "557:b"), "alice"));
 
-        assert_eq!(code_search_query("foo bar", None), "foo bar");
-        assert_eq!(code_search_query("foo", Some("api")), "foo repo:api");
-        assert_eq!(code_search_query("foo", Some("acme/api")), "foo repo:api");
+        let only = |a: &str, v: &str| Some(json!({"attribute": a, "eq": v}));
+        assert_eq!(
+            code_search_query("foo  bar", None),
+            ("foo  bar".into(), None)
+        );
+        assert_eq!(
+            code_search_query("foo", Some("acme/api.git")),
+            ("foo".into(), only("repository", "api"))
+        );
+        assert_eq!(
+            code_search_query("foo ext:rs", None),
+            ("foo".into(), only("extension", "rs"))
+        );
+        let quoted = r#""see path:x here""#;
+        assert_eq!(code_search_query(quoted, None), (quoted.into(), None));
+        assert_eq!(
+            code_search_query("foo lang:go", Some("api")).1.unwrap()["and"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     fn mock_server(
@@ -1442,11 +1540,11 @@ mod tests {
                 r#"{"values":[{"name":"feat/x","target":{"hash":"abcdef1234567890"}}]}"#,
             ),
             (
-                "GET",
-                "/workspaces/acme/search/code?search_query=needle+repo%3Aapi&pagelen=10",
-                "",
+                "POST",
+                "/workspaces/acme/codesearch",
+                "needle",
                 200,
-                r#"{"values":[{"content_match_count":2,"file":{"path":"lib.rs"}}]}"#,
+                r#"{"id":"r1","matched_files":[{"path":"lib.rs","matched_chunks":[{},{}]}],"pagination":{"has_more":false}}"#,
             ),
         ]);
         let c = Client::new(base, "u@e.com", "tok", Some(5000));

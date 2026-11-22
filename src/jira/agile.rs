@@ -2,7 +2,8 @@
 //! create|update` (sprint, story points, estimates, team).
 
 use super::{
-    Paged, board_values, enc, issue_project, issue_row, none_or, paginate_values, trailing_number,
+    Paged, board_values, enc, issue_project, issue_row, none_or, paginate_values, software_issues,
+    trailing_number,
 };
 use crate::client::{ApiError, Client};
 use anyhow::{Result, anyhow};
@@ -10,6 +11,8 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 const AGILE: &str = "/rest/agile/1.0";
+/// The issue lists that replace the deprecated Agile ones.
+const SOFTWARE: &str = "/rest/software/1.0";
 /// The most work items one Agile move call accepts.
 const MOVE_BATCH: usize = 50;
 
@@ -255,41 +258,23 @@ pub fn move_issues(c: &Client, to: Destination, keys: &[String]) -> Result<()> {
 /// Every work item in the sprint that is not done. Subtasks are left out:
 /// they follow their parent and Jira refuses to move them by themselves.
 fn unfinished(c: &Client, id: u64) -> Result<Vec<String>> {
-    let path = format!("{}/issue", sprint_path(id));
-    let mut keys = Vec::new();
-    let mut start = 0;
-    loop {
-        let at = start.to_string();
-        let v = c.get(
-            &path,
-            &[
-                ("startAt", at.as_str()),
-                ("maxResults", "100"),
-                ("fields", "status"),
-                (
-                    "jql",
-                    "statusCategory != Done AND issuetype not in subTaskIssueTypes()",
-                ),
-            ],
-        )?;
-        let page = v["issues"]
-            .as_array()
-            .ok_or_else(|| anyhow!("Jira returned no issue list for sprint {id}"))?;
-        for issue in page {
-            let key = issue["key"]
+    let q = [
+        ("fields", "status"),
+        (
+            "jql",
+            "statusCategory != Done AND issuetype not in subTaskIssueTypes()",
+        ),
+    ];
+    let path = format!("{SOFTWARE}/sprint/{id}/issue");
+    software_issues(c, &path, &q, 0, usize::MAX)?
+        .iter()
+        .map(|issue| {
+            issue["key"]
                 .as_str()
-                .ok_or_else(|| anyhow!("an issue in sprint {id} has no key"))?;
-            keys.push(key.to_string());
-        }
-        start += page.len();
-        let more = match v["total"].as_u64() {
-            Some(total) => (start as u64) < total,
-            None => v["isLast"].as_bool() != Some(true),
-        };
-        if page.is_empty() || !more {
-            return Ok(keys);
-        }
-    }
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("an issue in sprint {id} has no key"))
+        })
+        .collect()
 }
 
 /// Close an active sprint, first moving what isn't done to `to`.
@@ -428,38 +413,16 @@ pub fn backlog(
     }
     let jql = narrowed(&filters, jql);
     let fields = super::LIST_FIELDS.join(",");
-    let path = format!("{}/backlog", board_path(board));
-    let mut issues = Vec::new();
-    let mut total = None;
-    while issues.len() < limit {
-        let at = (start + issues.len()).to_string();
-        let size = (limit - issues.len()).min(100);
-        let max = size.to_string();
-        let mut q = vec![
-            ("startAt", at.as_str()),
-            ("maxResults", max.as_str()),
-            ("fields", fields.as_str()),
-        ];
-        if let Some(j) = &jql {
-            q.push(("jql", j));
-        }
-        let v = c.get(&path, &q)?;
-        let page = v["issues"].as_array().cloned().unwrap_or_default();
-        issues.extend(page.iter().take(size).map(|i| issue_row(c, i, false)));
-        total = v["total"].as_u64();
-        let more = match total {
-            Some(t) => ((start + issues.len()) as u64) < t,
-            None => page.len() >= size,
-        };
-        if page.is_empty() || !more {
-            break;
-        }
+    let path = format!("{SOFTWARE}/board/{board}/backlog");
+    let mut q = vec![("fields", fields.as_str())];
+    if let Some(j) = &jql {
+        q.push(("jql", j));
     }
-    let mut out = json!({"issues": issues, "startAt": start, "maxResults": limit});
-    if let Some(t) = total {
-        out["total"] = t.into();
-    }
-    Ok(out)
+    let issues: Vec<Value> = software_issues(c, &path, &q, start, limit)?
+        .iter()
+        .map(|i| issue_row(c, i, false))
+        .collect();
+    Ok(json!({"issues": issues, "startAt": start, "maxResults": limit}))
 }
 
 // --- create and update fields ------------------------------------------------

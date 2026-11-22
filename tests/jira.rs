@@ -507,8 +507,9 @@ fn jira_sprint_workitems_with_fields_and_offset() {
     let srv = MockServer::with_responses([MockResponse::json(
         200,
         json!({
-            "total": 3,
-            "issues": [{"key": "PROJ-3", "fields": {"summary": "Three", "labels": ["x"]}}]
+            "isLast": true,
+            "issues": [{"key": "PROJ-1"}, {"key": "PROJ-2"},
+                       {"key": "PROJ-3", "fields": {"summary": "Three", "labels": ["x"]}}]
         }),
     )]);
     let client = srv.client();
@@ -527,11 +528,10 @@ fn jira_sprint_workitems_with_fields_and_offset() {
     .unwrap();
     assert_eq!(out["issues"][0]["key"], "PROJ-3");
     assert_eq!(out["issues"][0]["labels"], json!(["x"]));
-    assert_eq!(out["total"], 3);
     let reqs = srv.requests();
     assert_eq!(reqs.len(), 1);
-    assert_eq!(reqs[0].path, "/rest/agile/1.0/sprint/99/issue");
-    assert_eq!(reqs[0].query_param("startAt").as_deref(), Some("2"));
+    assert_eq!(reqs[0].path, "/rest/software/1.0/sprint/99/issue");
+    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("12"));
     assert_eq!(reqs[0].query_param("expand").as_deref(), Some("names"));
     assert_eq!(
         reqs[0].query_param("jql").as_deref(),
