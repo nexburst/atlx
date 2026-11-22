@@ -156,7 +156,7 @@ pub(crate) struct SpaceQueryArgs {
     /// Offset to resume from (same as --start-at)
     #[arg(long)]
     after: Option<String>,
-    /// Maximum number of spaces [default: 25]
+    /// Maximum number of spaces [default: 50]
     #[arg(long, conflicts_with = "first")]
     limit: Option<usize>,
     /// Same as --limit
@@ -1363,7 +1363,7 @@ fn space_query(c: &client::Client, a: SpaceQueryArgs) -> Result<Value> {
             property_query: a.property_query.as_deref(),
             order_by: a.sort_by.as_deref(),
             start,
-            limit: a.limit.or(a.first).unwrap_or(25),
+            limit: a.limit.or(a.first).unwrap_or(50),
         },
     )
 }

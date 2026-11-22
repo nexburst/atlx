@@ -242,6 +242,8 @@ fn jira_and_user_output_matches_twg_shapes() {
         problems.extend(
             diff(&twg, &ours)
                 .into_iter()
+                // An atlx extra: twg prints `zoneinfo: null`.
+                .filter(|d| !(*name == "whoami" && d == "only atlx: data.timeZone"))
                 .map(|d| format!("{name}: {d}")),
         );
     }

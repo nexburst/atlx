@@ -125,10 +125,49 @@ pub fn space_restore(c: &Client, space: &str) -> Result<Value> {
 }
 
 /// The statuses of each of the space's issue types.
+/// `{statuses}`: each of the space's statuses once, though Jira lists them
+/// per work item type.
 pub fn space_statuses(c: &Client, space: &str) -> Result<Value> {
-    Ok(clean(
-        c.get(&format!("{}/statuses", space_path(space)?), &[])?,
-    ))
+    let v = c.get(&format!("{}/statuses", space_path(space)?), &[])?;
+    let mut seen = std::collections::HashSet::new();
+    let mut statuses: Vec<Value> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|kind| kind["statuses"].as_array().into_iter().flatten())
+        .filter(|s| seen.insert(s["id"].to_string()))
+        .map(|s| {
+            let category = &s["statusCategory"];
+            json!({
+                "id": s["id"],
+                "name": s["name"],
+                "statusCategory": {"key": category["key"], "name": category["name"]},
+            })
+        })
+        .collect();
+    // twg's order: by category, as Jira gave them within one.
+    statuses.sort_by_key(|s| match s["statusCategory"]["key"].as_str() {
+        Some("new") => 0,
+        Some("indeterminate") => 1,
+        Some("done") => 2,
+        _ => 3,
+    });
+    Ok(json!({"statuses": statuses}))
+}
+
+/// A space's `{key, name, id}` and its work item types.
+pub fn space_issue_types(c: &Client, space: &str, limit: usize) -> Result<(Value, Value)> {
+    let v = c.get(&space_path(space)?, &[])?;
+    let id = match &v["id"] {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => return Err(anyhow!("space {space} has no ID")),
+    };
+    let (mut types, _) = super::issue_types(c, &id, None, limit)?;
+    for t in types.as_array_mut().into_iter().flatten() {
+        t["issueTypeId"] = t["id"].clone();
+    }
+    Ok((json!({"key": v["key"], "name": v["name"], "id": id}), types))
 }
 
 pub fn notification_scheme(c: &Client, space: &str, expand: Option<&str>) -> Result<Value> {

@@ -145,9 +145,9 @@ pub(crate) struct DeleteArgs {
 
 #[derive(Args)]
 pub(crate) struct BoardGetArgs {
-    /// Board ID, ARI, URL or exact name
-    #[arg(long)]
-    id: String,
+    /// Board ID, ARI, URL or exact name; repeatable
+    #[arg(long, required = true)]
+    id: Vec<String>,
 }
 
 #[derive(Args)]
@@ -399,9 +399,14 @@ fn board(c: &Client, id: Option<String>, board_id: Option<String>) -> Result<u64
 }
 
 pub(super) fn board_get(c: &Client, a: BoardGetArgs) -> Result<Value> {
-    let id = jira::resolve_board(c, &a.id)?;
-    let data = agile::board_get(c, id)?;
-    board_out(c, "get", "jira.board", json!({"id": id}), data)
+    let mut ids = Vec::new();
+    let mut boards = Vec::new();
+    for given in &a.id {
+        let id = jira::resolve_board(c, given)?;
+        boards.push(agile::board_get(c, id)?);
+        ids.push(id.to_string());
+    }
+    board_out(c, "get", "jira.board", json!({"ids": ids}), boards.into())
 }
 
 pub(super) fn board_create(c: &Client, a: BoardCreateArgs) -> Result<Value> {
@@ -450,8 +455,8 @@ pub(super) fn projects(c: &Client, cmd: BoardProjectsCmd) -> Result<Value> {
     board_out(
         c,
         "projects.query",
-        "jira.space",
-        json!({"boardId": id}),
+        "jira.board-project",
+        json!({"boardId": id.to_string()}),
         data,
     )
 }
@@ -466,7 +471,13 @@ pub(super) fn quick_filter(c: &Client, cmd: QuickFilterCmd) -> Result<Value> {
         } => {
             let id = jira::resolve_board(c, &board_id)?;
             let data = agile::quick_filters(c, id, start_at, max_results)?.to_value("quickFilters");
-            board_out(c, "quick-filter.query", KIND, json!({"boardId": id}), data)
+            board_out(
+                c,
+                "quick-filter.query",
+                "jira.board-quick-filter",
+                json!({"boardId": id.to_string()}),
+                data,
+            )
         }
         QuickFilterCmd::Get {
             board_id,

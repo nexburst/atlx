@@ -119,6 +119,8 @@ const COLLECTIONS: &[&str] = &[
     "results",
     "values",
     "issueTypes",
+    "statuses",
+    "versions",
 ];
 
 /// The lines `-o jsonl` prints for `v`.
@@ -126,7 +128,8 @@ const COLLECTIONS: &[&str] = &[
 /// - An envelope prints each element of its main collection (`data` itself
 ///   when it is an array, else the first of [`COLLECTIONS`] it has, else
 ///   `data` as a single row), each with `_twg: {command, resourceType,
-///   collection, index}`. An empty collection prints nothing.
+///   collection, index}`. An empty collection prints nothing, unless it
+///   sits beside other keys (a page's `total`): then `data` is the one row.
 /// - An error envelope prints one line with `_twg: {collection: "root",
 ///   index: 0}`.
 /// - Anything else (Bitbucket payloads) prints the elements of a top-level
@@ -150,10 +153,11 @@ pub fn jsonl_rows(v: &Value) -> Vec<Value> {
     let data = &v["data"];
     let (collection, rows): (&str, Vec<Value>) = match data {
         Value::Array(a) => ("root", a.clone()),
-        Value::Object(m) => match COLLECTIONS
-            .iter()
-            .find(|k| m.get(**k).is_some_and(Value::is_array))
-        {
+        Value::Object(m) => match COLLECTIONS.iter().find(|k| {
+            m.get(**k)
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty() || m.len() == 1)
+        }) {
             Some(k) => (k, m[*k].as_array().cloned().unwrap_or_default()),
             None => ("root", vec![data.clone()]),
         },

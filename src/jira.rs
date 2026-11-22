@@ -681,8 +681,10 @@ pub fn profile(me: &Value) -> Value {
         },
         "email": me["emailAddress"],
         "nickname": me["displayName"],
-        "locale": me["locale"],
-        "zoneinfo": me["timeZone"],
+        // twg spells locales en-US and has no time zone; Jira's is an extra key.
+        "locale": me["locale"].as_str().map(|l| l.replace('_', "-")),
+        "zoneinfo": null,
+        "timeZone": me["timeZone"],
         "extendedProfile": {
             "jobTitle": null,
             "department": null,
@@ -1344,6 +1346,8 @@ pub fn unlink_weblink(c: &Client, key: &str, r: WeblinkRef) -> Result<Value> {
 /// One offset page of a REST list, with what twg prints around it.
 pub struct OffsetPage {
     pub data: Value,
+    /// The page's own URL, when Jira gives one.
+    pub this_page: Option<String>,
     pub start: usize,
     pub max: usize,
     pub total: Option<u64>,
@@ -1355,6 +1359,21 @@ impl OffsetPage {
     /// twg's `pageInfo` for this page; it is printed on the last page too.
     pub fn page_info(&self) -> Value {
         json!({"hasNextPage": self.next.is_some(), "nextCursor": self.next})
+    }
+
+    /// The page as twg prints Jira's searches: the list under `key`, beside
+    /// the paging fields.
+    pub fn named(&self, key: &str) -> Value {
+        let mut v = json!({});
+        if let Some(url) = &self.this_page {
+            v["self"] = url.as_str().into();
+        }
+        v["maxResults"] = self.max.into();
+        v["startAt"] = self.start.into();
+        v["total"] = json!(self.total);
+        v["isLast"] = self.next.is_none().into();
+        v[key] = self.data.clone();
+        v
     }
 
     /// twg's `meta.pagination`.
@@ -1403,6 +1422,7 @@ fn offset_page(
     };
     Ok(OffsetPage {
         data: list,
+        this_page: v["self"].as_str().map(str::to_string),
         start: v["startAt"].as_u64().map_or(start, |n| n as usize),
         max: v["maxResults"].as_u64().map_or(max, |n| n as usize),
         total,
@@ -1488,6 +1508,9 @@ pub fn delete(c: &Client, key: &str, delete_subtasks: bool) -> Result<Value> {
 fn edit_accepted_input(schema: &Value) -> &'static str {
     if schema["type"] == "priority" {
         return "option";
+    }
+    if schema["custom"] == "com.pyxis.greenhopper.jira:jsw-issue-color" {
+        return "value";
     }
     match accepted_input(schema) {
         "text" | "multi-text" if schema.get("system").is_some() => "value",
@@ -2058,7 +2081,8 @@ mod tests {
         assert_eq!(p["name"], "Alice");
         assert_eq!(p["picture"], "https://a/48");
         assert_eq!(p["accountStatus"], "active");
-        assert_eq!(p["zoneinfo"], "Europe/Madrid");
+        assert_eq!(p["zoneinfo"], Value::Null);
+        assert_eq!(p["timeZone"], "Europe/Madrid");
         assert!(p["extendedProfile"]["jobTitle"].is_null());
     }
 

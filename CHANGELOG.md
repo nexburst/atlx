@@ -17,6 +17,23 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   unseen, and a body needs `--format` and `--ack-body-formats`. Scripts that
   relied on the old behavior must add these flags.
 
+### Fixed
+
+- Output that differed from twg 1.4.4 on a live site. **These shapes
+  changed:** `jira board get` (a list, `--id` repeats), `filter query` and
+  `space versions query` (the page object), `space status query`
+  (`{statuses}`), `space issue-types` (`{space, issueTypes}`), `workitem
+  bulk-get` and `user bulk-lookup` (`{items, summary}`), `workitem property
+  query` and `worklog changed|deleted` (bare lists).
+- `jira space query` returns 50 spaces by default, not 25.
+- JSONL prints an empty page as one row, as twg does.
+- `user bulk-lookup` prints its result when it fails, and exits 0 on a
+  partial result without `--strict`.
+- `whoami` and `user get`: `locale` is spelled `en-US`, `zoneinfo` is null as
+  in twg, and Jira's time zone is the extra key `timeZone`.
+- `bb repo url` also prints `workspace` and `repo`; resource types and
+  request echoes follow twg where they were seen live.
+
 ### Added
 
 - Jira dashboards (#73): `jira dashboard query|get|create|update|copy|

@@ -170,7 +170,7 @@ atlx doctor --strict
 atlx jira board backlog query [--id <ID>] [--board-id <BOARD_ID>] [--active-quick-filters <ACTIVE_QUICK_FILTERS>] [--jql <JQL>] [--limit <LIMIT> [default: 50]]
 atlx jira board create --name <NAME> (required) --filter-id <FILTER_ID> (required) --type <BOARD_TYPE> {scrum|kanban} (required)
 atlx jira board delete [--id <ID>] [--board-id <BOARD_ID>] -y/--yes
-atlx jira board get --id <ID> (required)
+atlx jira board get --id <ID>... (required)
 atlx jira board list (hidden) [--project <PROJECT>] [--type <BOARD_TYPE> {scrum|kanban}] [--limit <LIMIT> [default: 25]]
 atlx jira board projects query [--id <ID>] [--board-id <BOARD_ID>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira board query [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--issue <ISSUE>] [--type <BOARD_TYPE> {scrum|kanban}] [--name <NAME>] [--filter-id <FILTER_ID>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
