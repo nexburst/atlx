@@ -151,19 +151,58 @@ fn purge_only_deletes_what_is_in_the_trash() {
 fn trash_and_untrash() {
     let srv = MockServer::with_responses([
         empty(),
-        ok(json!({"type": "page", "title": "T", "version": {"number": 4}})),
+        ok(
+            json!({"status": "trashed", "title": "T", "version": {"number": 4},
+                  "body": {"storage": {"value": "<p>kept</p>"}}}),
+        ),
         ok(json!({"status": "current"})),
     ]);
     let c = srv.client();
     lc::trash(&c, "1").unwrap();
-    assert_eq!(lc::untrash(&c, "1").unwrap()["status"], "current");
+    let out = lc::untrash(&c, "1").unwrap();
+    assert_eq!(
+        (&out["status"], &out["type"]),
+        (&json!("current"), &json!("page"))
+    );
     let r = srv.requests();
     assert_eq!(r[0].query, "");
-    assert_eq!(r[2].query_param("status").as_deref(), Some("trashed"));
+    assert_eq!(r[1].path, "/api/v2/pages/1");
+    assert_eq!(r[1].query_param("status").as_deref(), Some("trashed"));
+    assert_eq!(r[1].query_param("body-format").as_deref(), Some("storage"));
+    assert_eq!((r[2].method.as_str(), r[2].query.as_str()), ("PUT", ""));
+    assert_eq!(r[2].path, "/api/v2/pages/1");
     assert_eq!(
         r[2].json_body(),
-        json!({"type": "page", "title": "T", "status": "current", "version": {"number": 5}})
+        json!({"id": "1", "title": "T", "status": "current", "version": {"number": 5},
+               "body": {"representation": "storage", "value": "<p>kept</p>"}})
     );
+}
+
+#[test]
+fn untrash_handles_blog_posts() {
+    let srv = MockServer::with_responses([
+        not_found(),
+        ok(
+            json!({"status": "trashed", "title": "B", "version": {"number": 1},
+                  "body": {"storage": {"value": ""}}}),
+        ),
+        ok(json!({"status": "current"})),
+    ]);
+    assert_eq!(lc::untrash(&srv.client(), "1").unwrap()["type"], "blogpost");
+    assert_eq!(srv.requests()[2].path, "/api/v2/blogposts/1");
+}
+
+#[test]
+fn untrash_never_writes_a_body_it_did_not_read() {
+    for now in [
+        json!({"status": "trashed", "title": "T", "version": {"number": 4}}),
+        json!({"status": "current", "title": "T", "version": {"number": 4},
+               "body": {"storage": {"value": "<p>live</p>"}}}),
+    ] {
+        let srv = MockServer::with_responses([ok(now)]);
+        assert!(lc::untrash(&srv.client(), "1").is_err());
+        assert_eq!(srv.requests().len(), 1);
+    }
 }
 
 #[test]

@@ -141,7 +141,7 @@ pub(crate) struct SpaceQueryArgs {
     #[arg(long)]
     property_query: Option<String>,
     /// Sort order, e.g. key, name, -lastIssueUpdatedDate
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     sort_by: Option<String>,
     /// Zero-based offset of the first space
     #[arg(long, conflicts_with = "after")]

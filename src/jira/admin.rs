@@ -570,9 +570,14 @@ pub fn filter_share_add(c: &Client, id: &str, permission: &Value) -> Result<Valu
     if !permission["type"].is_string() {
         return Err(usage("the share permission needs a \"type\""));
     }
+    let mut permission = permission.clone();
+    // Jira prints `loggedin`, but this endpoint only takes `authenticated`.
+    if permission["type"] == "loggedin" {
+        permission["type"] = "authenticated".into();
+    }
     Ok(clean(c.post(
         &format!("{}/permission", filter_path(id)),
-        permission,
+        &permission,
     )?))
 }
 

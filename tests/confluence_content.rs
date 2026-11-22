@@ -141,23 +141,22 @@ fn versions_restore_posts_the_v1_operation() {
 }
 
 #[test]
-fn labels_list_uses_v1_only_where_v2_has_no_endpoint() {
+fn labels_list_refuses_what_rest_cannot_list() {
     let body = || ok(json!({"results": [{"id": "1", "name": "runbook", "prefix": "global"}]}));
-    let srv = MockServer::with_responses([body(), body()]);
+    let srv = MockServer::with_responses([body()]);
     let c = srv.client();
     let page = labels::list(&c, "12345", None, None, 250).unwrap();
-    let board = labels::list(
-        &c,
-        "12345",
-        None,
-        Some(labels::LabelTarget::Whiteboard),
-        250,
-    )
-    .unwrap();
-    assert_eq!(page["results"], board["results"]);
     let r = srv.requests();
     assert_eq!(r[0].path, "/api/v2/pages/12345/labels");
-    assert_eq!(r[1].path, "/rest/api/content/12345/label");
+    assert!(page["results"][0]["id"].is_string());
+    for target in [
+        labels::LabelTarget::Whiteboard,
+        labels::LabelTarget::Database,
+        labels::LabelTarget::Folder,
+    ] {
+        assert!(labels::list(&c, "12345", None, Some(target), 250).is_err());
+    }
+    assert_eq!(srv.requests().len(), 1);
 }
 
 #[test]

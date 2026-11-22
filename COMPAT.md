@@ -209,7 +209,7 @@ inferred rows.
 | `jira filter query` | ✅ | #26; `--favourite` is an atlx extra; `--owner` is resolved to an account ID; GraphQL-only `--variables-json` not planned |
 | `jira filter remove-favourite` | ✅ | #26; GraphQL-only `--variables-json` not planned |
 | `jira filter reset-columns` | ✅ | #26; GraphQL-only `--variables-json` not planned |
-| `jira filter share add` | ✅ | #26; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira filter share add` | ✅ | #26; `loggedin` is sent as `authenticated` (#65); GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira filter share query` | ✅ | #26; GraphQL-only `--variables-json` not planned |
 | `jira filter share remove` | ✅ | #26; GraphQL-only `--variables-json` not planned |
 | `jira filter subscription query` | ✅ | #26; GraphQL-only `--variables-json` not planned |
@@ -391,7 +391,7 @@ inferred rows.
 | `confluence content history get` | ✅ | same as `versions get` |
 | `confluence content history list` | ✅ | same as `versions list` |
 | `confluence content labels add` | ✅ | |
-| `confluence content labels list` | ✅ | |
+| `confluence content labels list` | 🟡 | #65: pages, blog posts and custom content; public REST has no endpoint for whiteboard, database or folder labels |
 | `confluence content labels remove` | ✅ | |
 | `confluence content labels unwatch` | ✅ | |
 | `confluence content labels watch` | ✅ | |
@@ -424,9 +424,9 @@ inferred rows.
 | `confluence content trash` | 🟡 | #13: pages and blog posts only |
 | `confluence content unarchive` | ⛔ | no public REST endpoint |
 | `confluence content unstar` | ⛔ | starring is only in the GraphQL gateway |
-| `confluence content untrash` | ✅ | #30 |
+| `confluence content untrash` | 🟡 | #65: pages and blog posts only (REST v2) |
 | `confluence content unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
-| `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#13). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
+| `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#13). `--minor-edit` is sent but absent from the v2 request schema, so Confluence may ignore it (#65). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
 | `confluence content versions diff` | ✅ | computed locally from the two bodies |
 | `confluence content versions get` | ✅ | |
 | `confluence content versions list` | ✅ | |

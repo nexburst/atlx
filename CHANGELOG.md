@@ -185,6 +185,13 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Fixed
 
+- Checked against Atlassian's OpenAPI specs (#65): `confluence content
+  untrash` restores through REST v2 (v1's endpoint is gone); `labels list`
+  refuses content types REST can't list instead of calling a removed
+  endpoint; `jira filter share add` sends `authenticated` for `loggedin`.
+- Descending sort values such as `--sort -name` can be typed with a space
+  in `bb branch query`, `bb repo query`, `jira space query` and `confluence
+  content attachments list` (#65).
 - Requests whose path has a `.` or `..` segment, and DELETEs with an empty
   one, are refused before they are sent. An ID of `..` used to address the
   parent resource, so deleting a comment could delete its work item.

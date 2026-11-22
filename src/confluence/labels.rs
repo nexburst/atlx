@@ -33,6 +33,14 @@ pub fn list(
     content_type: Option<LabelTarget>,
     limit: usize,
 ) -> Result<Value> {
+    if let Some(LabelTarget::Whiteboard | LabelTarget::Database | LabelTarget::Folder) =
+        content_type
+    {
+        return Err(ApiError::unsupported(
+            "Confluence's public REST API has no endpoint that lists whiteboard, database or folder labels",
+        )
+        .into());
+    }
     let id = resolve_id(c, reference, reference_space)?;
     let limit = limit.clamp(1, 250).to_string();
     let q = [("limit", limit.as_str())];
@@ -42,16 +50,8 @@ pub fn list(
         Some(LabelTarget::Page) => v2(ContentType::Page.collection())?,
         Some(LabelTarget::Blogpost) => v2(ContentType::Blogpost.collection())?,
         Some(LabelTarget::CustomContent) => v2("custom-content")?,
-        // v2 has no labels endpoint for these; v1 serves any content ID.
         Some(LabelTarget::Whiteboard | LabelTarget::Database | LabelTarget::Folder) => {
-            let v = c.get(&format!("/rest/api/content/{}/label", enc(&id)), &q)?;
-            let results: Vec<Value> = v["results"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(label)
-                .collect();
-            return Ok(json!({"results": results, "nextCursor": null}));
+            unreachable!("refused above")
         }
     };
     Ok(listing(&v, label))
