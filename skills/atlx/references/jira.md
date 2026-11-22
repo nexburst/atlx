@@ -31,6 +31,7 @@ atlx jira workitem update --id PROJ-1 --assignee me --story-points 3
 atlx jira workitem comment create --issue-id PROJ-1 --body 'Deployed.' --body-format markdown
 atlx jira workitem worklog add --issue-id PROJ-1 --time-spent '1h 30m'
 atlx jira workitem watcher add --id PROJ-1 --watcher-id me
+atlx jira dashboard query --dashboard-name Team --first 10
 atlx jira workitem bulk-get PROJ-1 PROJ-2 --fields summary,status
 atlx jira workitem bulk-transition --ids PROJ-1,PROJ-2 --transition-id 31 --dry-run
 ```

@@ -186,6 +186,7 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira workitem watcher query\|add\|remove`, `jira workitem vote query\|add\|remove` | `--watcher-id` takes an ID, email, name or `me` (the default) |
 | `jira workitem bulk-get\|create-bulk\|bulk-transition` | `bulk-get` takes keys, `--fields`, `--full`, `--strict`; `create-bulk --input-json` takes the REST `issueUpdates`; `bulk-transition --ids --transition-id` has `--dry-run`, needs `--yes`, and returns a task |
 | `jira workitem archive\|unarchive`, `jira workitem property get\|query\|set\|delete` | `--id` (repeatable; archiving needs an admin on Premium or Enterprise); `--issue-id --property-key --value-json` |
+| `jira dashboard query\|get\|create\|update\|copy\|delete\|bulk-edit`, `jira dashboard gadget`, `jira dashboard item-property` | new dashboards and copies are private; `update` keeps what isn't given; deletes and `bulk-edit` need `--yes` |
 | `jira field list` | `--query`, `--custom-only` |
 | `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
 | `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |

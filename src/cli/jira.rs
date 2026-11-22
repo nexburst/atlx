@@ -13,6 +13,7 @@ mod admin;
 mod agile;
 mod bulk;
 mod collab;
+mod dashboard;
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
@@ -21,6 +22,11 @@ pub(crate) enum JiraCmd {
     Workitem {
         #[command(subcommand)]
         cmd: WorkitemCmd,
+    },
+    /// Dashboards and their gadgets
+    Dashboard {
+        #[command(subcommand)]
+        cmd: dashboard::DashboardCmd,
     },
     /// Saved filters
     Filter {
@@ -1069,6 +1075,7 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
         JiraCmd::Space {
             cmd: SpaceCmd::Component { cmd },
         } => admin::component(c, cmd),
+        JiraCmd::Dashboard { cmd } => dashboard::run(c, cmd),
         JiraCmd::Filter { cmd } => admin::filter(c, cmd),
         JiraCmd::Field {
             cmd: FieldCmd::List { query, custom_only },

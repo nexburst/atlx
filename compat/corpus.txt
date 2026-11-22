@@ -288,3 +288,9 @@ ok confluence content status set 12345 --name Review --color '#ffc400' --yes
 ok confluence content watch --id 12345 --yes
 ok confluence space permission list --space ENG
 ok confluence templates list --space-id ENG --scope available
+
+# --- jira dashboards (#73) ---
+ok jira dashboard query --dashboard-name Team --first 10
+ok jira dashboard update --id 10000 --name 'Team board'
+ok jira dashboard gadget query --dashboard-id 10000
+ok jira dashboard delete --id 10000 --yes

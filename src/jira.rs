@@ -10,6 +10,7 @@ pub mod admin;
 pub mod agile;
 pub mod attachments;
 pub mod bulk;
+pub mod dashboards;
 pub mod people;
 pub mod worklogs;
 

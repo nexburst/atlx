@@ -179,22 +179,22 @@ inferred rows.
 | `jira board scope query` | ⛔ | board scope model is only in the GraphQL gateway |
 | `jira board sprints query` | ✅ | #18; `--project`/`--issue` use the space's only board; GraphQL-only `--variables-json` not planned |
 | `jira board view-settings query` | ⛔ | board view model is only in the GraphQL gateway |
-| `jira dashboard bulk-edit` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard copy` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard create` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard delete` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard gadget add` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard gadget catalog query` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard gadget delete` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard gadget query` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard gadget update` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard get` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard item-property delete` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard item-property get` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard item-property query` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard item-property set` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard query` | 📋 | #13 (unscheduled); REST v3 dashboards |
-| `jira dashboard update` | 📋 | #13 (unscheduled); REST v3 dashboards |
+| `jira dashboard bulk-edit` | ✅ | #73; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard copy` | ✅ | #73; `--name` is required; the copy is private unless shares are given; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard create` | ✅ | #73; private unless shares are given; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard delete` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard gadget add` | ✅ | #73; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard gadget catalog query` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard gadget delete` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard gadget query` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard gadget update` | ✅ | #73; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard get` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard item-property delete` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard item-property get` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard item-property query` | ✅ | #73; GraphQL-only `--variables-json` not planned |
+| `jira dashboard item-property set` | ✅ | #73; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira dashboard query` | ✅ | #73; `--owner` is deprecated by Jira; use `--account-id`; GraphQL-only `--variables-json` not planned |
+| `jira dashboard update` | ✅ | #73; reads first and sends back what isn't given, as the PUT replaces all; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira field cancel-delete` | 📋 | #13 (unscheduled); REST v3 custom field admin |
 | `jira field create` | 📋 | #13 (unscheduled); REST v3 custom field admin |
 | `jira field delete` | 📋 | #13 (unscheduled); REST v3 custom field admin |

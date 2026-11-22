@@ -11,6 +11,9 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira dashboards (#73): `jira dashboard query|get|create|update|copy|
+  delete|bulk-edit`, `dashboard gadget` and `dashboard item-property`.
+  `update` keeps what isn't given; deletes and bulk edits need `--yes`.
 - Confluence (#71): `content tasks list|get|complete|reopen`, `content
   status get|set`, `content list-available-statuses`, `content
   watch|unwatch`, `space watch|unwatch`, `space permission list|available`

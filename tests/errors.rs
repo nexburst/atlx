@@ -10,6 +10,10 @@ use std::process::{Command, Output};
 
 const TOKEN: &str = "ATATT3xFfGF0-very-secret-token-value";
 
+/// For commands that must fail before sending anything: if one does send,
+/// it goes to a closed local port and never to the internet.
+const NO_SITE: &str = "http://127.0.0.1:9";
+
 fn jira_handler() -> MockServer {
     MockServer::with_handler(|req| {
         if req.path.ends_with("/NOPE-1") || req.path.ends_with("/NOPE-2") {
@@ -170,7 +174,7 @@ fn unauthorized_is_category_auth() {
 #[test]
 fn missing_token_is_category_config() {
     let o = atlx(
-        Some("acme"),
+        Some(NO_SITE),
         None,
         &["jira", "workitem", "get", "A-1", "-o", "json"],
     );
@@ -271,7 +275,7 @@ fn old_names_work_without_notes_when_piped() {
 #[test]
 fn usage_errors_exit_1() {
     let o = atlx(
-        Some("acme"),
+        Some(NO_SITE),
         Some(TOKEN),
         &[
             "bb",
@@ -308,7 +312,7 @@ fn usage_errors_exit_1() {
 #[test]
 fn teamwork_graph_commands_fail_with_an_envelope_and_exit_2() {
     let o = atlx(
-        Some("acme"),
+        Some(NO_SITE),
         Some(TOKEN),
         &["rovo", "search", "launch", "-o", "json"],
     );
@@ -325,9 +329,9 @@ fn teamwork_graph_commands_fail_with_an_envelope_and_exit_2() {
 
     // A planned command says so and exits 1, like other usage errors.
     let o = atlx(
-        Some("acme"),
+        Some(NO_SITE),
         Some(TOKEN),
-        &["jira", "dashboard", "query", "-o", "json"],
+        &["confluence", "content", "analytics", "1", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(1));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
