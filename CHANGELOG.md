@@ -11,6 +11,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira Agile (#25): `jira sprint get|create|update|start|complete|delete`,
+  `jira board get|create|delete`, `board backlog|projects|quick-filter
+  query`, `board quick-filter get`, and `--sprint`, `--story-points`,
+  `--original-estimate`, `--remaining-estimate` and `--team` on `workitem
+  create|update`. Names are resolved before anything is written.
 - Jira collaboration commands (#24): `jira workitem attachment
   query|get|download|thumbnail|upload|delete`, `worklog
   add|update|query|get|delete|changed|deleted`, `watcher query|add|remove`

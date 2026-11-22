@@ -186,6 +186,9 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira field list` | `--query`, `--custom-only` |
 | `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
 | `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |
+| `jira sprint get\|create\|update\|start\|complete\|delete` | `start` needs `--end-date` or `--duration 2w` unless the sprint has an end; `complete --incomplete-issues-destination-id <sprint>\|backlog` moves unfinished work first; names need `--board-id` |
+| `jira board get\|create\|delete`, `jira board backlog\|projects\|quick-filter query` | `get` adds columns and estimation; backlog takes `--active-quick-filters`, `--jql`, `--limit`; `delete` needs `--yes` |
+| `jira workitem create\|update` planning flags | `--sprint <id\|name\|none>`, `--story-points`, `--original-estimate`, `--remaining-estimate` (durations, or seconds), `--team <id\|none>` |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
 | `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` (atlx extra) moves to the trash, or `--purge` |

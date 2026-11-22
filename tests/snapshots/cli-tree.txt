@@ -92,16 +92,29 @@ atlx confluence space list [--type <KIND>] [--status <STATUS>] [--keys <KEYS>] [
 atlx confluence space me
 atlx confluence tree [<ref>] [--target <TARGET>] [--depth <DEPTH> [default: 2]]
 atlx doctor --strict
+atlx jira board backlog query [--id <ID>] [--board-id <BOARD_ID>] [--active-quick-filters <ACTIVE_QUICK_FILTERS>] [--jql <JQL>] [--limit <LIMIT> [default: 50]]
+atlx jira board create --name <NAME> (required) --filter-id <FILTER_ID> (required) --type <BOARD_TYPE> {scrum|kanban} (required)
+atlx jira board delete [--id <ID>] [--board-id <BOARD_ID>] -y/--yes
+atlx jira board get --id <ID> (required)
 atlx jira board list (hidden) [--project <PROJECT>] [--type <BOARD_TYPE> {scrum|kanban}] [--limit <LIMIT> [default: 25]]
+atlx jira board projects query [--id <ID>] [--board-id <BOARD_ID>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira board query [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--issue <ISSUE>] [--type <BOARD_TYPE> {scrum|kanban}] [--name <NAME>] [--filter-id <FILTER_ID>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
+atlx jira board quick-filter get --board-id <BOARD_ID> (required) --quick-filter-id <QUICK_FILTER_ID> (required)
+atlx jira board quick-filter query --board-id <BOARD_ID> (required) [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira board sprints query [--id <ID>] [--board-id <BOARD_ID>] [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--issue <ISSUE>] [--state <STATE>] --current [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira field list [--query <QUERY>] --custom-only
 atlx jira project get (hidden) <IDENTIFIER> (required)
 atlx jira project list (hidden) [--query <QUERY>] [--limit <LIMIT> [default: 25]]
 atlx jira space get <id-or-key> (required)
 atlx jira space query [--query <QUERY>] [--key <KEY>...] [--id <ID>...] [--type-key <TYPE_KEY>] [--category-id <CATEGORY_ID>] [--action <ACTION>] [--expand <EXPAND>] [--status <STATUS>] [--property <PROPERTY>...] [--property-query <PROPERTY_QUERY>] [--sort-by <SORT_BY>] [--start-at <START_AT>] [--after <AFTER>] [--limit <LIMIT>] [--first <FIRST>]
+atlx jira sprint complete --id <ID> (required) [--board-id <BOARD_ID>] [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>] [--incomplete-issues-destination-id/--move-open-to <INCOMPLETE_ISSUES_DESTINATION_ID>]
+atlx jira sprint create --board-id <BOARD_ID> (required) [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>]
+atlx jira sprint delete [--id <ID>] [--sprint-id <SPRINT_ID>] [--board-id <BOARD_ID>] -y/--yes (hidden)
+atlx jira sprint get [<id>] [--id <ID>]
 atlx jira sprint issues (hidden) --sprint <SPRINT> (required) [--jql <JQL>] [--limit <LIMIT> [default: 25]]
 atlx jira sprint list (hidden) --board <BOARD> (required) [--state <STATE>] [--limit <LIMIT> [default: 25]]
+atlx jira sprint start --id <ID> (required) [--board-id <BOARD_ID>] [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>] [--duration <DURATION>]
+atlx jira sprint update --id <ID> (required) [--board-id <BOARD_ID>] [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>] [--state <STATE> {future|active|closed}] [--incomplete-issues-destination-id <INCOMPLETE_ISSUES_DESTINATION_ID>]
 atlx jira sprint workitems query [--id <ID>] [--sprint-id <SPRINT_ID>] [--jql <JQL>] [--fields <FIELDS>] [--expand <EXPAND>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira workitem attachment delete --attachment-id <ATTACHMENT_ID> (required) -y/--yes
 atlx jira workitem attachment download --attachment-id <ATTACHMENT_ID> (required) [--output-path/--out <OUTPUT_PATH>] --force
@@ -114,7 +127,7 @@ atlx jira workitem comment create --issue-id <ISSUE_ID> (required) --body <BODY>
 atlx jira workitem comment delete --id <ID> (required) --issue-id <ISSUE_ID> (required) -y/--yes (hidden)
 atlx jira workitem comment query --issue-id <ISSUE_ID> (required) [--first <FIRST>] [--after <AFTER>] [--order-by <ORDER_BY>]
 atlx jira workitem comment update --id <ID> (required) --issue-id <ISSUE_ID> (required) --body <BODY> (required) [--body-format <BODY_FORMAT> {html|markdown|plain} [default: html]]
-atlx jira workitem create --space <SPACE> (required) [--type <ISSUE_TYPE> [default: Task]] --summary <SUMMARY> (required) [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--reporter <REPORTER>] [--priority <PRIORITY>] [--labels <LABELS>] [--parent <PARENT>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] -y/--yes
+atlx jira workitem create --space <SPACE> (required) [--type <ISSUE_TYPE> [default: Task]] --summary <SUMMARY> (required) [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--reporter <REPORTER>] [--priority <PRIORITY>] [--labels <LABELS>] [--parent <PARENT>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--sprint <SPRINT>] [--story-points <STORY_POINTS>] [--original-estimate <ORIGINAL_ESTIMATE>] [--remaining-estimate <REMAINING_ESTIMATE>] [--team <TEAM>] -y/--yes
 atlx jira workitem create-meta (hidden) --space <SPACE> (required) [--type <ISSUE_TYPE>]
 atlx jira workitem delete [<id>] [--id <ID>] [--delete-subtasks <BOOL> {true|false}] -y/--yes (hidden)
 atlx jira workitem field create-metadata --space <SPACE> (required) [--type <ISSUE_TYPE>]
@@ -137,7 +150,7 @@ atlx jira workitem types get --id <ID>... (required)
 atlx jira workitem types query [--project <PROJECT>] [--issue <ISSUE>] [--project-id <PROJECT_ID>] [--project-key <PROJECT_KEY>] [--level <LEVEL>] [-n/--limit <LIMIT>] [--first <FIRST>] [--id <ID>...]
 atlx jira workitem unlink weblink --id <ID> (required) [--link-id <LINK_ID>] [--global-id <GLOBAL_ID>] [--url <URL>] -y/--yes (hidden)
 atlx jira workitem unlink workitem --link-id <LINK_ID> (required) -y/--yes (hidden)
-atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
+atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--sprint <SPRINT>] [--story-points <STORY_POINTS>] [--original-estimate <ORIGINAL_ESTIMATE>] [--remaining-estimate <REMAINING_ESTIMATE>] [--team <TEAM>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
 atlx jira workitem vote add --issue-id <ISSUE_ID> (required)
 atlx jira workitem vote query --issue-id <ISSUE_ID> (required)
 atlx jira workitem vote remove --issue-id <ISSUE_ID> (required)
