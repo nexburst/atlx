@@ -209,6 +209,8 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `confluence content attachments list\|get\|download\|upload\|delete` | `download --out --at-version --force`; `upload --file` (repeatable) `--comment --minor-edit`; `delete --purge`; `upload` and `delete` need `--yes` |
 | `confluence content body-formats [format]` | offline guide to what each body format reads, writes and loses; `content get --format url` prints just the web address |
 | `confluence content move\|copy\|trash\|untrash\|purge\|archive\|publish\|delete-draft` | all need `--yes`, as in twg; `purge` only deletes what is in the trash; `create` also takes `--private`, `--content-width`, `--title-emoji` |
+| `confluence content tasks list\|get\|complete\|reopen`, `confluence content status get\|set`, `confluence content list-available-statuses` | `tasks list --id --status open`; `--task-id`; `status set <id>` takes `--state-id` or `--name --color`, and `--yes` |
+| `confluence content watch\|unwatch`, `confluence space watch\|unwatch`, `confluence space permission list\|available`, `confluence templates list\|get` | watches need `--yes`; `--key` or `--space-id`; `templates list --space-id --scope --query` |
 | `confluence space create\|update\|archive\|unarchive\|delete` | all need `--yes`; `delete` is permanent and takes only an exact key, ID, ARI or space URL; `create --dry-run` |
 | `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
 | `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |

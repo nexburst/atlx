@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 mod comments;
+mod extras;
 mod lifecycle;
 
 pub(crate) use comments::ConfCommentCmd;
@@ -32,6 +33,11 @@ pub(crate) enum ConfCmd {
     Space {
         #[command(subcommand)]
         cmd: SpaceCmd,
+    },
+    /// Templates for new pages
+    Templates {
+        #[command(subcommand)]
+        cmd: extras::TemplatesCmd,
     },
     /// Page ancestors and descendant tree
     Tree {
@@ -247,6 +253,22 @@ pub(crate) enum ContentCmd {
         #[arg(long)]
         purge: bool,
     },
+    /// Tasks written in pages and blog posts
+    Tasks {
+        #[command(subcommand)]
+        cmd: extras::TasksCmd,
+    },
+    /// The status shown on content
+    Status {
+        #[command(subcommand)]
+        cmd: extras::StatusCmd,
+    },
+    /// The statuses content can be given
+    ListAvailableStatuses(extras::AvailableArgs),
+    /// Watch content
+    Watch(extras::WatchArgs),
+    /// Stop watching content
+    Unwatch(extras::WatchArgs),
     /// Move content under or beside other content
     Move(lifecycle::MoveArgs),
     /// Copy content under a parent or to a space
@@ -570,6 +592,15 @@ pub(crate) enum SpaceCmd {
     Unarchive(lifecycle::SpaceRef),
     /// Delete a space and everything in it, for good
     Delete(lifecycle::SpaceRef),
+    /// Watch a space
+    Watch(extras::SpaceWatchArgs),
+    /// Stop watching a space
+    Unwatch(extras::SpaceWatchArgs),
+    /// Space permissions
+    Permission {
+        #[command(subcommand)]
+        cmd: extras::PermissionCmd,
+    },
 }
 
 pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
@@ -847,6 +878,11 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     .data(data)
             }
             ContentCmd::Labels { cmd: Some(cmd), .. } => labels_cmd(c, cmd)?,
+            ContentCmd::Tasks { cmd } => extras::tasks(c, cmd)?,
+            ContentCmd::Status { cmd } => extras::status(c, cmd)?,
+            ContentCmd::ListAvailableStatuses(a) => extras::available(c, a)?,
+            ContentCmd::Watch(a) => extras::watch(c, a, true)?,
+            ContentCmd::Unwatch(a) => extras::watch(c, a, false)?,
             ContentCmd::Labels {
                 reference: Some(reference),
                 limit,
@@ -991,6 +1027,16 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
         ConfCmd::Space {
             cmd: SpaceCmd::Delete(a),
         } => lifecycle::space_delete(c, a)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Watch(a),
+        } => extras::space_watch(c, a, true)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Unwatch(a),
+        } => extras::space_watch(c, a, false)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Permission { cmd },
+        } => extras::permission(c, cmd)?,
+        ConfCmd::Templates { cmd } => extras::templates(c, cmd)?,
         ConfCmd::Tree {
             reference,
             target,

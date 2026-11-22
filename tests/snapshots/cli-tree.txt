@@ -130,16 +130,25 @@ atlx confluence content labels remove --id <ID> (required) [--reference-space <R
 atlx confluence content labels unwatch --name <NAME> (required) -y/--yes
 atlx confluence content labels watch --name <NAME> (required) -y/--yes
 atlx confluence content list --space <SPACE> (required) [--content-type <CONTENT_TYPE> {page|blogpost} [default: page]] [--status <STATUS> [default: current]] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence content list-available-statuses <ID> (required) [--reference-space <REFERENCE_SPACE>]
 atlx confluence content move <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--parent-id <PARENT_ID>] [--before <BEFORE>] [--after <AFTER>] [--target <TARGET>] [--position <POSITION> {append|before|after}]
 atlx confluence content publish <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes [--content-type <CONTENT_TYPE> {page|blogpost}] [--title <TITLE>]
 atlx confluence content purge <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
+atlx confluence content status get <ID> (required) [--content-type <CONTENT_TYPE> {page|blogpost|live_doc|whiteboard|database|folder}] --draft [--reference-space <REFERENCE_SPACE>]
+atlx confluence content status set <ID> (required) [--content-type <CONTENT_TYPE> {page|blogpost|live_doc|whiteboard|database|folder}] --draft [--reference-space <REFERENCE_SPACE>] [--state-id <STATE_ID>] [--name <NAME>] [--color <COLOR>] -y/--yes
+atlx confluence content tasks complete --task-id <TASK_ID> (required)
+atlx confluence content tasks get --task-id <TASK_ID> (required)
+atlx confluence content tasks list [--id <ID>] [--status <STATUS> {open|complete|all} [default: all]] [--limit <LIMIT> [default: 50]] [--content-type <CONTENT_TYPE> {page|blogpost}] [--reference-space <REFERENCE_SPACE>]
+atlx confluence content tasks reopen --task-id <TASK_ID> (required)
 atlx confluence content trash <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
 atlx confluence content untrash <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
+atlx confluence content unwatch --id <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
 atlx confluence content update [<REFERENCE>] [--id <ID>] [--snapshot-token <SNAPSHOT_TOKEN>] [--title <TITLE>] [--version-message <VERSION_MESSAGE>] --minor-edit [--body <BODY>] [--body-file <BODY_FILE>] [--edits <EDITS>] [--edits-file <EDITS_FILE>] [--format <FORMAT> {html|markdown|plain} [default: html]] --dry-run --draft -y/--yes --ack-body-formats
 atlx confluence content versions diff --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --from <FROM> (required) --to <TO> (required) [--format <FORMAT> {html|md} [default: md]]
 atlx confluence content versions get --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --at-version <AT_VERSION> (required) [--format <FORMAT> {html|md}]
 atlx confluence content versions list --id <ID> (required) [--reference-space <REFERENCE_SPACE>] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
 atlx confluence content versions restore --id <ID> (required) [--reference-space <REFERENCE_SPACE>] --at-version <AT_VERSION> (required) [--message <MESSAGE>] --restore-title -y/--yes
+atlx confluence content watch --id <ID> (required) [--reference-space <REFERENCE_SPACE>] -y/--yes
 atlx confluence search query [<CQL_ARG>...] [--cql <CQL>] [--limit <LIMIT> [default: 25]] --excerpt [--cursor <CURSOR>]
 atlx confluence search text [<TEXT>...] [--query <QUERY>] [--limit <LIMIT> [default: 25]] [--updated-since/--since <UPDATED_SINCE>] [--created-since <CREATED_SINCE>] --excerpt [--cursor <CURSOR>]
 atlx confluence space archive [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
@@ -148,8 +157,14 @@ atlx confluence space delete [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
 atlx confluence space get [<IDENTIFIER>] [--key <KEY> (hidden)] --labels
 atlx confluence space list [--type <KIND>] [--status <STATUS>] [--keys <KEYS>] [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>] --labels
 atlx confluence space me
+atlx confluence space permission available [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
+atlx confluence space permission list --space <SPACE> (required) [--limit <LIMIT> [default: 25]] [--cursor <CURSOR>]
 atlx confluence space unarchive [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes
+atlx confluence space unwatch [--key <KEY>] [--space-id <SPACE_ID>] -y/--yes
 atlx confluence space update [<id-or-key>] [--id <ID>] [--key <KEY>] -y/--yes [--name <NAME>] [--description <DESCRIPTION>] [--type <KIND> {global|personal}] [--status <STATUS> {current|archived}] [--homepage <HOMEPAGE>]
+atlx confluence space watch [--key <KEY>] [--space-id <SPACE_ID>] -y/--yes
+atlx confluence templates get <TEMPLATE_ID> (required)
+atlx confluence templates list [--space-id <SPACE_ID>] [--scope <SCOPE> {global|space|available}] [--template-type <TEMPLATE_TYPE> {all|page|blueprint} [default: all]] [--query <QUERY>] [--cursor <CURSOR>] [--limit <LIMIT> [default: 25]]
 atlx confluence tree [<ref>] [--target <TARGET>] [--depth <DEPTH> [default: 2]] [--type <NODE_TYPE> {page|whiteboard|database}]
 atlx doctor --strict
 atlx jira board backlog query [--id <ID>] [--board-id <BOARD_ID>] [--active-quick-filters <ACTIVE_QUICK_FILTERS>] [--jql <JQL>] [--limit <LIMIT> [default: 50]]
