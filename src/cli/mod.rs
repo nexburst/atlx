@@ -494,4 +494,18 @@ mod tests {
         let strict = Cli::try_parse_from(["atlx", "doctor", "--strict"]).unwrap();
         assert!(matches!(strict.cmd, Cmd::Doctor { strict: true }));
     }
+
+    #[test]
+    fn descending_sort_values_parse_as_documented() {
+        for args in [
+            "bb branch query -r acme/api --sort -name",
+            "bb repo query --workspace acme --sort -updated_on",
+            "jira space query --sort-by -lastIssueUpdatedDate",
+            "confluence content attachments list --id 1 --sort -created-date",
+        ] {
+            if let Err(e) = Cli::try_parse_from(["atlx"].into_iter().chain(args.split(' '))) {
+                panic!("{args}: {e}");
+            }
+        }
+    }
 }

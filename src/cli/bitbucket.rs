@@ -110,7 +110,7 @@ pub(crate) enum BranchCmd {
         #[arg(long)]
         author: Option<String>,
         /// Sort field: name, -name, target.date or -target.date
-        #[arg(long, default_value = "-target.date")]
+        #[arg(long, allow_hyphen_values = true, default_value = "-target.date")]
         sort: String,
         #[arg(long, short = 'n', default_value_t = 25)]
         limit: usize,
@@ -136,7 +136,7 @@ pub(crate) enum RepoCmd {
         project: Option<String>,
         #[arg(long)]
         language: Option<String>,
-        #[arg(long, default_value = "-updated_on")]
+        #[arg(long, allow_hyphen_values = true, default_value = "-updated_on")]
         sort: String,
         /// owner, admin, contributor, member
         #[arg(long)]

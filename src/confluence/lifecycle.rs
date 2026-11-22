@@ -251,24 +251,36 @@ pub fn purge(c: &Client, id: &str) -> Result<Value> {
     Ok(json!({"id": id, "type": kind_name(kind), "purged": true}))
 }
 
-/// v1 restores with only the version, title, type and status.
+/// v2 restores through an update. Its schema requires a body, though a
+/// restore doesn't change it, so the trashed one is sent back: never an empty
+/// body made up here.
 pub fn untrash(c: &Client, id: &str) -> Result<Value> {
-    let path = format!("/rest/api/content/{}", enc(id));
-    let q = [("status", "trashed"), ("expand", "version")];
-    let now = c.get(&path, &q)?;
+    let q = [("status", "trashed"), ("body-format", "storage")];
+    let (kind, now) = try_content(|k| c.get(&kind_path(k, id), &q))?;
+    if now["status"] != "trashed" {
+        return Err(usage(format!("content {id} isn't in the trash")));
+    }
     let n = now["version"]["number"]
         .as_u64()
         .ok_or_else(|| anyhow!("content {id} came back without its version"))?;
+    let storage = now["body"]["storage"]["value"]
+        .as_str()
+        .ok_or_else(|| anyhow!("content {id} came back without its body; not restoring it"))?;
     let body = json!({
-        "type": now["type"],
+        "id": id,
         "title": now["title"],
         "status": "current",
+        "body": {"representation": "storage", "value": storage},
         "version": {"number": n + 1},
     });
-    let v = c.request("PUT", &path, &[("status", "trashed")], Some(&body))?;
-    Ok(
-        json!({"id": id, "type": now["type"], "title": now["title"], "status": v["status"], "restored": true}),
-    )
+    let v = c.put(&kind_path(kind, id), &body)?;
+    Ok(json!({
+        "id": id,
+        "type": kind_name(kind),
+        "title": now["title"],
+        "status": v["status"],
+        "restored": true,
+    }))
 }
 
 /// How long and how often a long-running task is polled.

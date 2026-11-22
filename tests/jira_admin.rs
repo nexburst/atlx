@@ -310,6 +310,9 @@ fn filter_sub_resources() {
     let r = srv.requests();
     assert_eq!(r[3].json_body(), json!({"accountId": "acct"}));
     assert_eq!(r[5].json_body(), json!({"columns": ["summary"]}));
+    assert!(r.iter().any(|r| r.method == "POST"
+        && r.path.ends_with("/permission")
+        && r.json_body()["type"] == "authenticated"));
     assert_eq!(r[9].path, "/rest/api/3/filter/9/permission/3");
     assert_eq!(
         r[10].query_param("expand").as_deref(),

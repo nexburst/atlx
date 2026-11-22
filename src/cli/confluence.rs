@@ -170,6 +170,7 @@ pub(crate) enum ContentCmd {
         title: Option<String>,
         #[arg(long)]
         version_message: Option<String>,
+        /// Ask for a minor edit; undocumented in REST v2, so watchers may still be notified
         #[arg(long)]
         minor_edit: bool,
         #[arg(long, conflicts_with_all = ["body_file", "edits", "edits_file"])]
@@ -400,8 +401,8 @@ pub(crate) enum AttachmentsCmd {
         limit: usize,
         #[arg(long)]
         cursor: Option<String>,
-        /// REST sort order, e.g. -created-date or title
-        #[arg(long)]
+        /// created-date or modified-date; prefix - for descending
+        #[arg(long, allow_hyphen_values = true)]
         sort: Option<String>,
         /// current (default), archived or trashed
         #[arg(long, default_value = "current")]
@@ -1412,7 +1413,7 @@ mod tests {
             "atlx confluence content labels remove --id 12345 --label a --yes",
             "atlx confluence content labels watch --name runbook --yes",
             "atlx confluence content labels unwatch --name runbook --yes",
-            "atlx confluence content attachments list --id 12345 --media-type image/png --filename a.png --sort title --status current",
+            "atlx confluence content attachments list --id 12345 --media-type image/png --filename a.png --sort -modified-date --status current",
             "atlx confluence content attachments get --attachment-id att456 --at-version 1",
             "atlx confluence content attachments download --attachment-id att456 --out a.png --force",
             "atlx confluence content attachments upload --id 12345 --file a --file b --minor-edit --yes",
