@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 mod lifecycle;
 mod pipelines;
+mod repos;
 
 #[derive(Args)]
 pub(crate) struct RepoArgs {
@@ -54,6 +55,16 @@ pub(crate) enum BbCmd {
     /// most recently updated repositories (25 unless --repo-limit says
     /// otherwise), at one request or more each.
     Inbox(lifecycle::InboxArgs),
+    /// Commits and Code Insights reports
+    Commit {
+        #[command(subcommand)]
+        cmd: repos::CommitCmd,
+    },
+    /// Workspaces and their members
+    Workspace {
+        #[command(subcommand)]
+        cmd: repos::WorkspaceCmd,
+    },
     /// Deployments and their environments
     Deployment {
         #[command(subcommand)]
@@ -68,6 +79,8 @@ pub(crate) enum BbCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum BbSearchCmd {
+    /// Search pull request titles and descriptions
+    Prs(repos::SearchPrsArgs),
     /// Search code across repositories in a workspace
     Code {
         #[arg(required = true)]
@@ -84,6 +97,10 @@ pub(crate) enum BbSearchCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum BranchCmd {
+    /// Create a branch
+    Create(repos::BranchCreateArgs),
+    /// Delete a branch
+    Delete(repos::BranchDeleteArgs),
     /// List or search the branches of a repository
     Query {
         /// Branch name substring
@@ -141,6 +158,14 @@ pub(crate) enum RepoCmd {
         #[command(flatten)]
         repo: RepoArgs,
     },
+    /// Create a repository (private unless --public)
+    Create(repos::RepoCreateArgs),
+    /// List a directory
+    ListFiles(repos::ListFilesArgs),
+    /// A repository's web URL; needs no credentials
+    Url(repos::UrlArgs),
+    /// Top commit authors, over the 1000 most recent commits
+    Contributors(repos::ContributorsArgs),
     /// Old name of `bb branch query`
     #[command(hide = true)]
     Branches {
@@ -719,6 +744,12 @@ pub(crate) enum PipelineCmd {
 }
 
 pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
+    if let BbCmd::Repo {
+        cmd: RepoCmd::Url(a),
+    } = &cmd
+    {
+        return repos::url(cfg, a).map(Out::Data);
+    }
     let (c, default_ws) = cfg.bitbucket()?;
     let dws = default_ws.as_deref();
     let path = |r: &RepoArgs, slug: Option<&str>| {
@@ -803,6 +834,29 @@ pub(crate) fn bb_cmd(cfg: &Config, cmd: BbCmd) -> Result<Out> {
                 },
             )?
         }
+        BbCmd::Branch {
+            cmd: BranchCmd::Create(a),
+        } => repos::branch_create(&c, &|r| path(r, None), a)?,
+        BbCmd::Branch {
+            cmd: BranchCmd::Delete(a),
+        } => repos::branch_delete(&c, &|r| path(r, None), a)?,
+        BbCmd::Commit { cmd } => repos::commit(&c, &|r| path(r, None), cmd)?,
+        BbCmd::Workspace { cmd } => repos::workspace_cmd(&c, dws, cmd)?,
+        BbCmd::Repo {
+            cmd: RepoCmd::Create(a),
+        } => repos::repo_create(&c, dws, a)?,
+        BbCmd::Repo {
+            cmd: RepoCmd::ListFiles(a),
+        } => repos::list_files(&c, &|r| path(r, None), a)?,
+        BbCmd::Repo {
+            cmd: RepoCmd::Url(a),
+        } => repos::url(cfg, &a)?,
+        BbCmd::Repo {
+            cmd: RepoCmd::Contributors(a),
+        } => repos::contributors(&c, &|r| path(r, None), a)?,
+        BbCmd::Search {
+            cmd: BbSearchCmd::Prs(a),
+        } => repos::search_prs(&c, &|r| path(r, None), dws, a)?,
         BbCmd::Inbox(a) => lifecycle::inbox(&c, &|r| path(r, None), dws, a)?,
         BbCmd::PullRequests { cmd } => match cmd {
             PrCmd::Query {
@@ -1335,6 +1389,42 @@ mod tests {
     use crate::cli::Cli;
     use crate::cli::tests::shell_words;
     use clap::Parser;
+
+    #[test]
+    fn parses_repository_extras() {
+        for ok in [
+            "atlx bb branch create --branch x --from main",
+            "atlx bb branch create --name x",
+            "atlx bb branch delete x --yes",
+            "atlx bb commit query --branch main",
+            "atlx bb commit create -m msg --branch dev --file a.md --yes",
+            "atlx bb commit create -m msg --default-branch --file-local x --file-remote a --delete b --yes",
+            "atlx bb commit report create abc lint --report {}",
+            "atlx bb commit report query abc",
+            "atlx bb workspace get --workspace acme",
+            "atlx bb workspace member query -q ann --include-permissions",
+            "atlx bb workspace member get me",
+            "atlx bb repo create api --public",
+            "atlx bb repo list-files --ref main --path src --max-depth 2",
+            "atlx bb repo url acme/api --path a --line 3",
+            "atlx bb repo contributors --range v1..main",
+            "atlx bb search prs login --field title",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx bb commit create -m msg --file a.md --yes",
+            "atlx bb commit create -m msg --branch dev --default-branch --yes",
+            "atlx bb repo create api --public --private",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
 
     #[test]
     fn parses_pipelines_and_deployments() {
