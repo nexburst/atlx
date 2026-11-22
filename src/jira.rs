@@ -6,6 +6,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 
+pub mod attachments;
+pub mod people;
+pub mod worklogs;
+
 /// Fields `jira workitem get` fetches by default, as twg does.
 pub const GET_FIELDS: &[&str] = &[
     "summary",
