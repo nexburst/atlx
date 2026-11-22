@@ -180,6 +180,9 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jira workitem transition --id` | omit `--transition-id` to list; `--field`, `--transition-comment` |
 | `jira workitem transitions query --id` | includes required screen fields |
 | `jira workitem link-types query`, `jira workitem link workitem\|weblink\|query`, `jira workitem unlink workitem\|weblink` | `workitem`: `--id --target-id... --link-type-id` (`--id` reads with the outward phrase: A blocks B); `weblink`: `--id --url --title`, `--relationship`, `--global-id`, `--application-name/-type`, `--summary`, `--icon-url`, `--resolved`; `link query --issue-id`; `unlink workitem --link-id`; `unlink weblink --id` with one of `--link-id`, `--global-id`, `--url` |
+| `jira workitem attachment query\|get\|download\|thumbnail\|upload\|delete` | `download --output-path` (or `--out`) `--force`; `upload --file` (repeatable); `delete` needs `--yes` |
+| `jira workitem worklog add\|update\|query\|get\|delete\|changed\|deleted` | `--time-spent "1h 30m"`, `--started`, `--adjust-estimate`; times take epoch ms, dates, timestamps or ages like `7d`; `delete` needs `--yes` |
+| `jira workitem watcher query\|add\|remove`, `jira workitem vote query\|add\|remove` | `--watcher-id` takes an ID, email, name or `me` (the default) |
 | `jira field list` | `--query`, `--custom-only` |
 | `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
 | `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |

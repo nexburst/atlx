@@ -9,6 +9,8 @@ use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+mod collab;
+
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum JiraCmd {
@@ -480,6 +482,26 @@ pub(crate) enum WorkitemCmd {
     Priorities {
         #[command(subcommand)]
         cmd: PrioritiesCmd,
+    },
+    /// Files attached to work items
+    Attachment {
+        #[command(subcommand)]
+        cmd: collab::AttachmentCmd,
+    },
+    /// Time logged on work items
+    Worklog {
+        #[command(subcommand)]
+        cmd: collab::WorklogCmd,
+    },
+    /// Who watches a work item
+    Watcher {
+        #[command(subcommand)]
+        cmd: collab::WatcherCmd,
+    },
+    /// Votes on a work item
+    Vote {
+        #[command(subcommand)]
+        cmd: collab::VoteCmd,
     },
 }
 
@@ -1667,6 +1689,10 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 .request(ids_request(c, &ids))
                 .data(jira::statuses(c, &ids)?))
         }
+        WorkitemCmd::Attachment { cmd } => collab::attachment(c, cmd),
+        WorkitemCmd::Worklog { cmd } => collab::worklog(c, cmd),
+        WorkitemCmd::Watcher { cmd } => collab::watcher(c, cmd),
+        WorkitemCmd::Vote { cmd } => collab::vote(c, cmd),
         WorkitemCmd::Priorities {
             cmd: PrioritiesCmd::Query { id },
         } => {
@@ -1939,6 +1965,47 @@ mod tests {
             "atlx jira workitem delete PROJ-1 --delete-subtasks maybe",
             "atlx jira workitem types get",
             "atlx jira workitem types query -n 1 --first 2",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_attachments_worklogs_watchers_and_votes() {
+        for ok in [
+            "atlx jira workitem attachment query --issue-id PROJ-1",
+            "atlx jira workitem attachment get --attachment-id 10001",
+            "atlx jira workitem attachment download --attachment-id 10001 --output-path a.bin --force",
+            "atlx jira workitem attachment thumbnail --attachment-id 10001 --out a.png",
+            "atlx jira workitem attachment upload --issue-id PROJ-1 --file a --file b",
+            "atlx jira workitem attachment delete --attachment-id 10001 --yes",
+            "atlx jira workitem worklog add --issue-id PROJ-1 --time-spent '1h 30m' --started 2026-01-05 --comment x --comment-format markdown",
+            "atlx jira workitem worklog update --issue-id PROJ-1 --id 7 --time-spent-seconds 60 --adjust-estimate leave --notify-users false",
+            "atlx jira workitem worklog query --issue-id PROJ-1 --first 5 --after 5 --started-after 7d",
+            "atlx jira workitem worklog get --issue-id PROJ-1 --id 7 --expand properties",
+            "atlx jira workitem worklog delete --issue-id PROJ-1 --id 7 --adjust-estimate manual --increase-by 1h --yes",
+            "atlx jira workitem worklog changed --since 1763000000000",
+            "atlx jira workitem worklog deleted --since 2w",
+            "atlx jira workitem watcher query --issue-id PROJ-1",
+            "atlx jira workitem watcher add --id PROJ-1",
+            "atlx jira workitem watcher add --issue-id PROJ-1 --watcher-id me",
+            "atlx jira workitem watcher remove --id PROJ-1 --watcher-id abc",
+            "atlx jira workitem vote query --issue-id PROJ-1",
+            "atlx jira workitem vote add --issue-id PROJ-1",
+            "atlx jira workitem vote remove --issue-id PROJ-1",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx jira workitem attachment upload --issue-id PROJ-1",
+            "atlx jira workitem worklog add --issue-id PROJ-1 --time-spent 1h --time-spent-seconds 60",
+            "atlx jira workitem worklog get --issue-id PROJ-1",
+            "atlx jira workitem watcher add",
         ] {
             assert!(
                 Cli::try_parse_from(shell_words(bad)).is_err(),

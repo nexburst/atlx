@@ -103,6 +103,12 @@ atlx jira space query [--query <QUERY>] [--key <KEY>...] [--id <ID>...] [--type-
 atlx jira sprint issues (hidden) --sprint <SPRINT> (required) [--jql <JQL>] [--limit <LIMIT> [default: 25]]
 atlx jira sprint list (hidden) --board <BOARD> (required) [--state <STATE>] [--limit <LIMIT> [default: 25]]
 atlx jira sprint workitems query [--id <ID>] [--sprint-id <SPRINT_ID>] [--jql <JQL>] [--fields <FIELDS>] [--expand <EXPAND>] [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
+atlx jira workitem attachment delete --attachment-id <ATTACHMENT_ID> (required) -y/--yes
+atlx jira workitem attachment download --attachment-id <ATTACHMENT_ID> (required) [--output-path/--out <OUTPUT_PATH>] --force
+atlx jira workitem attachment get --attachment-id <ATTACHMENT_ID> (required)
+atlx jira workitem attachment query --issue-id <ISSUE_ID> (required)
+atlx jira workitem attachment thumbnail --attachment-id <ATTACHMENT_ID> (required) [--output-path/--out <OUTPUT_PATH>] --force
+atlx jira workitem attachment upload --issue-id <ISSUE_ID> (required) --file <FILE>... (required)
 atlx jira workitem changelog query --issue-id <ISSUE_ID> (required) [--first <FIRST>] [--after <AFTER>]
 atlx jira workitem comment create --issue-id <ISSUE_ID> (required) --body <BODY> (required) [--body-format <BODY_FORMAT> {html|markdown|plain} [default: html]] --internal [--visibility-role <VISIBILITY_ROLE>] [--visibility-group <VISIBILITY_GROUP>] [--parent-id <PARENT_ID>]
 atlx jira workitem comment delete --id <ID> (required) --issue-id <ISSUE_ID> (required) -y/--yes (hidden)
@@ -132,6 +138,19 @@ atlx jira workitem types query [--project <PROJECT>] [--issue <ISSUE>] [--projec
 atlx jira workitem unlink weblink --id <ID> (required) [--link-id <LINK_ID>] [--global-id <GLOBAL_ID>] [--url <URL>] -y/--yes (hidden)
 atlx jira workitem unlink workitem --link-id <LINK_ID> (required) -y/--yes (hidden)
 atlx jira workitem update --id <ID> (required) [--summary <SUMMARY>] [--description <DESCRIPTION>] [--description-format <DESCRIPTION_FORMAT> {html|markdown|plain} [default: html]] [--assignee <ASSIGNEE>] [--type <ISSUE_TYPE>] [--priority <PRIORITY>] [--labels <LABELS>] [--add-labels <ADD_LABELS>] [--remove-labels <REMOVE_LABELS>] [--parent <PARENT>] [--due-date <DUE_DATE>] [--fix-versions <FIX_VERSIONS>] [--add-fix-versions <ADD_FIX_VERSIONS>] [--remove-fix-versions <REMOVE_FIX_VERSIONS>] [--components <COMPONENTS>] [--add-components <ADD_COMPONENTS>] [--remove-components <REMOVE_COMPONENTS>] [--resolution <RESOLUTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--status <STATUS>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]]
+atlx jira workitem vote add --issue-id <ISSUE_ID> (required)
+atlx jira workitem vote query --issue-id <ISSUE_ID> (required)
+atlx jira workitem vote remove --issue-id <ISSUE_ID> (required)
+atlx jira workitem watcher add --id/--issue-id <ID> (required) [--watcher-id <WATCHER_ID> [default: me]]
+atlx jira workitem watcher query --issue-id <ISSUE_ID> (required)
+atlx jira workitem watcher remove --id/--issue-id <ID> (required) [--watcher-id <WATCHER_ID> [default: me]]
+atlx jira workitem worklog add --issue-id <ISSUE_ID> (required) [--time-spent <TIME_SPENT>] [--time-spent-seconds <TIME_SPENT_SECONDS>] [--started <STARTED>] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--visibility-json <JSON>] [--properties-json <JSON>] [--adjust-estimate <ADJUST_ESTIMATE> {auto|leave|new|manual}] [--new-estimate <NEW_ESTIMATE>] [--notify-users <BOOL> {true|false}] --override-editable [--reduce-by <REDUCE_BY>] [--expand <EXPAND>]
+atlx jira workitem worklog changed [--since <SINCE>] [--expand <EXPAND>]
+atlx jira workitem worklog delete --issue-id <ISSUE_ID> (required) --id <ID> (required) [--adjust-estimate <ADJUST_ESTIMATE> {auto|leave|new|manual}] [--new-estimate <NEW_ESTIMATE>] [--notify-users <BOOL> {true|false}] --override-editable [--increase-by <INCREASE_BY>] -y/--yes
+atlx jira workitem worklog deleted [--since <SINCE>]
+atlx jira workitem worklog get --issue-id <ISSUE_ID> (required) --id <ID> (required) [--expand <EXPAND>]
+atlx jira workitem worklog query --issue-id <ISSUE_ID> (required) [--first <FIRST>] [--after <AFTER>] [--started-after <STARTED_AFTER>] [--started-before <STARTED_BEFORE>] [--expand <EXPAND>]
+atlx jira workitem worklog update --issue-id <ISSUE_ID> (required) --id <ID> (required) [--time-spent <TIME_SPENT>] [--time-spent-seconds <TIME_SPENT_SECONDS>] [--started <STARTED>] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--visibility-json <JSON>] [--properties-json <JSON>] [--adjust-estimate <ADJUST_ESTIMATE> {auto|leave|new|manual}] [--new-estimate <NEW_ESTIMATE>] [--notify-users <BOOL> {true|false}] --override-editable [--reduce-by <REDUCE_BY>] [--expand <EXPAND>]
 atlx login [--token <TOKEN>] [--token-cmd <CMD>] --no-verify -f/--force [--new-profile <NAME>]
 atlx logout
 atlx man (hidden) [--dir <DIR>]

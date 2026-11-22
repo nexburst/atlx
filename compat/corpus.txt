@@ -94,12 +94,14 @@ ok jira workitem types query --issue PROJ-1
 ok jira workitem types get --id 10001 --id 10002
 ok jira workitem statuses query --id 3
 ok jira workitem priorities query --id 1 --id 2
-gap #24 jira workitem attachment query --issue-id PROJ-1
-gap #24 jira workitem attachment upload --issue-id PROJ-1 --file report.pdf
-gap #24 jira workitem worklog add --issue-id PROJ-1 --time-spent 2h --comment 'Pairing'
-gap #24 jira workitem worklog query --issue-id PROJ-1
-gap #24 jira workitem watcher add --id PROJ-1 --watcher-id 5b10ac8d82e05b22cc7d4ef5
-gap #24 jira workitem vote add --issue-id PROJ-1
+ok jira workitem attachment query --issue-id PROJ-1
+ok jira workitem attachment upload --issue-id PROJ-1 --file report.pdf
+ok jira workitem worklog add --issue-id PROJ-1 --time-spent 2h --comment 'Pairing'
+ok jira workitem worklog query --issue-id PROJ-1
+ok jira workitem watcher add --id PROJ-1 --watcher-id 5b10ac8d82e05b22cc7d4ef5
+ok jira workitem vote add --issue-id PROJ-1
+ok jira workitem attachment download --attachment-id 10001 --output-path file.bin
+ok jira workitem worklog changed --since 1763000000000
 
 # --- jira renames (#18) ---
 ok jira space query --query PROJ --limit 10

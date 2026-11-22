@@ -62,18 +62,6 @@ fn with_url(c: &Client, a: &Value) -> Value {
     a
 }
 
-/// The local name for a downloaded attachment: the last component of the
-/// name on the server, which anyone who can attach a file chooses. Hidden
-/// names are refused, so a download can't plant a `.bashrc` or `.envrc`.
-fn safe_file_name(title: &str) -> Option<&str> {
-    let name = title.rsplit(['/', '\\']).next()?;
-    let unsafe_name = name.trim().is_empty()
-        || name.starts_with('.')
-        || name.contains(':')
-        || name.chars().any(char::is_control);
-    (!unsafe_name).then_some(name)
-}
-
 pub struct ListOpts<'a> {
     pub limit: usize,
     pub cursor: Option<&'a str>,
@@ -142,7 +130,7 @@ pub fn download(
         Some(p) => p.to_path_buf(),
         None => {
             let title = meta["title"].as_str().unwrap_or_default();
-            PathBuf::from(safe_file_name(title).ok_or_else(|| {
+            PathBuf::from(crate::files::safe_file_name(title).ok_or_else(|| {
                 ApiError::usage(format!(
                     "the attachment's name {title:?} is not safe to use as a file name; pass --out"
                 ))

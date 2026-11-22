@@ -3,6 +3,7 @@ pub mod cli;
 pub mod client;
 pub mod config;
 pub mod confluence;
+mod files;
 pub mod jira;
 pub mod markup;
 pub mod output;

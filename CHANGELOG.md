@@ -11,6 +11,11 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira collaboration commands (#24): `jira workitem attachment
+  query|get|download|thumbnail|upload|delete`, `worklog
+  add|update|query|get|delete|changed|deleted`, `watcher query|add|remove`
+  and `vote query|add|remove`. Attachment and worklog deletes need `--yes`,
+  as in twg.
 - Confluence versions, labels and attachments (#28): `content versions
   list|get|diff|restore` (also `content history list|get|diff`), `labels
   add|remove|watch|unwatch`, `labels list --content-type --reference-space`,
