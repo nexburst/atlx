@@ -131,6 +131,12 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 - The CLI moved into `src/cli/` and the mock-HTTP tests were split per product,
   with a snapshot test of the whole command tree. No behaviour change (#14).
 
+### Fixed
+
+- Requests whose path has a `.` or `..` segment, and DELETEs with an empty
+  one, are refused before they are sent. An ID of `..` used to address the
+  parent resource, so deleting a comment could delete its work item.
+
 ## [0.1.0] - 2026-11-13
 
 First release.
@@ -161,5 +167,5 @@ First release.
 
 - Argument validation, pagination and auth-origin edge cases (#1).
 
-[Unreleased]: https://github.com/pedrosanzmtz/atlx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/pedrosanzmtz/atlx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nexburst/atlx/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nexburst/atlx/releases/tag/v0.1.0

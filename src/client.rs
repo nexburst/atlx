@@ -315,6 +315,7 @@ impl Client {
         mut payload: Payload<'_>,
         opts: &Opts<'_>,
     ) -> Result<(ureq::Response, String)> {
+        check_path(method, path)?;
         let (mut url, mut auth) = self.resolve_request(path)?;
         let mut method = method.to_ascii_uppercase();
         let mut query = query;
@@ -504,6 +505,46 @@ impl Client {
         };
         Ok((url, attach_auth))
     }
+}
+
+/// Refuse a path that would reach another resource than the one it names.
+///
+/// `urlencoding` leaves dots alone and the URL parser resolves dot segments,
+/// so an ID of `..` would turn "delete this comment" into "delete its work
+/// item". The parser also reads `%2e` as a dot and `\\` as `/`, and drops tabs,
+/// newlines and trailing blanks. An empty ID similarly turns a DELETE of one
+/// item into a DELETE of its collection.
+///
+/// Only paths built by atlx or given by the user are checked; redirects may
+/// use relative references.
+fn check_path(method: &str, path: &str) -> Result<()> {
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let path = match path.split_once("://") {
+        Some((scheme, rest)) if !scheme.contains('/') => rest.find('/').map_or("", |i| &rest[i..]),
+        _ => path,
+    };
+    let mut segments = Vec::new();
+    for raw in path.split('/') {
+        let decoded = urlencoding::decode_binary(raw.as_bytes());
+        let decoded = String::from_utf8_lossy(&decoded).replace(['\t', '\n', '\r'], "");
+        for segment in decoded.split(['/', '\\']) {
+            if matches!(segment.trim_end_matches(|c: char| c <= ' '), "." | "..") {
+                return Err(ApiError::usage(format!(
+                    "refusing to send {method} {path}: an ID or path segment is '.' or '..'"
+                ))
+                .into());
+            }
+        }
+        segments.push(raw);
+    }
+    if method.eq_ignore_ascii_case("DELETE") && segments.iter().skip(1).any(|s| s.trim().is_empty())
+    {
+        return Err(ApiError::usage(format!(
+            "refusing to send {method} {path}: an ID or path segment is empty"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]

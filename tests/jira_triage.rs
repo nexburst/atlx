@@ -395,3 +395,24 @@ fn statuses_and_priorities_all_or_by_id() {
         ]
     );
 }
+
+#[test]
+fn deletes_refuse_ids_that_would_address_the_parent() {
+    for id in ["..", ".", ""] {
+        let srv = MockServer::with_responses([MockResponse::empty(204)]);
+        let c = srv.client();
+        for err in [
+            jira::comment_delete(&c, "PROJ-1", id).unwrap_err(),
+            jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Id(id)).unwrap_err(),
+            jira::unlink_workitem(&c, id).unwrap_err(),
+            jira::delete(&c, id, false).unwrap_err(),
+        ] {
+            assert_eq!(
+                ApiError::find(&err).unwrap().kind,
+                ErrorKind::Usage,
+                "{id:?}"
+            );
+        }
+        assert!(srv.requests().is_empty(), "{id:?} was sent");
+    }
+}
