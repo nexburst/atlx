@@ -303,6 +303,7 @@ fn bitbucket_pipeline_query_filters_client_side() {
         &client,
         "/repositories/acme/api",
         &PipelineQuery {
+            pattern: None,
             state: Some("COMPLETED"),
             status: Some("FAILED"),
             branch: Some("main"),

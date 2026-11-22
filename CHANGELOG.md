@@ -11,6 +11,12 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Bitbucket Pipelines and deployments (#34): `pipeline run|trigger`,
+  `latest-failure`, `tail`, `grep`, `rerun-failed --whole-pipeline`, `config
+  get|update`, `get --test-reports --test-cases`, `query --pattern`, and
+  `bb deployment`. Secured variable values come from the environment and
+  are never printed. `pipeline get --step` now takes an index and reports
+  an unknown step; `query --status PASSED` now matches successful runs.
 - Bitbucket pull request lifecycle (#32): `pull-requests update`, reviewers
   by name on `create`, `merge --wait`, `merge-status`, `mergeability`,
   `conflicts`, `for-commit`, `remove-request-changes`, default reviewers,

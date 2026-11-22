@@ -254,9 +254,9 @@ ok bb pull-requests merge --pull-request 42 --wait --repo acme/api
 ok bb inbox
 gap #33 bb commit query --repo acme/api --branch main
 gap #33 bb workspace get --workspace acme
-gap #34 bb pipeline latest-failure --repo acme/api --branch main
-gap #34 bb pipeline run --repo acme/api --branch main
-gap #34 bb pipeline tail --pipeline 101 --repo acme/api
+ok bb pipeline latest-failure --repo acme/api --branch main
+ok bb pipeline run --repo acme/api --branch main
+ok bb pipeline tail --pipeline 101 --repo acme/api
 
 # --- users ---
 ok user search alice

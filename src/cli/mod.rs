@@ -134,6 +134,8 @@ pub(crate) enum Out {
         text: String,
         full: Value,
     },
+    /// The command already streamed its output; only exit with this code.
+    Streamed(i32),
     /// Print structured output, then exit with a non-zero status code.
     Exit(Value, i32),
 }
@@ -159,6 +161,7 @@ pub fn main() {
     util::enable_notes(
         fmt == Format::Text && std::io::stdout().is_terminal() && std::io::stderr().is_terminal(),
     );
+    util::set_text_output(fmt == Format::Text);
     let path = command_path(&matches);
     let shaping = match shape::Shaping::new(cli.shaping, fmt, &path) {
         Ok(s) => s,
@@ -175,6 +178,7 @@ pub fn main() {
     };
     let code = match run(&globals, cli.cmd).map(|out| wrap(&path, out)) {
         Ok(Out::Exit(v, code)) => shaping.emit(Out::Exit(v, code), code),
+        Ok(Out::Streamed(code)) => code,
         Ok(out) => {
             let code = if util::take_partial() {
                 exit::PARTIAL

@@ -7,7 +7,9 @@ use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
+pub mod deployments;
 pub mod lifecycle;
+pub mod pipelines;
 
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
@@ -1000,6 +1002,8 @@ pub struct PipelineQuery<'a> {
     pub status: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub trigger: Option<&'a str>,
+    /// The target selector's pattern, e.g. a custom pipeline's name.
+    pub pattern: Option<&'a str>,
     pub limit: usize,
 }
 
@@ -1011,7 +1015,8 @@ pub fn pipeline_query(c: &Client, path: &str, o: &PipelineQuery) -> Result<Value
     if let Some(b) = o.branch {
         q.push(("target.branch", b));
     }
-    let filtering = o.state.is_some() || o.status.is_some() || o.trigger.is_some();
+    let filtering =
+        o.state.is_some() || o.status.is_some() || o.trigger.is_some() || o.pattern.is_some();
     let fetch = if filtering { o.limit.max(100) } else { o.limit };
     let eq = |a: Option<&str>, b: Option<&str>| match (a, b) {
         (None, _) => true,
@@ -1023,7 +1028,11 @@ pub fn pipeline_query(c: &Client, path: &str, o: &PipelineQuery) -> Result<Value
         .filter(|p| {
             let (state, result) = state_of(p);
             eq(o.state, Some(&state))
-                && eq(o.status, result.as_deref())
+                // twg says PASSED where a pipeline's result says SUCCESSFUL.
+                && (eq(o.status, result.as_deref())
+                    || (o.status.is_some_and(|s| s.eq_ignore_ascii_case("PASSED"))
+                        && result.as_deref() == Some("SUCCESSFUL")))
+                && eq(o.pattern, p["target"]["selector"]["pattern"].as_str())
                 && eq(
                     o.trigger,
                     p["trigger"]["name"]
@@ -1078,28 +1087,26 @@ pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> 
         &[],
         100,
     )?;
+    let selected: Vec<usize> = pipelines::select(&steps, o.step)?
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect();
     let mut rendered = Vec::new();
-    for s in &steps {
+    for (i, s) in steps.iter().enumerate() {
         let (_, result) = state_of(s);
-        let name = s["name"].as_str().unwrap_or_default();
         let mut step = s.clone();
         let failed = matches!(result.as_deref(), Some("FAILED" | "ERROR"));
-        let wanted = o
-            .step
-            .is_none_or(|w| w == name || Some(w) == s["uuid"].as_str());
+        let wanted = selected.contains(&i);
         if o.logs && wanted && (!o.failed_steps || failed) {
             let log_path = format!(
                 "{path}/pipelines/{}/steps/{}/log",
                 enc(uuid),
                 enc(s["uuid"].as_str().unwrap_or(""))
             );
-            match c.get(&log_path, &[]) {
-                Ok(v) => {
-                    let text = match v {
-                        Value::String(t) => t,
-                        Value::Null => String::new(),
-                        other => other.to_string(),
-                    };
+            match c.get_bytes(&log_path, &[]) {
+                Ok(bytes) => {
+                    // Not parsed: a log can happen to be valid JSON.
+                    let text = String::from_utf8_lossy(&bytes.data);
                     let total = text.lines().count();
                     step["log"] = tail(&text, o.lines).into();
                     step["log_total_lines"] = total.into();

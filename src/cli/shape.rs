@@ -154,6 +154,7 @@ impl Shaping {
                 self.deliver(&output::render(&v, self.fmt), Some(&v));
             }
             Out::Body { body, full } => self.emit_body(body, full),
+            Out::Streamed(_) => {}
         }
         code
     }
