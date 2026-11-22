@@ -192,7 +192,7 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
 | `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` (atlx extra) moves to the trash, or `--purge` |
-| `confluence content comments list\|create --id` | `--comment-type footer\|inline`, `--body-format md\|html`, `--limit`, `--cursor`; create takes `--body`/`--body-file` and `--body-format` (markdown by default) |
+| `confluence content comments list\|get\|create\|reply\|update\|delete\|resolve\|reopen` | `--comment-type footer\|inline`, `--body-format`, `--include-replies`, `--sort`, `--resolution-status` (inline); `create --text-selection` anchors an inline comment; `resolve` and `reopen` are inline only; `delete` needs `--yes` |
 | `confluence content list\|children`, `confluence content labels list --id`, `confluence tree [ref]\|--target` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
 | `confluence content versions list\|get\|diff\|restore --id` | also `content history list\|get\|diff`; `get --at-version N --format md\|html`, `diff --from N --to M`; `restore` needs `--yes` |
 | `confluence content labels add\|remove --id --label a,b`, `labels watch\|unwatch --name` | `--prefix`; `remove`, `watch` and `unwatch` need `--yes` |

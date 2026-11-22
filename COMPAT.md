@@ -94,6 +94,7 @@ repositories, so:
 | Jira `workitem attachment`, `worklog`, `watcher`, `vote` | Inferred, not run live ([#24](https://github.com/nexburst/atlx/issues/24)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `sprint` lifecycle, `board get\|create\|delete\|backlog\|projects\|quick-filter` | Inferred, not run live ([#25](https://github.com/nexburst/atlx/issues/25)) | Built from the public Agile 1.0 payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -333,7 +334,7 @@ inferred rows.
 
 ## Confluence
 
-121 twg commands: ✅ 25, 🟡 5, 📋 55, ⛔ 36.
+121 twg commands: ✅ 30, 🟡 6, 📋 49, ⛔ 36.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -362,14 +363,14 @@ inferred rows.
 | `confluence content attachments list` | ✅ | |
 | `confluence content attachments upload` | ✅ | repeatable `--file` and `--minor-edit` are atlx extras |
 | `confluence content body-formats` | ✅ | atlx's own guide; `--reference` is rejected (it has no linked documents) |
-| `confluence content comments create` | 🟡 | missing `--reference-space`, `--text-selection`, `--text-selection-match-count`, `--text-selection-match-index` (#29); `--comment-type inline` returns a usage error until #29. The old positional `<ref>` and `--format` still work (hidden, deprecated) |
-| `confluence content comments delete` | 📋 | #29 |
-| `confluence content comments get` | 📋 | #29 |
-| `confluence content comments list` | 🟡 | missing `--content-type`, `--include-replies`, `--reference-space`, `--resolution-status`, `--sort`, `--status` (#29). The old positional `<ref>`, `--inline` and `--format` still work (hidden, deprecated) |
-| `confluence content comments reopen` | 📋 | #29 |
-| `confluence content comments reply` | 📋 | #29 |
-| `confluence content comments resolve` | 📋 | #29 |
-| `confluence content comments update` | 📋 | #29 |
+| `confluence content comments create` | ✅ | #29; inline with `--text-selection`; the match count is counted when not given. The old positional `<ref>` and `--format` still work (hidden, deprecated) |
+| `confluence content comments delete` | ✅ | #29 |
+| `confluence content comments get` | ✅ | #29; up to 500 replies, then `repliesTruncated` |
+| `confluence content comments list` | 🟡 | #13: lists footer comments unless `--comment-type inline` (twg detects both), and REST filters `--resolution-status` on inline comments only. The old positional `<ref>`, `--inline` and `--format` still work (hidden, deprecated) |
+| `confluence content comments reopen` | 🟡 | #13: inline comments only; REST has no resolution for footer comments |
+| `confluence content comments reply` | ✅ | #29 |
+| `confluence content comments resolve` | 🟡 | #13: inline comments only; REST has no resolution for footer comments |
+| `confluence content comments update` | ✅ | #29 |
 | `confluence content convert` | 📋 | #13; v1 contentbody/convert |
 | `confluence content copy` | 📋 | #30 |
 | `confluence content create` | 🟡 | missing `--content-width`, `--private`, `--reference-space`, `--synced-container-url`, `--title-emoji` (#30) |
