@@ -59,3 +59,16 @@ atlx jira space version update --id 10000 --released true
 
 Deleting or merging a version, and deleting a work item, comment, sprint or
 component, happen without a confirmation. Ask the person first.
+
+## Service desk requests
+
+```sh
+atlx jsm request-type query --portal-id 1
+atlx jsm request validate --service-desk 1 --request-type 10 --summary 'Laptop request'
+atlx jsm request comment list --request SD-1
+atlx jsm request comment create --request SD-1 --body 'Looking into it.' --internal
+atlx jsm approval list --request SD-1
+```
+
+A request comment without `--internal` goes to the customer. Never approve or
+decline unless the person told you to make that decision.

@@ -262,6 +262,31 @@ atlx jira workitem worklog deleted [--since <SINCE>]
 atlx jira workitem worklog get --issue-id <ISSUE_ID> (required) --id <ID> (required) [--expand <EXPAND>]
 atlx jira workitem worklog query --issue-id <ISSUE_ID> (required) [--first <FIRST>] [--after <AFTER>] [--started-after <STARTED_AFTER>] [--started-before <STARTED_BEFORE>] [--expand <EXPAND>]
 atlx jira workitem worklog update --issue-id <ISSUE_ID> (required) --id <ID> (required) [--time-spent <TIME_SPENT>] [--time-spent-seconds <TIME_SPENT_SECONDS>] [--started <STARTED>] [--comment <COMMENT>] [--comment-format <COMMENT_FORMAT> {html|markdown|plain} [default: html]] [--visibility-json <JSON>] [--properties-json <JSON>] [--adjust-estimate <ADJUST_ESTIMATE> {auto|leave|new|manual}] [--new-estimate <NEW_ESTIMATE>] [--notify-users <BOOL> {true|false}] --override-editable [--reduce-by <REDUCE_BY>] [--expand <EXPAND>]
+atlx jsm approval approve --request <REQUEST> (required) [--approval-id <APPROVAL_ID>]
+atlx jsm approval get --request <REQUEST> (required) --approval-id <APPROVAL_ID> (required)
+atlx jsm approval list --request <REQUEST> (required)
+atlx jsm approval reject --request <REQUEST> (required) [--approval-id <APPROVAL_ID>]
+atlx jsm knowledge-article query --project-id <PROJECT_ID> (required) [--query <QUERY>] [--limit <LIMIT> [default: 50]]
+atlx jsm portal query [--query-term <QUERY_TERM>] [--limit <LIMIT> [default: 50]] [--start <START> [default: 0]]
+atlx jsm queue query --service-desk/--service-desk-id/--servicedesk <SERVICE_DESK> (required) [--limit <LIMIT> [default: 50]] [--start <START> [default: 0]]
+atlx jsm queue workitems query --service-desk/--service-desk-id/--servicedesk <SERVICE_DESK> (required) --queue <QUEUE> (required) [--limit <LIMIT> [default: 50]] [--start <START> [default: 0]]
+atlx jsm request comment create --request <REQUEST> (required) --body <BODY> (required) --internal
+atlx jsm request comment list --request <REQUEST> (required) [--start <START> [default: 0]] [--limit <LIMIT> [default: 50]]
+atlx jsm request create --service-desk/--service-desk-id/--servicedesk <SERVICE_DESK> (required) [--request-type/--request-type-id <REQUEST_TYPE>] [--summary <SUMMARY>] [--description <DESCRIPTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--answer <QUESTION=VALUE>...] [--answers-json <ANSWERS_JSON>] [--answers-file <ANSWERS_FILE>] [--on-behalf-of <ON_BEHALF_OF>]
+atlx jsm request get <REQUEST> (required)
+atlx jsm request participant add --request <REQUEST> (required) --participant <PARTICIPANT>... (required)
+atlx jsm request participant list --request <REQUEST> (required)
+atlx jsm request participant remove --request <REQUEST> (required) --participant <PARTICIPANT>... (required) -y/--yes
+atlx jsm request query [--status <STATUS> {open|closed|all}] [--service-desk/--servicedesk <SERVICE_DESK>] [--request-type <REQUEST_TYPE>] [--query <QUERY>] [--limit <LIMIT> [default: 50]] [--start <START> [default: 0]]
+atlx jsm request transition create --request <REQUEST> (required) --transition <TRANSITION> (required) [--comment <COMMENT>]
+atlx jsm request transition query --request <REQUEST> (required)
+atlx jsm request validate --service-desk/--service-desk-id/--servicedesk <SERVICE_DESK> (required) [--request-type/--request-type-id <REQUEST_TYPE>] [--summary <SUMMARY>] [--description <DESCRIPTION>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--answer <QUESTION=VALUE>...] [--answers-json <ANSWERS_JSON>] [--answers-file <ANSWERS_FILE>]
+atlx jsm request-type field get --service-desk-id/--service-desk <SERVICE_DESK_ID> (required) --request-type-id/--request-type <REQUEST_TYPE_ID> (required)
+atlx jsm request-type fields get --service-desk-id/--service-desk <SERVICE_DESK_ID> (required) --request-type-id/--request-type <REQUEST_TYPE_ID> (required)
+atlx jsm request-type form get --service-desk/--service-desk-id/--servicedesk <SERVICE_DESK> (required) [--request-type <REQUEST_TYPE>] --example-only
+atlx jsm request-type query [--portal-id/--service-desk/--servicedesk <PORTAL_ID>] [--query-term <QUERY_TERM>] [--limit <LIMIT> [default: 50]]
+atlx jsm servicedesk query [--query-term <QUERY_TERM>] [--limit <LIMIT> [default: 50]] [--start <START> [default: 0]]
+atlx jsm sla get --workitem <WORKITEM> (required) [--sla <SLA>]
 atlx login [--token <TOKEN>] [--token-cmd <CMD>] --no-verify -f/--force [--new-profile <NAME>]
 atlx logout
 atlx man (hidden) [--dir <DIR>]

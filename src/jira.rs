@@ -736,7 +736,7 @@ pub fn user_by_account(c: &Client, account: &str) -> Result<Value> {
 }
 
 /// `me`, a raw accountId, or a name/email that matches exactly one user.
-fn resolve_account(c: &Client, who: &str) -> Result<String> {
+pub(crate) fn resolve_account(c: &Client, who: &str) -> Result<String> {
     if who.eq_ignore_ascii_case("me") {
         return myself(c)?["accountId"]
             .as_str()

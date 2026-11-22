@@ -11,6 +11,7 @@ mod completion;
 mod confluence;
 mod doctor;
 mod jira;
+mod jsm;
 mod search;
 mod shape;
 mod skill;
@@ -83,6 +84,11 @@ enum Cmd {
     Jira {
         #[command(subcommand)]
         cmd: jira::JiraCmd,
+    },
+    /// Jira Service Management requests, approvals and queues
+    Jsm {
+        #[command(subcommand)]
+        cmd: jsm::JsmCmd,
     },
     /// Atlassian users
     User {
@@ -278,7 +284,7 @@ fn wrap(path: &str, out: Out) -> Out {
     let first = path.split('.').next().unwrap_or_default();
     if matches!(
         first,
-        "bitbucket" | "bb" | "api" | "completion" | "man" | "jira" | "confluence" | "user"
+        "bitbucket" | "bb" | "api" | "completion" | "man" | "jira" | "jsm" | "confluence" | "user"
     ) {
         return out;
     }
@@ -337,6 +343,7 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Doctor { strict } => return Ok(doctor::doctor(g, strict)),
         Cmd::Setup { cmd } => auth::setup(g, cmd)?,
         Cmd::Jira { cmd } => jira::jira_cmd(&g.config()?.jira()?, cmd)?,
+        Cmd::Jsm { cmd } => jsm::jsm_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::User { cmd } => user::user_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Confluence { cmd } => {
             if let Some(out) = confluence::offline(&cmd) {

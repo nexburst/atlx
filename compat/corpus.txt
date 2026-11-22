@@ -268,7 +268,7 @@ ok user search alice -n 5
 ok user search --name alice --compact
 
 # --- jira service management ---
-gap #37 jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop request'
-gap #37 jsm request comment list --request SD-1
-gap #37 jsm request-type query --portal-id 1
-gap #37 jsm approval list --request SD-1
+ok jsm request create --service-desk-id 1 --request-type-id 10 --summary 'Laptop request'
+ok jsm request comment list --request SD-1
+ok jsm request-type query --portal-id 1
+ok jsm approval list --request SD-1
