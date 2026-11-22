@@ -202,7 +202,7 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `jsm portal query` / `servicedesk query`, `jsm request-type query\|field get\|form get`, `jsm knowledge-article query` | service desks by ID, project key or exact name |
 | `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
 | `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
-| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` (atlx extra) moves to the trash, or `--purge` |
+| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` moves to the trash, or `--purge`. Writes need `--yes`; `update` also needs `--snapshot-token`; a body needs `--format` and `--ack-body-formats` |
 | `confluence content comments list\|get\|create\|reply\|update\|delete\|resolve\|reopen` | `--comment-type footer\|inline`, `--body-format`, `--include-replies`, `--sort`, `--resolution-status` (inline); `create --text-selection` anchors an inline comment; `resolve` and `reopen` are inline only; `delete` needs `--yes` |
 | `confluence content list\|children`, `confluence content labels list --id`, `confluence tree [ref]\|--target` | `--space`, `--limit`, `--cursor`; `tree` takes a page (with its ancestors) or a space, `--depth` up to 10, `--type`, at most 500 nodes |
 | `confluence content versions list\|get\|diff\|restore --id` | also `content history list\|get\|diff`; `get --at-version N --format md\|html`, `diff --from N --to M`; `restore` needs `--yes` |
@@ -237,8 +237,9 @@ positional forms of `confluence content labels`, `comments list|create` and
 `pull-requests merge`, and the `--inline`, `--format`, `--strategy` and
 `--message` flags they used) still work but are hidden from help. In text mode
 on a terminal they print a one-line note naming the new form; JSON and piped
-output stay clean. They will be removed in 0.3. Like twg, merge, decline and
-content delete ask for no confirmation; `--yes` is still accepted and ignored.
+output stay clean. They will be removed in 0.3. Like twg, merge and decline
+ask for no confirmation, and `confluence content create`, `update` and `delete`
+refuse to write without `--yes`.
 
 atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
 Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +

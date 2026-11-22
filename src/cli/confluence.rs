@@ -141,8 +141,9 @@ pub(crate) enum ContentCmd {
         body: Option<String>,
         #[arg(long)]
         body_file: Option<String>,
-        #[arg(long, value_enum, default_value_t)]
-        format: TextFormat,
+        /// Format of the body (required)
+        #[arg(long, value_enum)]
+        format: Option<TextFormat>,
         #[arg(long)]
         draft: bool,
         /// Only you can see and edit it
@@ -157,10 +158,10 @@ pub(crate) enum ContentCmd {
         /// Space key or ID for looking up --parent-id by exact title
         #[arg(long)]
         reference_space: Option<String>,
-        /// Accepted for twg compatibility
+        /// Confirm (required)
         #[arg(long, short)]
         yes: bool,
-        /// Accepted for twg compatibility
+        /// Confirm you read `confluence content body-formats` (required)
         #[arg(long)]
         ack_body_formats: bool,
     },
@@ -169,7 +170,7 @@ pub(crate) enum ContentCmd {
         reference: Option<String>,
         #[arg(long)]
         id: Option<String>,
-        /// Version from a previous get/create/update; rejects stale edits
+        /// snapshotToken of the read you edited (required); rejects stale edits
         #[arg(long)]
         snapshot_token: Option<String>,
         #[arg(long)]
@@ -189,16 +190,19 @@ pub(crate) enum ContentCmd {
         /// Read the edit operations from a JSON file
         #[arg(long)]
         edits_file: Option<String>,
-        #[arg(long, value_enum, default_value_t)]
-        format: TextFormat,
+        /// Format of --body or --body-file (required with them)
+        #[arg(long, value_enum)]
+        format: Option<TextFormat>,
         /// Validate and show the request without writing; with --edits, also
         /// the resulting body and a diff
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
         draft: bool,
+        /// Confirm (required unless --dry-run)
         #[arg(long, short)]
         yes: bool,
+        /// Confirm you read `confluence content body-formats` (required to change the body)
         #[arg(long)]
         ack_body_formats: bool,
     },
@@ -242,12 +246,11 @@ pub(crate) enum ContentCmd {
         #[command(subcommand)]
         cmd: Option<LabelsCmd>,
     },
-    /// Delete a page or blog post (atlx extra; moves it to the trash unless
-    /// --purge)
+    /// Delete a page or blog post: to the trash, or for good with --purge
     Delete {
         reference: String,
-        /// Accepted for compatibility; no confirmation is asked
-        #[arg(long, short, hide = true)]
+        /// Confirm (required)
+        #[arg(long, short)]
         yes: bool,
         /// Permanently purge instead of moving to trash
         #[arg(long)]
@@ -761,9 +764,19 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 content_width,
                 title_emoji,
                 reference_space,
-                ..
+                yes,
+                ack_body_formats,
             } => {
                 use confluence::lifecycle as life;
+                if body.is_none() && body_file.is_none() {
+                    return Err(ApiError::usage(
+                        "pass --body or --body-file: pages and blog posts need a body",
+                    )
+                    .into());
+                }
+                let format = require_format(format)?;
+                require_ack(ack_body_formats)?;
+                require_yes(yes, "creating the content")?;
                 let emoji = title_emoji.as_deref().map(life::emoji_code).transpose()?;
                 let parent_id = match (parent_id, &reference_space) {
                     (Some(p), Some(_)) => {
@@ -816,7 +829,8 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 format,
                 dry_run,
                 draft,
-                ..
+                yes,
+                ack_body_formats,
             } => {
                 let Some(reference) = reference.or(id) else {
                     bail!("pass a content ID/URL or --id")
@@ -825,6 +839,31 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     Some(json) => Some(confluence::edits::parse(&json)?),
                     None => None,
                 };
+                let has_body = body.is_some() || body_file.is_some();
+                if title.is_none() && !has_body && ops.is_none() {
+                    return Err(ApiError::usage(
+                        "nothing to update; pass --title, --body/--body-file or --edits/--edits-file",
+                    )
+                    .into());
+                }
+                // twg's order: format, acknowledgement, token, confirmation.
+                let format = if has_body {
+                    require_format(format)?
+                } else {
+                    format.unwrap_or_default()
+                };
+                if has_body || ops.is_some() {
+                    require_ack(ack_body_formats)?;
+                }
+                if snapshot_token.is_none() {
+                    return Err(ApiError::usage(
+                        "pass --snapshot-token with the snapshotToken of the read you edited",
+                    )
+                    .into());
+                }
+                if !dry_run {
+                    require_yes(yes, "updating the content")?;
+                }
                 let body = body_arg(body, body_file)?;
                 let data = confluence::update(
                     c,
@@ -957,11 +996,19 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
             ContentCmd::DeleteDraft(a) => lifecycle::delete_draft(c, a)?,
             ContentCmd::Delete {
                 reference,
-                yes: _,
+                yes,
                 purge,
-            } => envelope("confluence.content.delete", "confluence.content")
-                .request(json!({"id": reference, "purge": purge}))
-                .data(confluence::delete(c, &reference, purge)?),
+            } => {
+                let action = if purge {
+                    "deleting the content for good"
+                } else {
+                    "deleting the content"
+                };
+                require_yes(yes, action)?;
+                envelope("confluence.content.delete", "confluence.content")
+                    .request(json!({"id": reference, "purge": purge}))
+                    .data(confluence::delete(c, &reference, purge)?)
+            }
         },
         ConfCmd::Space {
             cmd:
@@ -1335,6 +1382,20 @@ fn content_ref(
     }
 }
 
+fn require_format(format: Option<TextFormat>) -> Result<TextFormat> {
+    format.ok_or_else(|| ApiError::usage("pass --format to say what the body is written in").into())
+}
+
+fn require_ack(acknowledged: bool) -> Result<()> {
+    if !acknowledged {
+        return Err(ApiError::usage(
+            "read `atlx confluence content body-formats`, then pass --ack-body-formats",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1529,7 +1590,7 @@ mod tests {
     }
 
     #[test]
-    fn confluence_delete_needs_no_yes_and_old_forms_parse() {
+    fn confluence_delete_and_old_forms_parse() {
         for ok in [
             "atlx confluence content delete 12345",
             "atlx confluence content delete 12345 --yes --purge",

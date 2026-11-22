@@ -69,7 +69,8 @@ These checks are about parsing. Output shapes are covered by
 | JSONL rows with `_twg` locators | ✅ | one line per element of the main collection ([#21](https://github.com/nexburst/atlx/issues/21)) |
 | Teamwork Graph, Rovo and GraphQL-only commands | ⛔ | fail with "not supported by atlx (requires Teamwork Graph)" in twg's error envelope, `category: "unsupported"`, exit code 2; 📋 commands fail with a pointer to their issue ([#21](https://github.com/nexburst/atlx/issues/21)) |
 | Exit codes and the JSON error envelope | ✅ | [#17](https://github.com/nexburst/atlx/issues/17) |
-| No `--yes` on merge, decline and content delete | ✅ | `--yes` is still accepted and ignored; nothing asks for confirmation ([#18](https://github.com/nexburst/atlx/issues/18)) |
+| No `--yes` on merge and decline | ✅ | `--yes` is still accepted and ignored ([#18](https://github.com/nexburst/atlx/issues/18)) |
+| Confluence write guards | ✅ | `content create`, `update` and `delete` refuse without `--yes`; `update` also needs `--snapshot-token` (with `--dry-run` too), and a body needs `--format` and `--ack-body-formats`. Checked against twg 1.4.4 with no network |
 | API-token auth | ➕ | twg uses OAuth; atlx uses Atlassian and Bitbucket API tokens |
 
 ## JSON output shapes
@@ -466,7 +467,7 @@ inferred rows.
 | `confluence templates list` | ✅ | #71; `--query` and `--cursor` are applied client-side, as REST v1 has neither |
 | `confluence tree` | ✅ | #30; pages or whole spaces, depth 10, at most 500 nodes then `truncated`; `--type` keeps the containers of matches |
 | `confluence content children` | ➕ | direct children of a page |
-| `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge`, which need `--yes` (#30); here no confirmation is asked and `--yes` is ignored (#18) |
+| `confluence content delete` | ➕ | a hidden command in twg 1.4.4, so not in the inventory; needs `--yes` as in twg. Missing twg's `--content-type` and `--reference-space` |
 | `confluence content labels` | ➕ | old form `labels <ref>` of `confluence content labels list --id <ref>` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 
 ## Bitbucket

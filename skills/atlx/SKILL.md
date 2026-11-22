@@ -52,16 +52,16 @@ More in the references, which you should open only as needed:
    command asks for it and they haven't agreed to that action, ask them.
 4. A missing confirmation doesn't mean a command is harmless. Several act at
    once, as in twg: Jira work item, comment, sprint, version and component deletes,
-   version merge, pull request merge and decline, and `confluence content
-   delete`. Confirm those with the person first.
+   version merge, and pull request merge and decline. Confirm those with the
+   person first.
    `jsm approval approve|reject` decides as the person, and `jsm request
    comment create` is visible to customers unless you pass `--internal`.
 5. Use `--dry-run` where it exists (`confluence content update`,
    `confluence space create`). Most other writes have no dry run.
 6. Pass the `snapshotToken` you read as `--snapshot-token` when updating a
    page. On a conflict, read again and redo the edit; don't drop the token.
-7. `--ack-body-formats` is accepted for twg compatibility and checks nothing.
-   Read `atlx confluence content body-formats` before writing a rich page.
+7. Changing a body needs `--format` and `--ack-body-formats`. Read `atlx
+   confluence content body-formats` first; the flag says that you did.
 8. After a timeout on a write, check the state before sending it again.
 
 ## Keep output small
@@ -98,7 +98,7 @@ preview, then send the same edit without `--dry-run`:
 ```sh
 atlx confluence content get 12345 --detail outline -o json
 atlx confluence content get 12345 --detail full --format adf -o json
-atlx confluence content update 12345 --snapshot-token 7 --edits-file edits.json --dry-run
+atlx confluence content update 12345 --snapshot-token 7 --edits-file edits.json --ack-body-formats --dry-run
 ```
 
 Review a pull request:

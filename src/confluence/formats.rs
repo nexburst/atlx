@@ -31,7 +31,7 @@ storage format before it is written, and every body you read starts from it.
 
 | Format | What atlx does with it |
 | --- | --- |
-| `html` (default) | Sent unchanged. Use it for macros, layouts, panels and anything else Markdown cannot express. |
+| `html` (recommended) | Sent unchanged. Use it for macros, layouts, panels and anything else Markdown cannot express. |
 | `md` / `markdown` | Parsed as GitHub-flavoured Markdown and converted to storage format. |
 | `plain` | Each blank-line-separated block becomes a paragraph; single line breaks are kept. Markup characters are escaped. |
 
@@ -135,7 +135,7 @@ fn type_doc(t: GuideType) -> String {
             };
             format!(
                 "# Body formats for `{name}`\n\n\
-                 Write with `--format html` (default), `md`/`markdown` or `plain`.\n\
+                 Write with `--format html`, `md`/`markdown` or `plain`.\n\
                  Read with `--format html` (default), `md`, `adf` (atlx extra) or `url`.\n\n\
                  Use `html` or `--edits` to change pages with macros or layouts \
                  without losing them; Markdown reads are lossy.\n{extra}\n\

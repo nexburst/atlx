@@ -19,7 +19,7 @@ read and write HTML (storage format).
 ```sh
 atlx confluence content body-formats
 atlx confluence content get 12345 --detail full --format adf -o json
-atlx confluence content update 12345 --snapshot-token 7 --edits-file edits.json --dry-run
+atlx confluence content update 12345 --snapshot-token 7 --edits-file edits.json --ack-body-formats --dry-run
 ```
 
 The token is `data.snapshotToken` of the read. A stale token is refused.
@@ -27,7 +27,7 @@ The token is `data.snapshotToken` of the read. A stale token is refused.
 New pages can be Markdown, and restricted from the first request:
 
 ```sh
-atlx confluence content create --space-id ENG --content-type page --title 'Runbook' --body-file runbook.md --format markdown --private
+atlx confluence content create --space-id ENG --content-type page --title 'Runbook' --body-file runbook.md --format markdown --ack-body-formats --private --yes
 ```
 
 ## Comments
@@ -54,5 +54,5 @@ atlx confluence content versions restore --id 12345 --at-version 6 --yes
 ```
 
 `content purge` and `space delete` are permanent. Never run either because a
-trash or a cleanup seemed to imply it. The older `content delete` trashes
-without asking.
+trash or a cleanup seemed to imply it. `content delete` needs
+`--yes` too, and deletes for good with `--purge`.
