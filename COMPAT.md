@@ -92,6 +92,7 @@ repositories, so:
 | Jira `board sprints query`, `sprint workitems query` | Inferred: the site has no sprints. Follows the pattern twg uses for the other Agile lists (REST page, `values` renamed `sprints`; work item rows as in `workitem query`) | Not verified |
 | Jira `workitem comment query`, `changelog query` (default, `--first`, `--after`, `--order-by`), `field update-metadata` (with and without `--include-system-fields`), `types query` (`--project`, `--issue --level -n`, `--id`), `types get`, `statuses query`, `priorities query` (all, and by `--id`) | Live side by side ([#23](https://github.com/nexburst/atlx/issues/23)) | Same key paths, and the same `data` values once the `self` host is normalised. Comment and changelog pages print `pageInfo` on the last page too (`hasNextPage: false`, `nextCursor: null`); `types query` adds top-level `warnings` when `--limit` cut the list or `--id` was used |
 | Jira `workitem attachment`, `worklog`, `watcher`, `vote` | Inferred, not run live ([#24](https://github.com/nexburst/atlx/issues/24)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Jira `sprint` lifecycle, `board get\|create\|delete\|backlog\|projects\|quick-filter` | Inferred, not run live ([#25](https://github.com/nexburst/atlx/issues/25)) | Built from the public Agile 1.0 payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
@@ -154,20 +155,20 @@ inferred rows.
 
 ## Jira
 
-161 twg commands: ✅ 47, 🟡 2, 📋 102, ⛔ 10.
+161 twg commands: ✅ 61, 🟡 1, 📋 89, ⛔ 10.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
-| `jira board backlog query` | 📋 | #25; Agile 1.0 board backlog |
+| `jira board backlog query` | ✅ | #25; `--jql` and `--limit` are atlx extras; GraphQL-only `--variables-json` not planned |
 | `jira board backlog-view query` | ⛔ | board view model is only in the GraphQL gateway |
 | `jira board cells query` | ⛔ | board view model is only in the GraphQL gateway |
-| `jira board create` | 📋 | #25 |
-| `jira board delete` | 📋 | #25 |
-| `jira board get` | 📋 | #25 |
-| `jira board projects query` | 📋 | #25; Agile 1.0 board projects |
+| `jira board create` | ✅ | #25; GraphQL-only `--variables-json` not planned |
+| `jira board delete` | ✅ | #25; GraphQL-only `--variables-json` not planned |
+| `jira board get` | ✅ | #25; the board plus its `configuration`; GraphQL-only `--variables-json` not planned |
+| `jira board projects query` | ✅ | #25; GraphQL-only `--variables-json` not planned |
 | `jira board query` | ✅ | #18; `--issue` uses the work item's space; GraphQL-only `--variables-json` not planned |
-| `jira board quick-filter get` | 📋 | #25; Agile 1.0 quick filters |
-| `jira board quick-filter query` | 📋 | #25; Agile 1.0 quick filters |
+| `jira board quick-filter get` | ✅ | #25; GraphQL-only `--variables-json` not planned |
+| `jira board quick-filter query` | ✅ | #25; GraphQL-only `--variables-json` not planned |
 | `jira board scope query` | ⛔ | board scope model is only in the GraphQL gateway |
 | `jira board sprints query` | ✅ | #18; `--project`/`--issue` use the space's only board; GraphQL-only `--variables-json` not planned |
 | `jira board view-settings query` | ⛔ | board view model is only in the GraphQL gateway |
@@ -231,13 +232,13 @@ inferred rows.
 | `jira space version move` | 📋 | #26 |
 | `jira space version update` | 📋 | #26 |
 | `jira space versions query` | 📋 | #26 |
-| `jira sprint complete` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint create` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint delete` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint get` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint snapshot` | 📋 | #25 |
-| `jira sprint start` | 📋 | #25; Agile 1.0 sprint endpoints |
-| `jira sprint update` | 📋 | #25; Agile 1.0 sprint endpoints |
+| `jira sprint complete` | ✅ | #25; moves unfinished work (not subtasks) first when given a destination; `--move-open-to` is an alias; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira sprint create` | ✅ | #25; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira sprint delete` | ✅ | #25; GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira sprint get` | ✅ | #25; `--id` is an atlx extra; GraphQL-only `--variables-json` not planned |
+| `jira sprint snapshot` | 📋 | #13; a computed report with no REST endpoint of its own |
+| `jira sprint start` | ✅ | #25; the start defaults to now and the end is required, or `--duration` (atlx extra); GraphQL-only `--input-json`, `--variables-json` not planned |
+| `jira sprint update` | ✅ | #25; partial update; GraphQL-only `--input-json`, `--variables-json` not planned |
 | `jira sprint workitems query` | ✅ | #18; GraphQL-only `--variables-json` not planned |
 | `jira workitem archive` | 📋 | #13 (unscheduled); REST v3 issue archival |
 | `jira workitem attachment delete` | ✅ | #24; GraphQL-only `--variables-json` not planned |
@@ -305,7 +306,7 @@ inferred rows.
 | `jira workitem unlink repo` | 📋 | #13 (unscheduled); delete a remote link (REST v3 remotelink) |
 | `jira workitem unlink weblink` | ✅ | #23; `--url` deletes the one remote link pointing there |
 | `jira workitem unlink workitem` | ✅ | #23; GraphQL-only `--variables-json` not planned |
-| `jira workitem update` | 🟡 | missing `--original-estimate`, `--remaining-estimate`, `--sprint`, `--story-points`, `--team` (#25) |
+| `jira workitem update` | ✅ | #25 added sprint, story points, estimates and team; GraphQL-only `--variables-json` not planned |
 | `jira workitem vote add` | ✅ | #24; GraphQL-only `--variables-json` not planned |
 | `jira workitem vote query` | ✅ | #24; GraphQL-only `--variables-json` not planned |
 | `jira workitem vote remove` | ✅ | #24; GraphQL-only `--variables-json` not planned |

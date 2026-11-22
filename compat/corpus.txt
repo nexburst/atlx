@@ -63,9 +63,9 @@ ok jira workitem update --id PROJ-1 --assignee me --add-labels urgent --remove-l
 ok jira workitem update --id PROJ-1 --status 'In Progress' --transition-comment 'Starting now'
 ok jira workitem update --id PROJ-1 --due-date 2026-12-01 --add-fix-versions 1.2.0 --components api
 ok jira workitem update --id PROJ-1 --comment 'Updated the estimate' --comment-format plain
-gap #25 jira workitem update --id PROJ-1 --story-points 5
-gap #25 jira workitem update --id PROJ-1 --sprint 42
-gap #25 jira workitem update --id PROJ-1 --original-estimate 2d --remaining-estimate 1d
+ok jira workitem update --id PROJ-1 --story-points 5
+ok jira workitem update --id PROJ-1 --sprint 42
+ok jira workitem update --id PROJ-1 --original-estimate 2d --remaining-estimate 1d
 ok jira workitem transition --id PROJ-1 --transition-id 31
 ok jira workitem transition --id PROJ-1
 ok jira workitem transitions query --id PROJ-1
@@ -124,10 +124,12 @@ ok jira workitem link workitem --id PROJ-1 --target-id PROJ-2 --target-id PROJ-3
 ok jira workitem link weblink --id PROJ-1 --url https://example.com/run --title Runbook --global-id run-1 --resolved
 
 # --- jira agile and project admin ---
-gap #25 jira sprint get 99
-gap #25 jira sprint start --board-id 12 --id 99 --start-date 2026-12-01 --end-date 2026-12-14
-gap #25 jira board get --id 12
-gap #25 jira board backlog query --board-id 12
+ok jira sprint get 99
+ok jira sprint start --board-id 12 --id 99 --start-date 2026-12-01 --end-date 2026-12-14
+ok jira board get --id 12
+ok jira board quick-filter query --board-id 12
+ok jira sprint complete --id 99 --incomplete-issues-destination-id 100
+ok jira board backlog query --board-id 12
 gap #26 jira space versions query --key PROJ
 gap #26 jira space component query --key PROJ
 gap #26 jira filter query --filter-name 'My open'

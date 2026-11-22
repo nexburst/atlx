@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 
+pub mod agile;
 pub mod attachments;
 pub mod people;
 pub mod worklogs;
@@ -423,6 +424,8 @@ pub struct Update<'a> {
     pub due_date: Option<&'a str>,
     pub resolution: Option<&'a str>,
     pub extra: Map<String, Value>,
+    /// A sprint or backlog move, made after the field update.
+    pub sprint: Option<agile::Destination>,
     pub status: Option<&'a str>,
     pub transition_comment: Option<(&'a str, TextFormat)>,
     pub comment: Option<(&'a str, TextFormat)>,
@@ -513,7 +516,12 @@ pub fn update(c: &Client, key: &str, u: Update) -> Result<Value> {
     let extra_keys: Vec<String> = u.extra.keys().cloned().collect();
     fields.extend(u.extra);
 
-    if fields.is_empty() && ops.is_empty() && u.status.is_none() && u.comment.is_none() {
+    if fields.is_empty()
+        && ops.is_empty()
+        && u.sprint.is_none()
+        && u.status.is_none()
+        && u.comment.is_none()
+    {
         bail!("nothing to update; pass at least one field, --status or --comment");
     }
     let mut out = json!({"key": key, "updated": changed});
@@ -526,6 +534,13 @@ pub fn update(c: &Client, key: &str, u: Update) -> Result<Value> {
             &format!("/rest/api/3/issue/{}", enc(key)),
             &json!({"fields": fields, "update": ops}),
         )?;
+    }
+    if let Some(to) = u.sprint {
+        agile::move_issues(c, to, &[key.to_string()])?;
+        out["sprint"] = match to {
+            agile::Destination::Sprint(id) => id.into(),
+            agile::Destination::Backlog => "backlog".into(),
+        };
     }
     if let Some(s) = u.status {
         let t = transition(c, key, Some(s), Map::new(), u.transition_comment)?;

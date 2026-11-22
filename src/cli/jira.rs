@@ -9,6 +9,7 @@ use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+mod agile;
 mod collab;
 
 #[derive(Subcommand)]
@@ -168,6 +169,27 @@ pub(crate) enum BoardCmd {
         #[arg(long, default_value_t = 0)]
         start_at: usize,
     },
+    /// One board, with its columns and estimation
+    Get(agile::BoardGetArgs),
+    /// Create a board from a filter
+    Create(agile::BoardCreateArgs),
+    /// Delete a board
+    Delete(agile::BoardDeleteArgs),
+    /// A board's backlog
+    Backlog {
+        #[command(subcommand)]
+        cmd: agile::BacklogCmd,
+    },
+    /// The spaces (projects) on a board
+    Projects {
+        #[command(subcommand)]
+        cmd: agile::BoardProjectsCmd,
+    },
+    /// A board's quick filters
+    QuickFilter {
+        #[command(subcommand)]
+        cmd: agile::QuickFilterCmd,
+    },
     /// Sprints on a board
     Sprints {
         #[command(subcommand)]
@@ -222,6 +244,18 @@ pub(crate) enum BoardSprintsCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum SprintCmd {
+    /// One sprint
+    Get(agile::GetArgs),
+    /// Create a future sprint on a board
+    Create(agile::CreateArgs),
+    /// Change some of a sprint's fields
+    Update(agile::UpdateSprintArgs),
+    /// Start a sprint; it needs --end-date or --duration unless it has an end
+    Start(agile::StartArgs),
+    /// Complete a sprint
+    Complete(agile::CompleteArgs),
+    /// Delete a sprint
+    Delete(agile::DeleteArgs),
     /// Work items in a sprint
     Workitems {
         #[command(subcommand)]
@@ -383,6 +417,8 @@ pub(crate) enum WorkitemCmd {
         field: Vec<String>,
         #[arg(long)]
         fields_json: Option<String>,
+        #[command(flatten)]
+        planning: agile::PlanningArgs,
         /// Accepted for twg compatibility
         #[arg(long, short)]
         yes: bool,
@@ -688,6 +724,8 @@ pub(crate) struct UpdateArgs {
     field: Vec<String>,
     #[arg(long)]
     fields_json: Option<String>,
+    #[command(flatten)]
+    planning: agile::PlanningArgs,
     /// Transition by target status or transition name
     #[arg(long)]
     status: Option<String>,
@@ -1022,6 +1060,42 @@ pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
             };
             sprints_envelope(c, board, state.as_deref(), start_at, max_results)
         }
+        JiraCmd::Board {
+            cmd: BoardCmd::Get(a),
+        } => agile::board_get(c, a),
+        JiraCmd::Board {
+            cmd: BoardCmd::Create(a),
+        } => agile::board_create(c, a),
+        JiraCmd::Board {
+            cmd: BoardCmd::Delete(a),
+        } => agile::board_delete(c, a),
+        JiraCmd::Board {
+            cmd: BoardCmd::Backlog { cmd },
+        } => agile::backlog(c, cmd),
+        JiraCmd::Board {
+            cmd: BoardCmd::Projects { cmd },
+        } => agile::projects(c, cmd),
+        JiraCmd::Board {
+            cmd: BoardCmd::QuickFilter { cmd },
+        } => agile::quick_filter(c, cmd),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Get(a),
+        } => agile::sprint_get(c, a),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Create(a),
+        } => agile::sprint_create(c, a),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Update(a),
+        } => agile::sprint_update(c, a),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Start(a),
+        } => agile::sprint_start(c, a),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Complete(a),
+        } => agile::sprint_complete(c, a),
+        JiraCmd::Sprint {
+            cmd: SprintCmd::Delete(a),
+        } => agile::sprint_delete(c, a),
         JiraCmd::Board {
             cmd:
                 BoardCmd::List {
@@ -1463,10 +1537,15 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             parent,
             field,
             fields_json,
+            planning,
             yes: _,
         } => {
             let description = description.map(text_arg).transpose()?;
-            let data = jira::create(
+            let mut extra = jira::extra_fields(fields_json.as_deref(), &field)?;
+            let planned =
+                jira::agile::plan(c, jira::agile::On::Space(&space), &planning.planning())?;
+            extra.extend(planned.fields);
+            let mut data = jira::create(
                 c,
                 jira::NewWorkitem {
                     space: &space,
@@ -1478,9 +1557,23 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                     priority: priority.as_deref(),
                     labels: labels.as_deref().map(jira::csv).unwrap_or_default(),
                     parent: parent.as_deref(),
-                    extra: jira::extra_fields(fields_json.as_deref(), &field)?,
+                    extra,
                 },
             )?;
+            // A new work item is already in the backlog, so only sprints need a move.
+            if let Some(to @ jira::agile::Destination::Sprint(id)) = planned.sprint {
+                let key = data["key"].as_str().unwrap_or_default().to_string();
+                // The work item exists by now: say so, or a retry makes a second one.
+                jira::agile::move_issues(c, to, std::slice::from_ref(&key)).map_err(|e| {
+                    let mut err = ApiError::from_anyhow(&e);
+                    err.message = format!(
+                        "created {key}, but could not add it to sprint {id} (don't create it again): {}",
+                        err.message
+                    );
+                    anyhow::Error::from(err)
+                })?;
+                data["sprint"] = id.into();
+            }
             Ok(envelope("jira.workitem.create", "jira.workitem")
                 .request(json!({"site": jira::site(c), "space": space, "type": issue_type}))
                 .data(data))
@@ -1489,6 +1582,10 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
             let description = u.description.map(text_arg).transpose()?;
             let comment = u.comment.map(text_arg).transpose()?;
             let key = issue_ref(&u.id);
+            let mut extra = jira::extra_fields(u.fields_json.as_deref(), &u.field)?;
+            let planned =
+                jira::agile::plan(c, jira::agile::On::Issue(&key), &u.planning.planning())?;
+            extra.extend(planned.fields);
             let data = jira::update(
                 c,
                 &key,
@@ -1508,7 +1605,8 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                     parent: u.parent.as_deref(),
                     due_date: u.due_date.as_deref(),
                     resolution: u.resolution.as_deref(),
-                    extra: jira::extra_fields(u.fields_json.as_deref(), &u.field)?,
+                    extra,
+                    sprint: planned.sprint,
                     status: u.status.as_deref(),
                     transition_comment: u
                         .transition_comment
@@ -2006,6 +2104,45 @@ mod tests {
             "atlx jira workitem worklog add --issue-id PROJ-1 --time-spent 1h --time-spent-seconds 60",
             "atlx jira workitem worklog get --issue-id PROJ-1",
             "atlx jira workitem watcher add",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_agile_commands_and_flags() {
+        for ok in [
+            "atlx jira sprint get 99",
+            "atlx jira sprint get --id 99",
+            "atlx jira sprint create --board-id 12 --name S5 --goal ship",
+            "atlx jira sprint update --id 99 --state closed --incomplete-issues-destination-id backlog",
+            "atlx jira sprint start --id 99 --board-id 12 --start-date 2026-12-01 --end-date 2026-12-14",
+            "atlx jira sprint start --id 99 --duration 2w",
+            "atlx jira sprint complete --id 99 --move-open-to 100",
+            "atlx jira sprint delete --sprint-id 99",
+            "atlx jira board get --id 12",
+            "atlx jira board create --name Team --type scrum --filter-id 100",
+            "atlx jira board delete --board-id 12 --yes",
+            "atlx jira board backlog query --board-id 12 --active-quick-filters 1,2",
+            "atlx jira board projects query --id 12",
+            "atlx jira board quick-filter query --board-id 12",
+            "atlx jira board quick-filter get --board-id 12 --quick-filter-id 1",
+            "atlx jira workitem update --id PROJ-1 --sprint none --story-points 5 --team none",
+            "atlx jira workitem update --id PROJ-1 --original-estimate 2d --remaining-estimate 1d",
+            "atlx jira workitem create --space PROJ --summary x --sprint 42 --story-points 3",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx jira sprint start --id 99 --duration 2w --end-date 2026-12-14",
+            "atlx jira sprint update --id 99 --state open",
+            "atlx jira board delete --yes",
+            "atlx jira board backlog query",
         ] {
             assert!(
                 Cli::try_parse_from(shell_words(bad)).is_err(),
