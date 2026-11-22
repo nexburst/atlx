@@ -136,10 +136,48 @@ atlx jira board quick-filter get --board-id <BOARD_ID> (required) --quick-filter
 atlx jira board quick-filter query --board-id <BOARD_ID> (required) [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira board sprints query [--id <ID>] [--board-id <BOARD_ID>] [--project <PROJECT>] [--project-ari <PROJECT_ARI>] [--issue <ISSUE>] [--state <STATE>] --current [--max-results <MAX_RESULTS> [default: 50]] [--start-at <START_AT> [default: 0]]
 atlx jira field list [--query <QUERY>] --custom-only
+atlx jira filter add-favourite --id <ID> (required)
+atlx jira filter change-owner --id <ID> (required) --account-id <ACCOUNT_ID> (required)
+atlx jira filter columns get <ID> (required)
+atlx jira filter columns set --id <ID> (required) --column <COLUMN>... (required)
+atlx jira filter create --name <NAME> (required) [--jql <JQL>] [--description <DESCRIPTION>] [--favourite <BOOL> {true|false}] [--share-permissions-json <JSON>] [--edit-permissions-json <JSON>] [--expand <EXPAND>] [--override-share-permissions <BOOL> {true|false}]
+atlx jira filter delete --id <ID> (required) [--override-share-permissions <BOOL> {true|false}] -y/--yes
+atlx jira filter get <ID> (required) [--expand <EXPAND>]
+atlx jira filter query [--filter-name/--name <FILTER_NAME>] [--owner <OWNER>] [--owner-account-id <OWNER_ACCOUNT_ID>] [--group-name <GROUP_NAME>] [--group-id <GROUP_ID>] [--project-id <PROJECT_ID>] [--filter-id <FILTER_ID>...] [--order-by <ORDER_BY>] [--expand <EXPAND>] [--override-share-permissions <BOOL> {true|false}] --favourite [--first <FIRST> [default: 50]] [--start-at <START_AT>]
+atlx jira filter remove-favourite --id <ID> (required) [--expand <EXPAND>]
+atlx jira filter reset-columns --id <ID> (required) -y/--yes
+atlx jira filter share add --id <ID> (required) --permission-json <JSON> (required)
+atlx jira filter share query --id <ID> (required)
+atlx jira filter share remove --id <ID> (required) --permission-id <PERMISSION_ID> (required) -y/--yes
+atlx jira filter subscription query --id <ID> (required) [--first <FIRST> [default: 50]] [--start-at <START_AT> [default: 0]]
+atlx jira filter update --id <ID> (required) [--name <NAME>] [--jql <JQL>] [--description <DESCRIPTION>] [--favourite <BOOL> {true|false}] [--share-permissions-json <JSON>] [--edit-permissions-json <JSON>]
 atlx jira project get (hidden) <IDENTIFIER> (required)
 atlx jira project list (hidden) [--query <QUERY>] [--limit <LIMIT> [default: 25]]
+atlx jira space archive --id-or-key <ID_OR_KEY> (required) -y/--yes
+atlx jira space component counts --id <ID> (required)
+atlx jira space component create --key <KEY> (required) --name <NAME> (required) [--description <DESCRIPTION>] [--lead-account-id <LEAD_ACCOUNT_ID>] [--assignee-type <ASSIGNEE_TYPE>]
+atlx jira space component delete --id <ID> (required) [--move-issues-to <MOVE_ISSUES_TO>] -y/--yes (hidden)
+atlx jira space component get <ID> (required)
+atlx jira space component query --key/--space <KEY> (required)
+atlx jira space component update --id <ID> (required) [--name <NAME>] [--description <DESCRIPTION>] [--lead-account-id <LEAD_ACCOUNT_ID>] [--assignee-type <ASSIGNEE_TYPE>]
+atlx jira space create --key <KEY> (required) --name <NAME> (required) [--project-type-key <PROJECT_TYPE_KEY>] [--project-template-key <PROJECT_TEMPLATE_KEY>] [--lead-account-id <LEAD_ACCOUNT_ID>] [--description <DESCRIPTION>] [--url <URL>] [--assignee-type <ASSIGNEE_TYPE>] [--category-id <CATEGORY_ID>]
+atlx jira space delete --id-or-key <ID_OR_KEY> (required) -y/--yes
 atlx jira space get <id-or-key> (required)
+atlx jira space issue-types --id-or-key <ID_OR_KEY> (required) [--first <FIRST> [default: 50]]
+atlx jira space notification-scheme get --key <KEY> (required) [--expand <EXPAND>]
 atlx jira space query [--query <QUERY>] [--key <KEY>...] [--id <ID>...] [--type-key <TYPE_KEY>] [--category-id <CATEGORY_ID>] [--action <ACTION>] [--expand <EXPAND>] [--status <STATUS>] [--property <PROPERTY>...] [--property-query <PROPERTY_QUERY>] [--sort-by <SORT_BY>] [--start-at <START_AT>] [--after <AFTER>] [--limit <LIMIT>] [--first <FIRST>]
+atlx jira space restore --id-or-key <ID_OR_KEY> (required) -y/--yes
+atlx jira space status query --id-or-key <ID_OR_KEY> (required)
+atlx jira space types query [--id <ID>...]
+atlx jira space update --id-or-key <ID_OR_KEY> (required) [--name <NAME>] [--key <KEY>] [--expand <EXPAND>] [--lead-account-id <LEAD_ACCOUNT_ID>] [--description <DESCRIPTION>] [--url <URL>] [--assignee-type <ASSIGNEE_TYPE>] [--category-id <CATEGORY_ID>]
+atlx jira space version counts --id <ID> (required)
+atlx jira space version create --key <KEY> (required) --name <NAME> (required) [--description <DESCRIPTION>] [--start-date <START_DATE>] [--release-date <RELEASE_DATE>] [--released <BOOL> {true|false}] [--archived <BOOL> {true|false}]
+atlx jira space version delete --id <ID> (required) [--move-fix-issues-to <MOVE_FIX_ISSUES_TO>] [--move-affected-issues-to <MOVE_AFFECTED_ISSUES_TO>] -y/--yes (hidden)
+atlx jira space version get <ID> (required)
+atlx jira space version merge --id <ID> (required) --move-issues-to <MOVE_ISSUES_TO> (required) -y/--yes (hidden)
+atlx jira space version move --id <ID> (required) [--after <AFTER>] [--position <POSITION> {First|Last|Earlier|Later}]
+atlx jira space version update --id <ID> (required) [--name <NAME>] [--description <DESCRIPTION>] [--start-date <START_DATE>] [--release-date <RELEASE_DATE>] [--released <BOOL> {true|false}] [--archived <BOOL> {true|false}]
+atlx jira space versions query --key/--space <KEY> (required) [--search-string/--query <SEARCH_STRING>] [--filter/--status <FILTER>] [--sort-by <SORT_BY>] [--after <AFTER>] [--limit <LIMIT> [default: 50]]
 atlx jira sprint complete --id <ID> (required) [--board-id <BOARD_ID>] [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>] [--incomplete-issues-destination-id/--move-open-to <INCOMPLETE_ISSUES_DESTINATION_ID>]
 atlx jira sprint create --board-id <BOARD_ID> (required) [--name <NAME>] [--goal <GOAL>] [--start-date <START_DATE>] [--end-date <END_DATE>]
 atlx jira sprint delete [--id <ID>] [--sprint-id <SPRINT_ID>] [--board-id <BOARD_ID>] -y/--yes (hidden)
@@ -174,7 +212,7 @@ atlx jira workitem link weblink --id <ID> (required) --url <URL> (required) --ti
 atlx jira workitem link workitem --id <ID> (required) --target-id <TARGET_ID>... (required) --link-type-id <LINK_TYPE_ID> (required)
 atlx jira workitem link-types query
 atlx jira workitem priorities query [--id <ID>...]
-atlx jira workitem query [<JQL_ARG>] [--jql <JQL>] [-n/--limit <LIMIT>] [--first <FIRST>] [--after <AFTER>] [--last <LAST>] [--before <BEFORE>] [--fields <FIELDS>]
+atlx jira workitem query [<JQL_ARG>] [--jql <JQL>] [--filter <FILTER>] [-n/--limit <LIMIT>] [--first <FIRST>] [--after <AFTER>] [--last <LAST>] [--before <BEFORE>] [--fields <FIELDS>]
 atlx jira workitem search <TEXT>... (required) [--limit <LIMIT>] [--first <FIRST>] [--after <AFTER>] [--fields <FIELDS>]
 atlx jira workitem statuses query [--id <ID>...]
 atlx jira workitem transition --id <ID> (required) [--transition-id <TRANSITION_ID>] [--field <FIELD>...] [--fields-json <FIELDS_JSON>] [--transition-comment <TRANSITION_COMMENT>] [--transition-comment-format <TRANSITION_COMMENT_FORMAT> {html|markdown|plain} [default: html]]

@@ -130,9 +130,9 @@ ok jira board get --id 12
 ok jira board quick-filter query --board-id 12
 ok jira sprint complete --id 99 --incomplete-issues-destination-id 100
 ok jira board backlog query --board-id 12
-gap #26 jira space versions query --key PROJ
-gap #26 jira space component query --key PROJ
-gap #26 jira filter query --filter-name 'My open'
+ok jira space versions query --key PROJ
+ok jira space component query --key PROJ
+ok jira filter query --filter-name 'My open'
 
 # --- confluence ---
 ok confluence content get 12345

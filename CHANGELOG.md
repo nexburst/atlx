@@ -11,6 +11,10 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Jira administration (#26): space lifecycle and lookups, versions,
+  components, saved filters, and `jira workitem query --filter`. Space
+  delete (to the trash), archive and restore need `--yes` and accept only an
+  exact key, ID, ARI or project URL.
 - Bitbucket Pipelines and deployments (#34): `pipeline run|trigger`,
   `latest-failure`, `tail`, `grep`, `rerun-failed --whole-pipeline`, `config
   get|update`, `get --test-reports --test-cases`, `query --pattern`, and

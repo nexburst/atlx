@@ -9,6 +9,7 @@ use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+mod admin;
 mod agile;
 mod collab;
 
@@ -19,6 +20,11 @@ pub(crate) enum JiraCmd {
     Workitem {
         #[command(subcommand)]
         cmd: WorkitemCmd,
+    },
+    /// Saved filters
+    Filter {
+        #[command(subcommand)]
+        cmd: admin::FilterCmd,
     },
     /// Jira fields
     Field {
@@ -59,6 +65,48 @@ pub(crate) enum SpaceCmd {
         /// Space key or ID
         #[arg(value_name = "id-or-key")]
         identifier: String,
+    },
+    /// Create a space
+    Create(admin::SpaceCreateArgs),
+    /// Change a space
+    Update(admin::SpaceUpdateArgs),
+    /// Move a space to the trash
+    Delete(admin::ConfirmedSpace),
+    /// Archive a space
+    Archive(admin::ConfirmedSpace),
+    /// Bring an archived or trashed space back
+    Restore(admin::ConfirmedSpace),
+    /// The issue types of a space
+    IssueTypes(admin::IssueTypesArgs),
+    /// The statuses used in a space
+    Status {
+        #[command(subcommand)]
+        cmd: admin::StatusCmd,
+    },
+    /// Space (project) types
+    Types {
+        #[command(subcommand)]
+        cmd: admin::SpaceTypesCmd,
+    },
+    /// Notification schemes
+    NotificationScheme {
+        #[command(subcommand)]
+        cmd: admin::NotificationSchemeCmd,
+    },
+    /// A space's versions
+    Versions {
+        #[command(subcommand)]
+        cmd: admin::VersionsCmd,
+    },
+    /// One version
+    Version {
+        #[command(subcommand)]
+        cmd: admin::VersionCmd,
+    },
+    /// Components
+    Component {
+        #[command(subcommand)]
+        cmd: admin::ComponentCmd,
     },
 }
 
@@ -369,6 +417,9 @@ pub(crate) enum WorkitemCmd {
         jql_arg: Option<String>,
         #[arg(long)]
         jql: Option<String>,
+        /// Run a saved filter's JQL: ID, URL or exact name (atlx extra)
+        #[arg(long, conflicts_with_all = ["jql", "jql_arg"])]
+        filter: Option<String>,
         #[arg(long, short = 'n')]
         limit: Option<usize>,
         #[arg(long)]
@@ -966,6 +1017,43 @@ fn list_edit(
 pub(crate) fn jira_cmd(c: &client::Client, cmd: JiraCmd) -> Result<Value> {
     match cmd {
         JiraCmd::Workitem { cmd } => workitem(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Create(a),
+        } => admin::space_create(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Update(a),
+        } => admin::space_update(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Delete(a),
+        } => admin::space_delete(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Archive(a),
+        } => admin::space_archive(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Restore(a),
+        } => admin::space_restore(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::IssueTypes(a),
+        } => admin::issue_types(c, a),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Status { cmd },
+        } => admin::status(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Types { cmd },
+        } => admin::types(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::NotificationScheme { cmd },
+        } => admin::notification_scheme(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Versions { cmd },
+        } => admin::versions(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Version { cmd },
+        } => admin::version(c, cmd),
+        JiraCmd::Space {
+            cmd: SpaceCmd::Component { cmd },
+        } => admin::component(c, cmd),
+        JiraCmd::Filter { cmd } => admin::filter(c, cmd),
         JiraCmd::Field {
             cmd: FieldCmd::List { query, custom_only },
         } => Ok(envelope("jira.field.list", "jira.field")
@@ -1495,6 +1583,7 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
         WorkitemCmd::Query {
             jql_arg,
             jql,
+            filter,
             limit,
             first,
             after,
@@ -1509,8 +1598,12 @@ fn workitem(c: &client::Client, cmd: WorkitemCmd) -> Result<Value> {
                 )
                 .into());
             }
-            let Some(jql) = jql.or(jql_arg) else {
-                bail!("pass --jql or a JQL argument")
+            let saved = filter
+                .as_deref()
+                .map(|f| jira::admin::filter_jql(c, f))
+                .transpose()?;
+            let Some(jql) = saved.or(jql).or(jql_arg) else {
+                bail!("pass --jql, a JQL argument or --filter")
             };
             let fields = fields_opt(fields.as_deref());
             let limit = limit.or(first).unwrap_or(25);
@@ -2143,6 +2236,67 @@ mod tests {
             "atlx jira sprint update --id 99 --state open",
             "atlx jira board delete --yes",
             "atlx jira board backlog query",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_space_admin_and_filters() {
+        for ok in [
+            "atlx jira space create --key NEW --name New --project-type-key software",
+            "atlx jira space update --id-or-key PROJ --category-id -1",
+            "atlx jira space delete --id-or-key PROJ --yes",
+            "atlx jira space archive --id-or-key PROJ --yes",
+            "atlx jira space restore --id-or-key PROJ --yes",
+            "atlx jira space issue-types --id-or-key PROJ --first 5",
+            "atlx jira space status query --id-or-key PROJ",
+            "atlx jira space types query --id software",
+            "atlx jira space notification-scheme get --key PROJ",
+            "atlx jira space versions query --key PROJ --status released --sort-by -releaseDate",
+            "atlx jira space version create --key PROJ --name 1.0 --released true",
+            "atlx jira space version get 5",
+            "atlx jira space version update --id 5 --archived false",
+            "atlx jira space version delete --id 5 --move-fix-issues-to 6",
+            "atlx jira space version merge --id 5 --move-issues-to 6",
+            "atlx jira space version move --id 5 --position First",
+            "atlx jira space version counts --id 5",
+            "atlx jira space component query --key PROJ",
+            "atlx jira space component get 7",
+            "atlx jira space component create --key PROJ --name API",
+            "atlx jira space component update --id 7 --description d",
+            "atlx jira space component delete --id 7",
+            "atlx jira space component counts --id 7",
+            "atlx jira filter query --filter-name open --order-by -id",
+            "atlx jira filter query --favourite",
+            "atlx jira filter get 9",
+            "atlx jira filter create --name F --jql 'a = 1' --favourite true",
+            "atlx jira filter update --id 9 --jql 'a = 2'",
+            "atlx jira filter delete --id 9 --yes",
+            "atlx jira filter add-favourite --id 9",
+            "atlx jira filter remove-favourite --id 9",
+            "atlx jira filter change-owner --id 9 --account-id a",
+            "atlx jira filter columns get 9",
+            "atlx jira filter columns set --id 9 --column summary --column status",
+            "atlx jira filter reset-columns --id 9 --yes",
+            "atlx jira filter share query --id 9",
+            "atlx jira filter share add --id 9 --permission-json {}",
+            "atlx jira filter share remove --id 9 --permission-id 3 --yes",
+            "atlx jira filter subscription query --id 9",
+            "atlx jira workitem query --filter 9",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx jira space delete --yes",
+            "atlx jira space version move --id 5",
+            "atlx jira filter query --favourite --owner me",
+            "atlx jira workitem query --filter 9 --jql x",
         ] {
             assert!(
                 Cli::try_parse_from(shell_words(bad)).is_err(),
