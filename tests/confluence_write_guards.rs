@@ -21,11 +21,16 @@ fn server() -> MockServer {
 
 /// Run `confluence content ARGS` without a terminal, against `site` only.
 fn content(site: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_atlx"))
-        .args(["confluence", "content"])
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_atlx"));
+    // Not env_clear(): without SystemRoot, Windows can't open a socket, and
+    // then "nothing was sent" would hold for the wrong reason.
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("ATLX_") {
+            cmd.env_remove(&key);
+        }
+    }
+    cmd.args(["confluence", "content"])
         .args(args)
-        .env_clear()
-        .env("HOME", std::env::temp_dir())
         .env(
             "ATLX_CONFIG",
             std::env::temp_dir().join("atlx-no-config.toml"),
