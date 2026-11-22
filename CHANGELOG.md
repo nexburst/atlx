@@ -11,6 +11,13 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Added
 
+- Confluence versions, labels and attachments (#28): `content versions
+  list|get|diff|restore` (also `content history list|get|diff`), `labels
+  add|remove|watch|unwatch`, `labels list --content-type --reference-space`,
+  `attachments list|get|download|upload|delete`, an offline `content
+  body-formats` guide and `content get --format url`. Commands confirm with
+  `--yes` where twg's do. A download without `--out` refuses hidden or
+  otherwise unsafe file names from the server.
 - Jira triage commands with twg's names and output (#23): `jira workitem
   comment query|update|delete`, `comment create --parent-id`, `changelog
   query`, `field update-metadata`, `link query`, `unlink workitem|weblink`,

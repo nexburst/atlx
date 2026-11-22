@@ -1,14 +1,15 @@
 //! `atlx confluence`: clap definitions and dispatch.
 
 use super::Out;
-use super::util::{batch, body_arg, deprecated};
+use super::util::{batch, body_arg, deprecated, require_yes};
 use crate::client::{self, ApiError};
 use crate::confluence;
 use crate::markup::TextFormat;
 use crate::output::envelope::envelope;
 use anyhow::{Result, bail};
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 
 #[derive(Subcommand)]
 pub(crate) enum ConfCmd {
@@ -93,9 +94,9 @@ pub(crate) enum ContentCmd {
         #[arg(long, value_enum)]
         detail: Option<confluence::Detail>,
         /// Body format for --detail full: html (storage, the default), md,
-        /// or adf (atlx extra)
+        /// or adf (atlx extra); url prints only the web address
         #[arg(long, value_enum)]
-        format: Option<confluence::ReadFormat>,
+        format: Option<GetFormat>,
         /// Only the section under this heading, subsections included;
         /// repeatable. Case-insensitive: an exact heading wins, else any
         /// heading containing the text. Defaults to Markdown.
@@ -232,15 +233,265 @@ pub(crate) enum ContentCmd {
         #[arg(long)]
         purge: bool,
     },
+    /// Version history of a page or blog post
+    Versions {
+        #[command(subcommand)]
+        cmd: VersionsCmd,
+    },
+    /// Version history (same as `versions`, without restore)
+    History {
+        #[command(subcommand)]
+        cmd: HistoryCmd,
+    },
+    /// Files attached to a page or blog post
+    Attachments {
+        #[command(subcommand)]
+        cmd: AttachmentsCmd,
+    },
+    /// Explain the body formats atlx reads and writes (offline)
+    BodyFormats {
+        /// One format to explain: html, md (markdown), plain or adf
+        format: Option<String>,
+        /// Show the formats one content type supports
+        #[arg(long, value_enum)]
+        content_type: Option<confluence::formats::GuideType>,
+        /// Accepted for twg compatibility; atlx's guide has no linked pages
+        #[arg(long, num_args = 1.., value_name = "path")]
+        reference: Vec<String>,
+    },
+}
+
+/// `--format` on `content get`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum GetFormat {
+    Html,
+    #[value(alias = "markdown")]
+    Md,
+    /// The ADF document as JSON, with node `localId`s for `--edits` (atlx
+    /// extra)
+    #[value(hide = true)]
+    Adf,
+    /// Only the web URL
+    Url,
+}
+
+/// The page or blog post that a versions/labels/attachments command acts on.
+#[derive(Args)]
+pub(crate) struct Target {
+    /// Page or blog post ID, URL, or exact title (with --reference-space)
+    #[arg(long)]
+    id: String,
+    /// Space key or ID for looking up --id by exact title
+    #[arg(long)]
+    reference_space: Option<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct VersionListArgs {
+    #[command(flatten)]
+    target: Target,
+    /// Versions per page, newest first (1-250)
+    #[arg(long, default_value_t = 25)]
+    limit: usize,
+    #[arg(long)]
+    cursor: Option<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct VersionGetArgs {
+    #[command(flatten)]
+    target: Target,
+    /// Version number
+    #[arg(long)]
+    at_version: u64,
+    /// Also return that version's body: md (markdown) or html
+    #[arg(long, value_enum)]
+    format: Option<confluence::ReadFormat>,
+}
+
+#[derive(Args)]
+pub(crate) struct VersionDiffArgs {
+    #[command(flatten)]
+    target: Target,
+    /// Older version number
+    #[arg(long)]
+    from: u64,
+    /// Newer version number
+    #[arg(long)]
+    to: u64,
+    /// Compare the bodies as md (markdown, default) or html
+    #[arg(long, value_enum, default_value = "md")]
+    format: confluence::ReadFormat,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum VersionsCmd {
+    /// List versions, newest first
+    List(VersionListArgs),
+    /// One version's details, and its body with --format
+    Get(VersionGetArgs),
+    /// Unified diff between two versions' bodies
+    Diff(VersionDiffArgs),
+    /// Make an old version the latest again (adds a new version)
+    Restore {
+        #[command(flatten)]
+        target: Target,
+        /// Version number to bring back
+        #[arg(long)]
+        at_version: u64,
+        /// Message for the new version
+        #[arg(long)]
+        message: Option<String>,
+        /// Bring back that version's title too
+        #[arg(long)]
+        restore_title: bool,
+        /// Confirm the restore (required)
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HistoryCmd {
+    /// List versions, newest first
+    List(VersionListArgs),
+    /// One version's details, and its body with --format
+    Get(VersionGetArgs),
+    /// Unified diff between two versions' bodies
+    Diff(VersionDiffArgs),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AttachmentsCmd {
+    /// List attachments
+    List {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
+        /// REST sort order, e.g. -created-date or title
+        #[arg(long)]
+        sort: Option<String>,
+        /// current (default), archived or trashed
+        #[arg(long, default_value = "current")]
+        status: String,
+        /// Only attachments of this media type, e.g. image/png
+        #[arg(long)]
+        media_type: Option<String>,
+        /// Only attachments with this file name
+        #[arg(long)]
+        filename: Option<String>,
+    },
+    /// One attachment's metadata
+    Get {
+        /// Attachment ID (att12345) or URL
+        #[arg(long)]
+        attachment_id: String,
+        /// Attachment version (default: latest)
+        #[arg(long)]
+        at_version: Option<u64>,
+    },
+    /// Save an attachment to a local file
+    Download {
+        /// Attachment ID (att12345) or URL
+        #[arg(long)]
+        attachment_id: String,
+        /// File to write (default: the attachment's name, in the current
+        /// directory)
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Attachment version (default: latest)
+        #[arg(long)]
+        at_version: Option<u64>,
+        /// Replace the file if it exists
+        #[arg(long)]
+        force: bool,
+    },
+    /// Attach a local file; a file with the same name gets a new version
+    Upload {
+        #[command(flatten)]
+        target: Target,
+        /// File to upload; repeat for several (atlx extra)
+        #[arg(long, required = true)]
+        file: Vec<String>,
+        /// Comment for this attachment version
+        #[arg(long)]
+        comment: Option<String>,
+        /// Don't notify watchers of the new version (atlx extra)
+        #[arg(long)]
+        minor_edit: bool,
+        /// Confirm the upload (required)
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Delete an attachment (moves it to the trash)
+    Delete {
+        /// Attachment ID (att12345) or URL
+        #[arg(long)]
+        attachment_id: String,
+        /// Delete for good; it must be in the trash already (atlx extra)
+        #[arg(long)]
+        purge: bool,
+        /// Confirm the delete (required)
+        #[arg(long, short)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum LabelsCmd {
-    /// List the labels on a page or blog post
+    /// List the labels on a piece of content
     List {
-        /// Page or blog post ID or URL
+        #[command(flatten)]
+        target: Target,
+        /// Content type, which skips probing for it
+        #[arg(long, value_enum)]
+        content_type: Option<confluence::labels::LabelTarget>,
+    },
+    /// Add labels to a page or blog post
+    Add {
+        #[command(flatten)]
+        target: Target,
+        /// Label name; repeatable, and commas separate several
         #[arg(long)]
-        id: String,
+        label: Vec<String>,
+        /// Label prefix
+        #[arg(long, default_value = "global")]
+        prefix: String,
+    },
+    /// Remove labels from a page or blog post
+    Remove {
+        #[command(flatten)]
+        target: Target,
+        /// Label name; repeatable, and commas separate several
+        #[arg(long)]
+        label: Vec<String>,
+        /// Label prefix
+        #[arg(long, default_value = "global")]
+        prefix: String,
+        /// Confirm the removal (required)
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Watch a label: get notified about content that gets it
+    Watch {
+        /// Label name
+        #[arg(long)]
+        name: String,
+        /// Confirm (required)
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Stop watching a label
+    Unwatch {
+        /// Label name
+        #[arg(long)]
+        name: String,
+        /// Confirm (required)
+        #[arg(long, short)]
+        yes: bool,
     },
 }
 
@@ -394,6 +645,45 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 strict,
             } => {
                 let inputs: Vec<String> = refs.into_iter().chain(id_flags).collect();
+                if format == Some(GetFormat::Url) {
+                    if body_only || !sections.is_empty() || detail.is_some() {
+                        return Err(ApiError::usage(
+                            "--format url returns only the web address; drop --detail, --section and --body-only",
+                        )
+                        .into());
+                    }
+                    let opts = confluence::GetOpts {
+                        detail: confluence::Detail::Summary,
+                        format: confluence::ReadFormat::Html,
+                        draft,
+                        reference_space: reference_space.as_deref(),
+                        sections: &[],
+                    };
+                    let request = json!({
+                        "ids": if inputs.len() == 1 { json!(inputs[0]) } else { json!(inputs) },
+                        "format": "url",
+                    });
+                    let data = batch(inputs, strict, 1, |r| confluence::get_url(c, r, &opts))?;
+                    let text = match data["items"].as_array() {
+                        Some(items) => items
+                            .iter()
+                            .map(|i| i["data"]["url"].as_str().unwrap_or_default())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        None => data["url"].as_str().unwrap_or_default().to_string(),
+                    };
+                    return Ok(Out::Doc {
+                        text,
+                        full: envelope("confluence.content.get", "confluence.content")
+                            .request(request)
+                            .data(data),
+                    });
+                }
+                let format = format.map(|f| match f {
+                    GetFormat::Md => confluence::ReadFormat::Md,
+                    GetFormat::Adf => confluence::ReadFormat::Adf,
+                    _ => confluence::ReadFormat::Html,
+                });
                 // --section implies --detail full, in Markdown unless asked.
                 let detail = if body_only || !sections.is_empty() {
                     if detail.is_some_and(|d| d != confluence::Detail::Full) {
@@ -627,10 +917,7 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     .next_cursor(data["nextCursor"].as_str())
                     .data(data)
             }
-            ContentCmd::Labels {
-                cmd: Some(LabelsCmd::List { id }),
-                ..
-            } => labels(c, &id, 250)?,
+            ContentCmd::Labels { cmd: Some(cmd), .. } => labels_cmd(c, cmd)?,
             ContentCmd::Labels {
                 reference: Some(reference),
                 limit,
@@ -640,8 +927,53 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                     "confluence content labels <ref>",
                     "confluence content labels list --id <ref>",
                 );
-                labels(c, &reference, limit)?
+                let data = confluence::labels(c, &reference, limit)?;
+                envelope("confluence.content.labels.list", "confluence.label")
+                    .request(json!({"id": reference}))
+                    .next_cursor(data["nextCursor"].as_str())
+                    .data(data)
             }
+            ContentCmd::Versions { cmd } => match cmd {
+                VersionsCmd::List(a) => versions_list(c, a, "versions")?,
+                VersionsCmd::Get(a) => versions_get(c, a, "versions")?,
+                VersionsCmd::Diff(a) => versions_diff(c, a, "versions")?,
+                VersionsCmd::Restore {
+                    target,
+                    at_version,
+                    message,
+                    restore_title,
+                    yes,
+                } => {
+                    require_yes(yes, "restoring an old version")?;
+                    let data = confluence::history::restore(
+                        c,
+                        &target.id,
+                        target.reference_space.as_deref(),
+                        at_version,
+                        message.as_deref(),
+                        restore_title,
+                    )?;
+                    envelope("confluence.content.versions.restore", "confluence.version")
+                        .request(json!({
+                            "id": target.id,
+                            "atVersion": at_version,
+                            "message": message,
+                            "restoreTitle": restore_title,
+                        }))
+                        .data(data)
+                }
+            },
+            ContentCmd::History { cmd } => match cmd {
+                HistoryCmd::List(a) => versions_list(c, a, "history")?,
+                HistoryCmd::Get(a) => versions_get(c, a, "history")?,
+                HistoryCmd::Diff(a) => versions_diff(c, a, "history")?,
+            },
+            ContentCmd::Attachments { cmd } => attachments_cmd(c, cmd)?,
+            ContentCmd::BodyFormats {
+                format,
+                content_type,
+                reference,
+            } => return body_formats(format.as_deref(), content_type, &reference),
             ContentCmd::Labels {
                 reference: None, ..
             } => {
@@ -723,14 +1055,268 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
     Ok(Out::Data(data))
 }
 
-fn labels(c: &client::Client, id: &str, limit: usize) -> Result<Value> {
-    let data = confluence::labels(c, id, limit)?;
-    Ok(
-        envelope("confluence.content.labels.list", "confluence.label")
-            .request(json!({"id": id}))
-            .next_cursor(data["nextCursor"].as_str())
-            .data(data),
+/// Commands that need no site or credentials, answered before a client is
+/// built: `content body-formats`.
+pub(crate) fn offline(cmd: &ConfCmd) -> Option<Result<Out>> {
+    match cmd {
+        ConfCmd::Content {
+            cmd:
+                ContentCmd::BodyFormats {
+                    format,
+                    content_type,
+                    reference,
+                },
+        } => Some(body_formats(format.as_deref(), *content_type, reference)),
+        _ => None,
+    }
+}
+
+/// `content body-formats`: printed without an envelope, as twg does; text
+/// output is the guide itself.
+fn body_formats(
+    format: Option<&str>,
+    content_type: Option<confluence::formats::GuideType>,
+    reference: &[String],
+) -> Result<Out> {
+    if !reference.is_empty() {
+        return Err(ApiError::usage(
+            "atlx's body-format guide has no linked documents; omit --reference",
+        )
+        .into());
+    }
+    let data = confluence::formats::guide(format, content_type)?;
+    let text = data["doc"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_end()
+        .to_string();
+    Ok(Out::Doc { text, full: data })
+}
+
+fn labels_cmd(c: &client::Client, cmd: LabelsCmd) -> Result<Value> {
+    use confluence::labels;
+    Ok(match cmd {
+        LabelsCmd::List {
+            target,
+            content_type,
+        } => {
+            let data = labels::list(
+                c,
+                &target.id,
+                target.reference_space.as_deref(),
+                content_type,
+                250,
+            )?;
+            envelope("confluence.content.labels.list", "confluence.label")
+                .request(json!({"id": target.id, "contentType": content_type.map(|t| format!("{t:?}").to_lowercase())}))
+                .next_cursor(data["nextCursor"].as_str())
+                .data(data)
+        }
+        LabelsCmd::Add {
+            target,
+            label,
+            prefix,
+        } => envelope("confluence.content.labels.add", "confluence.label")
+            .request(json!({"id": target.id, "labels": label, "prefix": prefix}))
+            .data(labels::add(
+                c,
+                &target.id,
+                target.reference_space.as_deref(),
+                &label,
+                &prefix,
+            )?),
+        LabelsCmd::Remove {
+            target,
+            label,
+            prefix,
+            yes,
+        } => {
+            require_yes(yes, "removing labels")?;
+            envelope("confluence.content.labels.remove", "confluence.label")
+                .request(json!({"id": target.id, "labels": label, "prefix": prefix}))
+                .data(labels::remove(
+                    c,
+                    &target.id,
+                    target.reference_space.as_deref(),
+                    &label,
+                    &prefix,
+                )?)
+        }
+        LabelsCmd::Watch { name, yes } => {
+            require_yes(yes, "watching the label")?;
+            envelope("confluence.content.labels.watch", "confluence.label")
+                .request(json!({"name": name}))
+                .data(labels::watch(c, &name, true)?)
+        }
+        LabelsCmd::Unwatch { name, yes } => {
+            require_yes(yes, "unwatching the label")?;
+            envelope("confluence.content.labels.unwatch", "confluence.label")
+                .request(json!({"name": name}))
+                .data(labels::watch(c, &name, false)?)
+        }
+    })
+}
+
+fn versions_list(c: &client::Client, a: VersionListArgs, group: &str) -> Result<Value> {
+    let data = confluence::history::list(
+        c,
+        &a.target.id,
+        a.target.reference_space.as_deref(),
+        a.limit,
+        a.cursor.as_deref(),
+    )?;
+    Ok(envelope(
+        &format!("confluence.content.{group}.list"),
+        "confluence.version",
     )
+    .request(json!({"id": a.target.id, "limit": a.limit, "cursor": a.cursor}))
+    .next_cursor(data["nextCursor"].as_str())
+    .data(data))
+}
+
+fn versions_get(c: &client::Client, a: VersionGetArgs, group: &str) -> Result<Value> {
+    let data = confluence::history::get(
+        c,
+        &a.target.id,
+        a.target.reference_space.as_deref(),
+        a.at_version,
+        a.format,
+    )?;
+    Ok(envelope(
+        &format!("confluence.content.{group}.get"),
+        "confluence.version",
+    )
+    .request(json!({
+        "id": a.target.id,
+        "atVersion": a.at_version,
+        "format": a.format.map(|f| format!("{f:?}").to_lowercase()),
+    }))
+    .data(data))
+}
+
+fn versions_diff(c: &client::Client, a: VersionDiffArgs, group: &str) -> Result<Value> {
+    let data = confluence::history::diff(
+        c,
+        &a.target.id,
+        a.target.reference_space.as_deref(),
+        a.from,
+        a.to,
+        a.format,
+    )?;
+    Ok(envelope(
+        &format!("confluence.content.{group}.diff"),
+        "confluence.version-diff",
+    )
+    .request(json!({
+        "id": a.target.id,
+        "from": a.from,
+        "to": a.to,
+        "format": format!("{:?}", a.format).to_lowercase(),
+    }))
+    .data(data))
+}
+
+fn attachments_cmd(c: &client::Client, cmd: AttachmentsCmd) -> Result<Value> {
+    use confluence::attachments;
+    const KIND: &str = "confluence.attachment";
+    Ok(match cmd {
+        AttachmentsCmd::List {
+            target,
+            limit,
+            cursor,
+            sort,
+            status,
+            media_type,
+            filename,
+        } => {
+            let data = attachments::list(
+                c,
+                &target.id,
+                target.reference_space.as_deref(),
+                &attachments::ListOpts {
+                    limit,
+                    cursor: cursor.as_deref(),
+                    sort: sort.as_deref(),
+                    status: Some(status.as_str()),
+                    media_type: media_type.as_deref(),
+                    filename: filename.as_deref(),
+                },
+            )?;
+            envelope("confluence.content.attachments.list", KIND)
+                .request(json!({
+                    "id": target.id,
+                    "limit": limit,
+                    "cursor": cursor,
+                    "sort": sort,
+                    "status": status,
+                    "mediaType": media_type,
+                    "filename": filename,
+                }))
+                .next_cursor(data["nextCursor"].as_str())
+                .data(data)
+        }
+        AttachmentsCmd::Get {
+            attachment_id,
+            at_version,
+        } => envelope("confluence.content.attachments.get", KIND)
+            .request(json!({"attachmentId": attachment_id, "atVersion": at_version}))
+            .data(attachments::get(c, &attachment_id, at_version)?),
+        AttachmentsCmd::Download {
+            attachment_id,
+            out,
+            at_version,
+            force,
+        } => envelope("confluence.content.attachments.download", KIND)
+            .request(json!({
+                "attachmentId": attachment_id,
+                "out": out.as_ref().map(|p| p.display().to_string()),
+                "atVersion": at_version,
+                "force": force,
+            }))
+            .data(attachments::download(
+                c,
+                &attachment_id,
+                out.as_deref(),
+                at_version,
+                force,
+            )?),
+        AttachmentsCmd::Upload {
+            target,
+            file,
+            comment,
+            minor_edit,
+            yes,
+        } => {
+            require_yes(yes, "uploading the attachment")?;
+            envelope("confluence.content.attachments.upload", KIND)
+                .request(json!({
+                    "id": target.id,
+                    "file": if file.len() == 1 { json!(file[0]) } else { json!(file) },
+                    "comment": comment,
+                }))
+                // One at a time: parallel writes to one page's attachments conflict.
+                .data(batch(file, false, 1, |f| {
+                    attachments::upload(
+                        c,
+                        &target.id,
+                        target.reference_space.as_deref(),
+                        Path::new(f),
+                        comment.as_deref(),
+                        minor_edit,
+                    )
+                })?)
+        }
+        AttachmentsCmd::Delete {
+            attachment_id,
+            purge,
+            yes,
+        } => {
+            require_yes(yes, "deleting the attachment")?;
+            envelope("confluence.content.attachments.delete", KIND)
+                .request(json!({"attachmentId": attachment_id}))
+                .data(attachments::delete(c, &attachment_id, purge)?)
+        }
+    })
 }
 
 /// `--id`, or the old positional reference (with a deprecation note).
@@ -789,6 +1375,47 @@ mod tests {
                 assert_eq!(cursor.as_deref(), Some("cur%3D"));
             }
             _ => panic!("unexpected parsed command"),
+        }
+    }
+
+    #[test]
+    fn parses_versions_labels_attachments_and_formats() {
+        for ok in [
+            "atlx confluence content get 12345 --format url",
+            "atlx confluence content versions list --id 12345 --limit 5 --cursor c",
+            "atlx confluence content versions get --id 12345 --at-version 2 --format md",
+            "atlx confluence content versions diff --id 12345 --from 1 --to 2 --format html",
+            "atlx confluence content versions restore --id 12345 --at-version 2 --restore-title --message undo --yes",
+            "atlx confluence content history list --id Runbook --reference-space ENG",
+            "atlx confluence content history get --id 12345 --at-version 2",
+            "atlx confluence content history diff --id 12345 --from 1 --to 2",
+            "atlx confluence content labels list --id 12345 --content-type whiteboard",
+            "atlx confluence content labels add --id 12345 --label a,b --label c --prefix global",
+            "atlx confluence content labels remove --id 12345 --label a --yes",
+            "atlx confluence content labels watch --name runbook --yes",
+            "atlx confluence content labels unwatch --name runbook --yes",
+            "atlx confluence content attachments list --id 12345 --media-type image/png --filename a.png --sort title --status current",
+            "atlx confluence content attachments get --attachment-id att456 --at-version 1",
+            "atlx confluence content attachments download --attachment-id att456 --out a.png --force",
+            "atlx confluence content attachments upload --id 12345 --file a --file b --minor-edit --yes",
+            "atlx confluence content attachments delete --attachment-id att456 --purge --yes",
+            "atlx confluence content body-formats md",
+            "atlx confluence content body-formats --content-type live_doc",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx confluence content versions get --id 12345",
+            "atlx confluence content versions diff --id 12345 --from 1",
+            "atlx confluence content history restore --id 12345 --at-version 2",
+            "atlx confluence content attachments upload --id 12345 --yes",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
         }
     }
 

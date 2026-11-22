@@ -188,6 +188,10 @@ comes from (`config`, `env` or `token_cmd`), never its value.
 | `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` (atlx extra) moves to the trash, or `--purge` |
 | `confluence content comments list\|create --id` | `--comment-type footer\|inline`, `--body-format md\|html`, `--limit`, `--cursor`; create takes `--body`/`--body-file` and `--body-format` (markdown by default) |
 | `confluence content list\|children`, `confluence content labels list --id`, `confluence tree [ref]\|--target` | `--space`, `--limit`, `--cursor`; `tree` fetches ancestors + `--depth` (max 5) |
+| `confluence content versions list\|get\|diff\|restore --id` | also `content history list\|get\|diff`; `get --at-version N --format md\|html`, `diff --from N --to M`; `restore` needs `--yes` |
+| `confluence content labels add\|remove --id --label a,b`, `labels watch\|unwatch --name` | `--prefix`; `remove`, `watch` and `unwatch` need `--yes` |
+| `confluence content attachments list\|get\|download\|upload\|delete` | `download --out --at-version --force`; `upload --file` (repeatable) `--comment --minor-edit`; `delete --purge`; `upload` and `delete` need `--yes` |
+| `confluence content body-formats [format]` | offline guide to what each body format reads, writes and loses; `content get --format url` prints just the web address |
 | `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
 | `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |
 | `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |

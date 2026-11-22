@@ -10,7 +10,11 @@ use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
+pub mod attachments;
 pub mod edits;
+pub mod formats;
+pub mod history;
+pub mod labels;
 pub mod sections;
 
 fn enc(s: &str) -> String {
@@ -301,6 +305,37 @@ fn resolve_and_fetch(c: &Client, reference: &str, o: &GetOpts) -> Result<(Conten
         }
     }
     bail!("no Confluence page or blogpost titled '{reference}' in space '{ref_space}'")
+}
+
+/// The content ID for a reference: an ID or URL as is, otherwise an exact
+/// title looked up in `reference_space`.
+pub fn resolve_id(c: &Client, reference: &str, reference_space: Option<&str>) -> Result<String> {
+    if let Ok(id) = content_id(reference) {
+        return Ok(id);
+    }
+    let o = GetOpts {
+        detail: Detail::Summary,
+        format: ReadFormat::Html,
+        draft: false,
+        reference_space,
+        sections: &[],
+    };
+    let (_, v) = resolve_and_fetch(c, reference, &o)?;
+    v["id"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| anyhow!("Confluence returned no ID for '{reference}'"))
+}
+
+/// `confluence content get --format url`: the content's web address.
+pub fn get_url(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
+    let (kind, v) = resolve_and_fetch(c, reference, o)?;
+    Ok(json!({
+        "id": v["id"],
+        "type": format!("{kind:?}").to_lowercase(),
+        "title": v["title"],
+        "url": content_url(c, &v),
+    }))
 }
 
 /// `confluence content get`
@@ -715,21 +750,9 @@ pub fn tree(c: &Client, reference: &str, depth: usize) -> Result<Value> {
     }))
 }
 
-/// `confluence content labels`
+/// `confluence content labels` (old atlx form; see [`labels::list`]).
 pub fn labels(c: &Client, reference: &str, limit: usize) -> Result<Value> {
-    let id = content_id(reference)?;
-    let limit = limit.clamp(1, 250).to_string();
-    let q = [("limit", limit.as_str())];
-    let (_, v) = try_content(|kind| {
-        c.get(
-            &format!("/api/v2/{}/{}/labels", kind.collection(), enc(&id)),
-            &q,
-        )
-    })?;
-    Ok(listing(
-        &v,
-        |l| json!({"id": l["id"], "name": l["name"], "prefix": l["prefix"]}),
-    ))
+    labels::list(c, reference, None, None, limit)
 }
 
 /// `confluence content delete`

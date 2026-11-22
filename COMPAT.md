@@ -91,6 +91,7 @@ repositories, so:
 | Jira `workitem get` (default, `--comments`, `--fields`, `--full`, several IDs), `workitem query` (rows, `--fields`, paging), `workitem search`, `transitions query`, `field create-metadata`, `link-types query`, `space query`, `space get`, `board query` | Live side by side | Same key paths and types. Differences in values only: `self` links use the site URL (twg goes through `api.atlassian.com`), and `meta` describes atlx's REST source instead of twg's backend |
 | Jira `board sprints query`, `sprint workitems query` | Inferred: the site has no sprints. Follows the pattern twg uses for the other Agile lists (REST page, `values` renamed `sprints`; work item rows as in `workitem query`) | Not verified |
 | Jira `workitem comment query`, `changelog query` (default, `--first`, `--after`, `--order-by`), `field update-metadata` (with and without `--include-system-fields`), `types query` (`--project`, `--issue --level -n`, `--id`), `types get`, `statuses query`, `priorities query` (all, and by `--id`) | Live side by side ([#23](https://github.com/nexburst/atlx/issues/23)) | Same key paths, and the same `data` values once the `self` host is normalised. Comment and changelog pages print `pageInfo` on the last page too (`hasNextPage: false`, `nextCursor: null`); `types query` adds top-level `warnings` when `--limit` cut the list or `--id` was used |
+| Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
 | Jira writes (`create`, `update`, `comment create`, `transition`, `link workitem`, `link weblink`, `comment update`, `comment delete`, `delete`, `unlink workitem`, `unlink weblink`) | Inferred (the run was read-only): REST responses with camelCase atlx additions (`url`, `commentId`, ...); deletes print `{id, deleted: true}`-style objects | Not verified |
 | Confluence `content get`, `search query`, `search text` | Inferred from twg's `--select` preset expansions (see `src/output/select.rs`): `id`, `type`, `title`, `status`, `spaceId`, `externalUrl`, `detail`, `snapshotToken`, `summary.{excerpt,wordCount,sectionCount}`, `outline[].{level,text,anchor}`, `body.{format,value}`; search passes REST's `results` through with `totalSize`, `size`, `nextCursor` | Not verified; `aiSummary` and `body.lossyConversion` are not produced. atlx adds `outline[].localId` and `outline[].wordCount`, and `body.sections` for `--section` reads. The `anchor` spelling (whitespace runs to `-`) is a guess |
@@ -330,7 +331,7 @@ inferred rows.
 
 ## Confluence
 
-121 twg commands: ✅ 7, 🟡 6, 📋 72, ⛔ 36.
+121 twg commands: ✅ 25, 🟡 5, 📋 55, ⛔ 36.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -353,12 +354,12 @@ inferred rows.
 | `confluence content approvals request-changes` | ⛔ | page approvals are only in the GraphQL gateway |
 | `confluence content approvals reviewers update` | ⛔ | page approvals are only in the GraphQL gateway |
 | `confluence content archive` | 📋 | #30 |
-| `confluence content attachments delete` | 📋 | #28 |
-| `confluence content attachments download` | 📋 | #28 |
-| `confluence content attachments get` | 📋 | #28 |
-| `confluence content attachments list` | 📋 | #28 |
-| `confluence content attachments upload` | 📋 | #28 |
-| `confluence content body-formats` | 📋 | #28 |
+| `confluence content attachments delete` | ✅ | `--purge` is an atlx extra |
+| `confluence content attachments download` | ✅ | without `--out`, hidden or otherwise unsafe server file names are refused |
+| `confluence content attachments get` | ✅ | |
+| `confluence content attachments list` | ✅ | |
+| `confluence content attachments upload` | ✅ | repeatable `--file` and `--minor-edit` are atlx extras |
+| `confluence content body-formats` | ✅ | atlx's own guide; `--reference` is rejected (it has no linked documents) |
 | `confluence content comments create` | 🟡 | missing `--reference-space`, `--text-selection`, `--text-selection-match-count`, `--text-selection-match-index` (#29); `--comment-type inline` returns a usage error until #29. The old positional `<ref>` and `--format` still work (hidden, deprecated) |
 | `confluence content comments delete` | 📋 | #29 |
 | `confluence content comments get` | 📋 | #29 |
@@ -367,7 +368,7 @@ inferred rows.
 | `confluence content comments reply` | 📋 | #29 |
 | `confluence content comments resolve` | 📋 | #29 |
 | `confluence content comments update` | 📋 | #29 |
-| `confluence content convert` | 📋 | #28; v1 contentbody/convert |
+| `confluence content convert` | 📋 | #13; v1 contentbody/convert |
 | `confluence content copy` | 📋 | #30 |
 | `confluence content create` | 🟡 | missing `--content-width`, `--private`, `--reference-space`, `--synced-container-url`, `--title-emoji` (#30) |
 | `confluence content delete-draft` | 📋 | #30 |
@@ -377,14 +378,14 @@ inferred rows.
 | `confluence content export-status` | ⛔ | no public PDF/Word export endpoint |
 | `confluence content get` | ✅ | `--detail ai_summary` is not offered (Atlassian AI); `--format adf` is an atlx extra that shows node `localId`s for `--edits` |
 | `confluence content get-public-link` | ⛔ | public links are only in the GraphQL gateway |
-| `confluence content history diff` | 📋 | #28 |
-| `confluence content history get` | 📋 | #28 |
-| `confluence content history list` | 📋 | #28 |
-| `confluence content labels add` | 📋 | #28 |
-| `confluence content labels list` | 🟡 | missing `--content-type`, `--reference-space` (#28) |
-| `confluence content labels remove` | 📋 | #28 |
-| `confluence content labels unwatch` | 📋 | #28 |
-| `confluence content labels watch` | 📋 | #28 |
+| `confluence content history diff` | ✅ | same as `versions diff` |
+| `confluence content history get` | ✅ | same as `versions get` |
+| `confluence content history list` | ✅ | same as `versions list` |
+| `confluence content labels add` | ✅ | |
+| `confluence content labels list` | ✅ | |
+| `confluence content labels remove` | ✅ | |
+| `confluence content labels unwatch` | ✅ | |
+| `confluence content labels watch` | ✅ | |
 | `confluence content list` | ✅ |  |
 | `confluence content list-available-statuses` | 📋 | #13 (unscheduled); v1 content states |
 | `confluence content macros resolve` | 📋 | #13 (unscheduled); v1 async body conversion, to confirm |
@@ -417,10 +418,10 @@ inferred rows.
 | `confluence content untrash` | 📋 | #30 |
 | `confluence content unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
 | `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#30). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
-| `confluence content versions diff` | 📋 | #28 |
-| `confluence content versions get` | 📋 | #28 |
-| `confluence content versions list` | 📋 | #28 |
-| `confluence content versions restore` | 📋 | #28 |
+| `confluence content versions diff` | ✅ | computed locally from the two bodies |
+| `confluence content versions get` | ✅ | |
+| `confluence content versions list` | ✅ | |
+| `confluence content versions restore` | ✅ | v1 restore operation |
 | `confluence content watch` | 📋 | #13 (unscheduled); v1 user/watch |
 | `confluence group get` | 📋 | #13 (unscheduled); v1 groups |
 | `confluence remix infographic create` | ⛔ | AI generation (Atlassian AI) |

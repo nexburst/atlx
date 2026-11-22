@@ -146,6 +146,13 @@ impl Shaping {
                 self.deliver(&output::render(&v, self.fmt), Some(&v));
             }
             Out::Raw(s) => self.deliver(&format!("{s}\n"), None),
+            Out::Doc { text, .. } if self.fmt == Format::Text => {
+                self.deliver(&format!("{text}\n"), None)
+            }
+            Out::Doc { full, .. } => {
+                let v = self.select(full);
+                self.deliver(&output::render(&v, self.fmt), Some(&v));
+            }
             Out::Body { body, full } => self.emit_body(body, full),
         }
         code
