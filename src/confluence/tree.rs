@@ -42,7 +42,7 @@ struct Walk<'a> {
 
 impl Walk<'_> {
     /// Every result of a list, up to what the node budget has left.
-    fn list(&mut self, path: &str, extra: &[(&str, &str)]) -> Result<Vec<Value>> {
+    fn list(&mut self, path: &str, extra: &[(&str, &str)], pages_only: bool) -> Result<Vec<Value>> {
         let mut out: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
@@ -57,7 +57,15 @@ impl Walk<'_> {
                 Err(e) if not_found(&e) && extra.is_empty() => return Ok(out),
                 Err(e) => return Err(e),
             };
-            out.extend(v["results"].as_array().into_iter().flatten().cloned());
+            // Filtered here, so other types don't use up the node budget.
+            out.extend(
+                v["results"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|i| !pages_only || i["type"] == "page")
+                    .cloned(),
+            );
             match next_cursor(&v) {
                 Value::String(next)
                     if out.len() <= self.left && cursor.as_deref() != Some(&next) =>
@@ -70,21 +78,16 @@ impl Walk<'_> {
     }
 
     fn children(&mut self, id: &str, kind: &str) -> Result<Vec<Value>> {
-        let path = match (self.only, kind) {
-            (None, "page") => format!("/api/v2/pages/{}/children", enc(id)),
+        let collection = match (self.only, kind) {
+            (_, "page") => "pages",
             (None, _) => return Ok(Vec::new()),
-            (Some(_), kind) => {
-                let collection = match kind {
-                    "page" => "pages",
-                    "whiteboard" => "whiteboards",
-                    "database" => "databases",
-                    "folder" => "folders",
-                    _ => return Ok(Vec::new()),
-                };
-                format!("/api/v2/{collection}/{}/direct-children", enc(id))
-            }
+            (Some(_), "whiteboard") => "whiteboards",
+            (Some(_), "database") => "databases",
+            (Some(_), "folder") => "folders",
+            _ => return Ok(Vec::new()),
         };
-        self.list(&path, &[])
+        let path = format!("/api/v2/{collection}/{}/direct-children", enc(id));
+        self.list(&path, &[], self.only.is_none())
     }
 
     /// `depth` levels from `items` down.
@@ -191,6 +194,7 @@ fn space_tree(walk: &mut Walk, reference: &str, depth: usize) -> Result<Value> {
         let mut roots = walk.list(
             &format!("/api/v2/spaces/{}/pages", enc(&sid)),
             &[("depth", "root")],
+            false,
         )?;
         for r in &mut roots {
             r["type"] = "page".into();

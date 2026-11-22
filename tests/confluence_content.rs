@@ -243,7 +243,7 @@ fn attachments_list_passes_filters() {
     let o = attachments::ListOpts {
         limit: 10,
         cursor: None,
-        sort: Some("title"),
+        sort: Some("-modified-date"),
         status: Some("current"),
         media_type: Some("image/png"),
         filename: Some("a.png"),
@@ -254,7 +254,7 @@ fn attachments_list_passes_filters() {
     assert_eq!(r.path, "/api/v2/pages/12345/attachments");
     for (k, v) in [
         ("limit", "10"),
-        ("sort", "title"),
+        ("sort", "-modified-date"),
         ("mediaType", "image/png"),
         ("filename", "a.png"),
     ] {

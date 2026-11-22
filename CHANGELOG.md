@@ -185,6 +185,12 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ### Fixed
 
+- Moved off deprecated REST endpoints (#66). `bb search code` uses
+  `codesearch`: the token needs `repository:read` and `workspace:read`, and
+  hits keep `file.path` and `content_match_count` (now matched chunks) but
+  otherwise change shape. `jira sprint workitems query` and `jira board
+  backlog query` page by token, so no longer report `total`. Priorities and
+  Confluence children use their replacement endpoints.
 - Checked against Atlassian's OpenAPI specs (#65): `confluence content
   untrash` restores through REST v2 (v1's endpoint is gone); `labels list`
   refuses content types REST can't list instead of calling a removed

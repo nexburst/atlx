@@ -129,8 +129,8 @@ fn sprint_complete_moves_every_page_of_open_work_then_closes() {
     let srv = MockServer::with_responses([
         ok(json!({"id": 5, "state": "active"})),
         ok(json!({"id": 6, "state": "future"})),
-        ok(json!({"total": 120, "issues": issues(0, 100)})),
-        ok(json!({"total": 120, "issues": issues(100, 20)})),
+        ok(json!({"isLast": false, "nextPageToken": "t2", "issues": issues(0, 100)})),
+        ok(json!({"isLast": true, "issues": issues(100, 20)})),
         empty(),
         empty(),
         empty(),
@@ -143,7 +143,8 @@ fn sprint_complete_moves_every_page_of_open_work_then_closes() {
     let jql = r[2].query_param("jql").unwrap();
     assert!(jql.contains("statusCategory != Done"), "{jql}");
     assert!(jql.contains("subTaskIssueTypes()"), "{jql}");
-    assert_eq!(r[3].query_param("startAt").as_deref(), Some("100"));
+    assert_eq!(r[2].path, "/rest/software/1.0/sprint/5/issue");
+    assert_eq!(r[3].query_param("nextPageToken").as_deref(), Some("t2"));
     let sizes: Vec<usize> = r[4..7]
         .iter()
         .map(|m| m.json_body()["issues"].as_array().unwrap().len())
@@ -177,7 +178,7 @@ fn sprint_complete_moves_nothing_unless_it_can_close() {
 fn sprint_complete_does_not_close_when_the_move_fails() {
     let srv = MockServer::with_responses([
         ok(json!({"state": "active"})),
-        ok(json!({"total": 1, "issues": [{"key": "PROJ-1"}]})),
+        ok(json!({"isLast": true, "issues": [{"key": "PROJ-1"}]})),
         MockResponse::json(400, json!({"errorMessages": ["no"]})),
     ]);
     let backlog = Some(Destination::Backlog);
@@ -246,10 +247,21 @@ fn board_commands_use_agile_endpoints() {
 }
 
 #[test]
+fn sprint_complete_stops_when_the_list_cannot_be_finished() {
+    let srv = MockServer::with_responses([
+        ok(json!({"state": "active"})),
+        ok(json!({"isLast": false, "issues": [{"key": "PROJ-1"}]})),
+    ]);
+    let backlog = Some(Destination::Backlog);
+    assert!(agile::sprint_complete(&srv.client(), 5, &Sprint::default(), backlog).is_err());
+    assert!(srv.requests().iter().all(|r| r.method == "GET"));
+}
+
+#[test]
 fn backlog_applies_quick_filters_and_jql() {
     let srv = MockServer::with_responses([
         ok(json!({"jql": "type = Bug"})),
-        ok(json!({"total": 1, "issues": [{"key": "PROJ-1", "fields": {"summary": "s"}}]})),
+        ok(json!({"isLast": true, "issues": [{"key": "PROJ-1", "fields": {"summary": "s"}}]})),
     ]);
     let filters = ["3".to_string()];
     let out = agile::backlog(
@@ -261,9 +273,9 @@ fn backlog_applies_quick_filters_and_jql() {
         50,
     )
     .unwrap();
-    assert_eq!(out["total"], 1);
+    assert_eq!(out["issues"][0]["key"], "PROJ-1");
     let r = &srv.requests()[1];
-    assert_eq!(r.path, "/rest/agile/1.0/board/12/backlog");
+    assert_eq!(r.path, "/rest/software/1.0/board/12/backlog");
     assert_eq!(
         r.query_param("jql").as_deref(),
         Some("(type = Bug) AND (a = 1) ORDER BY rank")

@@ -555,7 +555,7 @@ inferred rows.
 | `bitbucket workspace member query` | ✅ | #33; `-q` is an atlx extra |
 | `bitbucket pull-requests tasks` | ➕ | old name of `bb pull-requests task query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 | `bitbucket repo branches` | ➕ | old name of `bb branch query` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
-| `bitbucket search code` | ➕ | Bitbucket code search; twg's `search-code` uses Code Intelligence |
+| `bitbucket search code` | ➕ | Bitbucket `codesearch` (#66; needs `repository:read` and `workspace:read`; searches default branches); twg's `search-code` uses Code Intelligence |
 
 ## Users
 

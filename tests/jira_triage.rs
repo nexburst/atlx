@@ -364,7 +364,10 @@ fn statuses_and_priorities_all_or_by_id() {
         ),
         MockResponse::json(200, json!({"id": "3", "name": "In Progress"})),
         MockResponse::json(200, json!({"id": "10000", "name": "To Do"})),
-        MockResponse::json(200, json!([{"id": "1", "name": "Highest", "iconUrl": "i"}])),
+        MockResponse::json(
+            200,
+            json!({"isLast": true, "values": [{"id": "1", "name": "Highest", "iconUrl": "i"}]}),
+        ),
         MockResponse::json(200, json!({"id": "2", "name": "High"})),
     ]);
     let c = srv.client();
@@ -390,7 +393,7 @@ fn statuses_and_priorities_all_or_by_id() {
             "/rest/api/3/status",
             "/rest/api/3/status/3",
             "/rest/api/3/status/10000",
-            "/rest/api/3/priority",
+            "/rest/api/3/priority/search",
             "/rest/api/3/priority/2",
         ]
     );

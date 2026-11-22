@@ -54,8 +54,11 @@ fn server() -> MockServer {
             "issuetype-project"
         } else if p == "/rest/api/3/status" {
             "statuses"
-        } else if p == "/rest/api/3/priority" {
-            "priorities"
+        } else if p == "/rest/api/3/priority/search" {
+            return MockResponse::json(
+                200,
+                json!({"isLast": true, "values": fixture("rest/priorities.json")}),
+            );
         } else if p == "/rest/api/3/user/search" {
             "user-search"
         } else {

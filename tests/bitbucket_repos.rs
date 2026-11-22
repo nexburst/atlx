@@ -337,3 +337,24 @@ fn search_prs_by_field() {
     assert_eq!(r.query_param("q").as_deref(), Some("(title ~ \"login\")"));
     assert_eq!(r.query_param("state").as_deref(), Some("OPEN"));
 }
+
+#[test]
+fn code_search_follows_the_cursor_and_stops_without_one() {
+    let file = |p: &str| serde_json::json!({"path": p, "matched_chunks": [{}]});
+    let srv = MockServer::with_responses([
+        MockResponse::json(
+            200,
+            serde_json::json!({"id": "r1", "matched_files": [file("a.rs")],
+                "pagination": {"has_more": true, "next_cursor": "c2"}}),
+        ),
+        MockResponse::json(
+            200,
+            serde_json::json!({"id": "r1", "matched_files": [file("b.rs")],
+                "pagination": {"has_more": true}}),
+        ),
+    ]);
+    assert!(atlx::bitbucket::search_code(&srv.client(), "acme", "x", None, 5).is_err());
+    let r = srv.requests();
+    assert_eq!(r[1].json_body()["request_id"], "r1");
+    assert_eq!(r[1].json_body()["pagination"]["next_cursor"], "c2");
+}
