@@ -9,6 +9,14 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ## [Unreleased]
 
+### Security
+
+- `confluence content create`, `update` and `delete` (including `--purge`)
+  wrote without confirmation where twg refuses. They now need `--yes`.
+  `update` needs `--snapshot-token`, so it can't overwrite a newer edit
+  unseen, and a body needs `--format` and `--ack-body-formats`. Scripts that
+  relied on the old behavior must add these flags.
+
 ### Added
 
 - Jira dashboards (#73): `jira dashboard query|get|create|update|copy|
@@ -171,7 +179,7 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
   no longer carry fallbacks for them.
 - `user search` returns 20 users by default, as twg does (was 25).
 - `jira space query` sorts by key unless `--sort-by` is given, as twg does.
-- Merge, decline and `confluence content delete` no longer require `--yes`,
+- Merge and decline no longer require `--yes`,
   matching twg; `--yes` is still accepted and ignored (#18).
 - The 0.1 names (`jira project`, `jira board list`, `jira sprint list|issues`,
   `jira workitem create-meta`, `jira workitem link types|create|remote`, `bb
