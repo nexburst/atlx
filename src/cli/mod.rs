@@ -192,7 +192,9 @@ pub fn main() {
         Ok(Out::Exit(v, code)) => shaping.emit(Out::Exit(v, code), code),
         Ok(Out::Streamed(code)) => code,
         Ok(out) => {
-            let code = if util::take_partial() {
+            let code = if util::take_failed() {
+                exit::FAILURE
+            } else if util::take_partial() {
                 exit::PARTIAL
             } else {
                 exit::OK

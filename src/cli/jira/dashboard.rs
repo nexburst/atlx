@@ -387,11 +387,16 @@ pub(super) fn run(c: &Client, cmd: DashboardCmd) -> Result<Value> {
     };
     let mut request = request;
     request["site"] = jira::site(c).into();
-    Ok(
-        envelope(&format!("jira.dashboard.{name}"), "jira.dashboard")
-            .request(request)
-            .data(data),
-    )
+    let kind = match name {
+        "query" => "jira.dashboard-search-result",
+        "gadget.query" => "jira.dashboard-gadget",
+        "gadget.catalog.query" => "jira.dashboard-gadget-catalog",
+        "item-property.query" => "jira.dashboard-item-property",
+        _ => "jira.dashboard",
+    };
+    Ok(envelope(&format!("jira.dashboard.{name}"), kind)
+        .request(request)
+        .data(data))
 }
 
 fn gadget(c: &Client, cmd: GadgetCmd) -> Result<(&'static str, Value, Value)> {

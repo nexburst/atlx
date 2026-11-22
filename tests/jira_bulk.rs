@@ -162,9 +162,13 @@ fn lookup_takes_only_exact_emails() {
         Who::Email("bo@example.com".into()),
     ];
     let out = bulk::lookup(&srv.client(), &who).unwrap();
-    assert_eq!(out["items"][0]["user"]["accountId"], "abc");
-    assert_eq!(out["items"][1]["found"], false);
-    assert_eq!(out["items"][2]["user"]["accountId"], "y");
+    assert_eq!(out["items"][0]["data"]["accountId"], "abc");
+    assert_eq!(out["items"][1]["ok"], false);
+    assert_eq!(out["items"][2]["data"]["accountId"], "y");
+    assert_eq!(
+        out["summary"],
+        json!({"requested": 3, "succeeded": 2, "failed": 1})
+    );
     let r = &srv.requests()[0];
     assert_eq!(r.path, "/rest/api/3/user/bulk");
     assert_eq!(r.query_param("accountId").as_deref(), Some("abc"));

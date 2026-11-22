@@ -233,13 +233,28 @@ pub fn user(c: &Client, account: Option<&str>) -> Result<Value> {
     Ok(profile(&v))
 }
 
+/// A looked-up user under twg's names, beside what `user search` prints.
+fn looked_up(u: &Value) -> Value {
+    let mut out = user_row(u);
+    for k in ["username", "fullName", "displayName"] {
+        out[k] = u["displayName"].clone();
+    }
+    out["active"] = u["active"].clone();
+    out["accountStatus"] = match u["active"].as_bool() {
+        Some(true) => "active".into(),
+        Some(false) => "inactive".into(),
+        None => "unknown".into(),
+    };
+    out
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Who {
     Account(String),
     Email(String),
 }
 
-/// `{items: [{input, found, user|reason}]}`. An email only matches
+/// `{items: [{input, ok, data|error}], summary}`. An email only matches
 /// the one user who shows exactly that address: search matches prefixes, and
 /// a hidden address can't be confirmed.
 pub fn lookup(c: &Client, who: &[Who]) -> Result<Value> {
@@ -301,11 +316,14 @@ pub fn lookup(c: &Client, who: &[Who]) -> Result<Value> {
             }
         };
         items.push(match found {
-            Ok(u) => json!({"input": input, "found": true, "user": user_row(&u)}),
-            Err(reason) => json!({"input": input, "found": false, "reason": reason}),
+            Ok(u) => json!({"input": input, "ok": true, "data": looked_up(&u)}),
+            Err(reason) => json!({"input": input, "ok": false, "error": {"message": reason}}),
         });
     }
-    let mut out = json!({"items": items});
+    let good = items.iter().filter(|i| i["ok"] == true).count();
+    let summary =
+        json!({"requested": items.len(), "succeeded": good, "failed": items.len() - good});
+    let mut out = json!({"items": items, "summary": summary});
     strip_media(&mut out);
     Ok(out)
 }

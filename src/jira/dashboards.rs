@@ -43,7 +43,7 @@ pub fn query(c: &Client, o: &Search) -> Result<Value> {
         return Err(usage("--first must be at least 1"));
     }
     let mut all: Vec<Value> = Vec::new();
-    let (mut total, mut last) = (None, true);
+    let (mut total, mut last, mut first_page) = (None, true, None);
     while all.len() < o.limit {
         let start = (o.start + all.len()).to_string();
         let size = (o.limit - all.len()).min(100).to_string();
@@ -67,6 +67,7 @@ pub fn query(c: &Client, o: &Search) -> Result<Value> {
             .as_array()
             .ok_or_else(|| anyhow!("Jira returned no dashboard list"))?;
         all.extend(page.iter().cloned());
+        first_page = first_page.or_else(|| v["self"].as_str().map(str::to_string));
         total = v["total"].as_u64();
         last = page.is_empty() || v["isLast"].as_bool() != Some(false);
         if last {
@@ -75,6 +76,7 @@ pub fn query(c: &Client, o: &Search) -> Result<Value> {
     }
     all.truncate(o.limit);
     Ok(clean(json!({
+        "self": first_page,
         "values": all,
         "startAt": o.start,
         "maxResults": o.limit,

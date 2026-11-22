@@ -458,22 +458,31 @@ pub(super) fn worklog(c: &Client, cmd: WorklogCmd) -> Result<Value> {
         }
         WorklogCmd::Changed { since, expand } => {
             let since = millis(since.as_deref())?;
-            Ok(envelope("jira.workitem.worklog.changed", KIND)
-                .request(json!({"site": site, "since": since}))
-                .data(worklogs::feed(
-                    c,
-                    worklogs::Feed::Changed,
-                    since,
-                    expand.as_deref(),
-                )?))
+            let page = worklogs::feed(c, worklogs::Feed::Changed, since, expand.as_deref())?;
+            Ok(feed_out("changed", site, since, page))
         }
         WorklogCmd::Deleted { since } => {
             let since = millis(since.as_deref())?;
-            Ok(envelope("jira.workitem.worklog.deleted", KIND)
-                .request(json!({"site": site, "since": since}))
-                .data(worklogs::feed(c, worklogs::Feed::Deleted, since, None)?))
+            let page = worklogs::feed(c, worklogs::Feed::Deleted, since, None)?;
+            Ok(feed_out("deleted", site, since, page))
         }
     }
+}
+
+/// twg prints the IDs as `data` and where the page ends as `meta.sync`.
+fn feed_out(kind: &str, site: impl Into<Value>, since: Option<i64>, page: Value) -> Value {
+    let sync = json!({
+        "type": kind,
+        "since": page["since"],
+        "until": page["until"],
+        "lastPage": page["lastPage"],
+    });
+    let site: Value = site.into();
+    let rows = page["values"].as_array().cloned().unwrap_or_default();
+    envelope(&format!("jira.workitem.worklog.{kind}"), "jira.worklog")
+        .request(json!({"site": site, "since": since}))
+        .meta("sync", sync)
+        .data(rows.into())
 }
 
 /// `add`, or `update` when there is a worklog ID.

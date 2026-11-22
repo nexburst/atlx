@@ -1,6 +1,6 @@
 //! `atlx user`: Atlassian users.
 
-use crate::client::{ApiError, Client, ErrorKind};
+use crate::client::{ApiError, Client};
 use crate::jira::{self, bulk::Who};
 use crate::output::envelope::envelope;
 use anyhow::Result;
@@ -114,6 +114,7 @@ pub(crate) fn user_cmd(c: &Client, cmd: UserCmd) -> Result<Value> {
         } => {
             let id = account_id.or(account);
             Ok(envelope("user.get", "user")
+                .meta("resultCount", 1)
                 .request(json!({"site": jira::site(c), "accountId": id}))
                 .data(jira::bulk::user(c, id.as_deref())?))
         }
@@ -124,6 +125,20 @@ pub(crate) fn user_cmd(c: &Client, cmd: UserCmd) -> Result<Value> {
             input_type,
             strict,
         } => {
+            let given: Vec<&String> = identifiers
+                .iter()
+                .chain(&account_id)
+                .chain(&email)
+                .collect();
+            let request = json!({
+                "site": null,
+                "identifiers": given,
+                "inputType": match input_type {
+                    InputType::Auto => "auto",
+                    InputType::Email => "email",
+                    InputType::AccountId => "account-id",
+                },
+            });
             let who: Vec<Who> = identifiers
                 .into_iter()
                 .map(|s| match input_type {
@@ -136,18 +151,20 @@ pub(crate) fn user_cmd(c: &Client, cmd: UserCmd) -> Result<Value> {
                 .collect();
             let data = jira::bulk::lookup(c, &who)?;
             let items = data["items"].as_array().map_or(&[][..], Vec::as_slice);
-            let missed = items.iter().filter(|i| i["found"] != true).count();
+            let missed = items.iter().filter(|i| i["ok"] != true).count();
+            // As twg: print the result either way, and fail only when nobody
+            // was found, or anyone wasn't under --strict.
             if missed > 0 && (strict || missed == items.len()) {
-                let message = format!("found {} of {} users", items.len() - missed, items.len());
-                return Err(ApiError::new(ErrorKind::NotFound, message).into());
+                crate::cli::util::mark_failed();
             }
-            if missed > 0 {
-                crate::cli::util::mark_partial();
-            }
-            Ok(envelope("user.bulk-lookup", "user")
-                .request(json!({"site": jira::site(c), "count": who.len()}))
-                .meta("resultCount", items.len() - missed)
-                .data(data.clone()))
+            let found = items.len() - missed;
+            // Not `data()` with the batch: user lookups have no acquisition.
+            let mut out = envelope("user.bulk-lookup", "user")
+                .request(request)
+                .meta("resultCount", found)
+                .data(Value::Null);
+            out["data"] = data;
+            Ok(out)
         }
     }
 }

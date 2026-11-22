@@ -125,6 +125,7 @@ pub(super) fn get(c: &Client, a: GetArgs) -> Result<Value> {
     let ids = refs(a.keys.iter().chain(&a.id));
     let mut fields = a.fields.as_deref().map(jira::csv).unwrap_or_default();
     fields.extend(a.field);
+    let given_fields = a.full || !fields.is_empty();
     if a.full {
         fields = vec!["*all".into()];
     } else if fields.is_empty() {
@@ -140,6 +141,7 @@ pub(super) fn get(c: &Client, a: GetArgs) -> Result<Value> {
     let data = bulk::fetch(c, &ids, &o)?;
     let failed = non_empty(&data["missing"]) || non_empty(&data["errors"]);
     let none = !non_empty(&data["issues"]);
+    let rows = batch_rows(&ids, &data);
     if failed && (a.strict || none) {
         let mut why = data["missing"].to_string();
         if non_empty(&data["errors"]) {
@@ -154,9 +156,65 @@ pub(super) fn get(c: &Client, a: GetArgs) -> Result<Value> {
     if failed {
         mark_partial();
     }
-    Ok(envelope("jira.workitem.bulk-get", "jira.issue")
-        .request(json!({"site": jira::site(c), "ids": ids, "fields": fields}))
-        .data(data))
+    let mut request = json!({"site": jira::site(c), "issueIdsOrKeys": ids});
+    if given_fields {
+        request["fields"] = json!(fields);
+    }
+    let mut env = envelope("jira.workitem.bulk-get", "jira.workitem").request(request);
+    if failed {
+        env = env.meta("partial", true);
+    }
+    Ok(env.data(rows))
+}
+
+/// twg's `{items, summary}` of a bulk read: an item per ID, in the order
+/// given. A moved work item answers under its new key, so it can only be
+/// tied to its old one when it's the only one unaccounted for.
+fn batch_rows(ids: &[String], data: &Value) -> Value {
+    let list = |k: &str| data[k].as_array().cloned().unwrap_or_default();
+    let (mut issues, missing) = (list("issues"), list("missing"));
+    let mut seen = std::collections::HashSet::new();
+    let mut items: Vec<Value> = Vec::new();
+    let mut unmatched = Vec::new();
+    for id in ids.iter().filter(|id| seen.insert(id.to_ascii_uppercase())) {
+        let at = issues.iter().position(|issue| {
+            [&issue["key"], &issue["id"]]
+                .iter()
+                .any(|v| v.as_str().is_some_and(|s| s.eq_ignore_ascii_case(id)))
+        });
+        items.push(match at {
+            Some(i) => json!({"input": id, "ok": true, "data": issues.remove(i)}),
+            None => {
+                unmatched.push(items.len());
+                json!({"input": id, "ok": false, "error": {"message": "Jira didn't return it"}})
+            }
+        });
+    }
+    if missing.is_empty() && unmatched.len() == issues.len() {
+        for (at, issue) in unmatched.iter().zip(issues) {
+            let input = if unmatched.len() == 1 {
+                items[*at]["input"].clone()
+            } else {
+                issue["key"].clone()
+            };
+            items[*at] = json!({"input": input, "ok": true, "data": issue});
+        }
+    } else {
+        // Still work items that were asked for: don't drop them.
+        for issue in issues {
+            items.push(json!({"input": issue["key"], "ok": true, "data": issue}));
+        }
+    }
+    let good = items.iter().filter(|i| i["ok"] == true).count();
+    let summary = json!({
+        "requested": seen.len(),
+        "returned": good,
+        "succeeded": good,
+        "failed": items.len() - good,
+        "omitted": 0,
+        "truncated": 0,
+    });
+    json!({"items": items, "summary": summary})
 }
 
 pub(super) fn create(c: &Client, a: CreateArgs) -> Result<Value> {
@@ -203,7 +261,8 @@ pub(super) fn property(c: &Client, cmd: PropertyCmd) -> Result<Value> {
         PropertyCmd::Query { issue_id } => {
             let issue = issue_ref(&issue_id);
             let data = bulk::properties(c, &issue)?;
-            ("jira.workitem.property.query", issue, None, data)
+            let keys = data["keys"].as_array().cloned().unwrap_or_default();
+            ("jira.workitem.property.query", issue, None, keys.into())
         }
         PropertyCmd::Get(at) => {
             let issue = issue_ref(&at.issue_id);
@@ -237,7 +296,7 @@ pub(super) fn property(c: &Client, cmd: PropertyCmd) -> Result<Value> {
             )
         }
     };
-    Ok(envelope(name, "jira.issue.property")
+    Ok(envelope(name, "jira.issue-property")
         .request(json!({"site": jira::site(c), "issueId": issue, "propertyKey": key}))
         .data(data))
 }

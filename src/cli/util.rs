@@ -36,6 +36,18 @@ pub(crate) fn body_arg(inline: Option<String>, file: Option<String>) -> Result<O
 /// [`crate::client::exit::PARTIAL`] after printing the result.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
 
+static FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Makes the run exit 1 after its result is printed.
+pub(crate) fn mark_failed() {
+    FAILED.store(true, Ordering::SeqCst);
+}
+
+/// Whether the printed result is a failure (and clears the flag).
+pub(crate) fn take_failed() -> bool {
+    FAILED.swap(false, Ordering::SeqCst)
+}
+
 /// Whether the last batch read had failed items (and clears the flag).
 pub(crate) fn take_partial() -> bool {
     PARTIAL.swap(false, Ordering::SeqCst)

@@ -660,12 +660,13 @@ pub(super) fn space_restore(c: &Client, a: ConfirmedSpace) -> Result<Value> {
 }
 
 pub(super) fn issue_types(c: &Client, a: IssueTypesArgs) -> Result<Value> {
-    let (key, id) = jira::project_key_id(c, &space_ref(&a.id_or_key))?;
-    let (data, _) = jira::issue_types(c, &id, None, a.first)?;
+    let (space, types) = admin::space_issue_types(c, &space_ref(&a.id_or_key), a.first)?;
+    let key = space["key"].clone();
+    let data = json!({"space": space, "issueTypes": types});
     out(
         c,
         "space.issue-types",
-        "workitem-type",
+        "issue-type",
         json!({"idOrKey": key, "first": a.first}),
         data,
     )
@@ -676,7 +677,7 @@ pub(super) fn status(c: &Client, cmd: StatusCmd) -> Result<Value> {
     let data = admin::space_statuses(c, &t.id_or_key)?;
     out(
         c,
-        "space.status.query",
+        "space.statuses",
         "status",
         json!({"idOrKey": t.id_or_key}),
         data,
@@ -701,8 +702,8 @@ pub(super) fn notification_scheme(c: &Client, cmd: NotificationSchemeCmd) -> Res
     out(
         c,
         "space.notification-scheme.get",
-        "notification-scheme",
-        json!({"key": key}),
+        "space-notification-scheme",
+        json!({"key": key, "projectKeyOrId": key}),
         data,
     )
 }
@@ -716,7 +717,7 @@ pub(super) fn versions(c: &Client, cmd: VersionsCmd) -> Result<Value> {
         after,
         limit,
     } = cmd;
-    let page = admin::versions(
+    let mut page = admin::versions(
         c,
         &key,
         &admin::VersionQuery {
@@ -727,10 +728,17 @@ pub(super) fn versions(c: &Client, cmd: VersionsCmd) -> Result<Value> {
             limit,
         },
     )?;
-    let request = json!({"site": jira::site(c), "key": key, "limit": limit});
+    let request = json!({
+        "site": jira::site(c),
+        "projectIdOrKey": key,
+        "key": key,
+        "maxResults": limit,
+        "limit": limit,
+    });
+    page.data = page.named("versions");
     Ok(offset_envelope(
         "jira.space.versions.query",
-        "jira.version",
+        "jira.space-version",
         request,
         page,
     ))
@@ -817,7 +825,7 @@ pub(super) fn component(c: &Client, cmd: ComponentCmd) -> Result<Value> {
     let (verb, request, data) = match cmd {
         ComponentCmd::Query { key } => {
             let data = admin::components(c, &key)?;
-            ("query", json!({"key": key}), data)
+            ("query", json!({"key": key, "projectIdOrKey": key}), data)
         }
         ComponentCmd::Get { id } => {
             let data = admin::component_get(c, &id)?;
@@ -847,7 +855,11 @@ pub(super) fn component(c: &Client, cmd: ComponentCmd) -> Result<Value> {
     out(
         c,
         &format!("space.component.{verb}"),
-        "component",
+        if verb == "query" {
+            "space-component"
+        } else {
+            "component"
+        },
         request,
         data,
     )
@@ -899,9 +911,11 @@ pub(super) fn filter(c: &Client, cmd: FilterCmd) -> Result<Value> {
                 },
             )?;
             let request = json!({"site": jira::site(c), "filterName": filter_name, "first": first});
+            let mut page = page;
+            page.data = page.named("values");
             return Ok(offset_envelope(
                 "jira.filter.query",
-                "jira.filter",
+                "jira.filter-search-result",
                 request,
                 page,
             ));
@@ -1054,11 +1068,10 @@ pub(super) fn filter(c: &Client, cmd: FilterCmd) -> Result<Value> {
             ("subscription.query", id, data)
         }
     };
-    out(
-        c,
-        &format!("filter.{verb}"),
-        "filter",
-        json!({"id": id}),
-        data,
-    )
+    let kind = match verb {
+        "share.query" => "filter-share-permission",
+        "subscription.query" => "filter-subscription",
+        _ => "filter",
+    };
+    out(c, &format!("filter.{verb}"), kind, json!({"id": id}), data)
 }

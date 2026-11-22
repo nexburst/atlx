@@ -484,7 +484,12 @@ pub(super) fn url(cfg: &Config, a: &UrlArgs) -> Result<Value> {
         cfg.bitbucket.workspace.as_deref(),
     )?;
     let url = repos::web_url(&path, a.path.as_deref(), a.git_ref.as_deref(), a.line)?;
-    Ok(json!({"url": url}))
+    let mut parts = path.trim_start_matches("/repositories/").split('/');
+    let decode =
+        |part: &str| urlencoding::decode(part).map_or(part.to_string(), |s| s.into_owned());
+    let workspace = decode(parts.next().unwrap_or_default());
+    let repo = decode(parts.next().unwrap_or_default());
+    Ok(json!({"workspace": workspace, "repo": repo, "url": url}))
 }
 
 pub(super) fn contributors(c: &Client, path: PathOf, a: ContributorsArgs) -> Result<Value> {
