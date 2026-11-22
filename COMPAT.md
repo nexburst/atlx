@@ -96,6 +96,7 @@ repositories, so:
 | Jira `space` administration, `filter` | Inferred, not run live ([#26](https://github.com/nexburst/atlx/issues/26)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content versions`, `history`, `labels add\|remove\|watch\|unwatch`, `attachments`, `body-formats`, `get --format url` | Inferred, not run live ([#28](https://github.com/nexburst/atlx/issues/28)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Confluence `content comments` threads | Inferred, not run live ([#29](https://github.com/nexburst/atlx/issues/29)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
+| Confluence content and space lifecycle, space `tree` | Inferred, not run live ([#30](https://github.com/nexburst/atlx/issues/30)) | Built from the public REST payloads and tested against mock responses only; the width and emoji property values are unverified too |
 | Bitbucket pull request lifecycle, `inbox` | Inferred, not run live ([#32](https://github.com/nexburst/atlx/issues/32)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Bitbucket `pipeline` actions, `deployment` | Inferred, not run live ([#34](https://github.com/nexburst/atlx/issues/34)) | Built from the public REST payloads and tested against mock responses only; key paths have not been compared with twg |
 | Jira `workitem link query` | Live, but the site's work items have no links, so only the empty list was compared. With links, the REST `issuelinks` entries are inferred | Partly verified |
@@ -337,7 +338,7 @@ inferred rows.
 
 ## Confluence
 
-121 twg commands: ✅ 30, 🟡 6, 📋 49, ⛔ 36.
+121 twg commands: ✅ 40, 🟡 9, 📋 35, ⛔ 37.
 
 | twg command | atlx | Notes |
 | --- | --- | --- |
@@ -359,7 +360,7 @@ inferred rows.
 | `confluence content approvals request` | ⛔ | page approvals are only in the GraphQL gateway |
 | `confluence content approvals request-changes` | ⛔ | page approvals are only in the GraphQL gateway |
 | `confluence content approvals reviewers update` | ⛔ | page approvals are only in the GraphQL gateway |
-| `confluence content archive` | 📋 | #30 |
+| `confluence content archive` | ✅ | #30; pages; `--wait` is an atlx extra |
 | `confluence content attachments delete` | ✅ | `--purge` is an atlx extra |
 | `confluence content attachments download` | ✅ | without `--out`, hidden or otherwise unsafe server file names are refused |
 | `confluence content attachments get` | ✅ | |
@@ -375,9 +376,9 @@ inferred rows.
 | `confluence content comments resolve` | 🟡 | #13: inline comments only; REST has no resolution for footer comments |
 | `confluence content comments update` | ✅ | #29 |
 | `confluence content convert` | 📋 | #13; v1 contentbody/convert |
-| `confluence content copy` | 📋 | #30 |
-| `confluence content create` | 🟡 | missing `--content-width`, `--private`, `--reference-space`, `--synced-container-url`, `--title-emoji` (#30) |
-| `confluence content delete-draft` | 📋 | #30 |
+| `confluence content copy` | ✅ | #30; the `--copy-*` flags are atlx extras |
+| `confluence content create` | 🟡 | missing `--synced-container-url` (#13); folders and other types are not created. Width and emoji are content properties set after creating |
+| `confluence content delete-draft` | 🟡 | #13: only drafts that were never published; refuses otherwise |
 | `confluence content disable-public-link` | ⛔ | public links are only in the GraphQL gateway |
 | `confluence content enable-public-link` | ⛔ | public links are only in the GraphQL gateway |
 | `confluence content export` | ⛔ | no public PDF/Word export endpoint |
@@ -396,15 +397,15 @@ inferred rows.
 | `confluence content list-available-statuses` | 📋 | #13 (unscheduled); v1 content states |
 | `confluence content macros resolve` | 📋 | #13 (unscheduled); v1 async body conversion, to confirm |
 | `confluence content macros resolve-status` | 📋 | #13 (unscheduled); v1 async body conversion, to confirm |
-| `confluence content move` | 📋 | #30 |
+| `confluence content move` | ✅ | #30; `--target` with `--position` is an atlx extra |
 | `confluence content permissions add` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content permissions check` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content permissions clear` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content permissions list` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content permissions remove` | 📋 | #13 (unscheduled); v1 content restrictions |
 | `confluence content permissions replace` | 📋 | #13 (unscheduled); v1 content restrictions |
-| `confluence content publish` | 📋 | #30; v2 draft to current |
-| `confluence content purge` | 📋 | #30; atlx today: `confluence content delete --purge` |
+| `confluence content publish` | ✅ | #30 |
+| `confluence content purge` | 🟡 | #13: pages and blog posts only; checks that the content is in the trash |
 | `confluence content reactions add` | ⛔ | reactions are only in the GraphQL gateway |
 | `confluence content reactions list` | ⛔ | reactions are only in the GraphQL gateway |
 | `confluence content reactions remove` | ⛔ | reactions are only in the GraphQL gateway |
@@ -418,12 +419,12 @@ inferred rows.
 | `confluence content tasks get` | 📋 | #13 (unscheduled); v2 tasks |
 | `confluence content tasks list` | 📋 | #13 (unscheduled); v2 tasks |
 | `confluence content tasks reopen` | 📋 | #13 (unscheduled); v2 tasks |
-| `confluence content trash` | 📋 | #30; atlx today: `confluence content delete` |
-| `confluence content unarchive` | 📋 | #30 |
+| `confluence content trash` | 🟡 | #13: pages and blog posts only |
+| `confluence content unarchive` | ⛔ | no public REST endpoint |
 | `confluence content unstar` | ⛔ | starring is only in the GraphQL gateway |
-| `confluence content untrash` | 📋 | #30 |
+| `confluence content untrash` | ✅ | #30 |
 | `confluence content unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
-| `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#30). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
+| `confluence content update` | 🟡 | missing `--content-width`, `--header-image-file`, `--header-image-file-id`, `--header-image-position`, `--header-image-url`, `--reference-space`, `--remove-header-image` (#13). `--context-content`/`--context-content-file` are not planned: they only apply to whiteboard and database bodies, which public REST doesn't return. `--edits`/`--edits-file` take twg's operations (see [Confluence targeted edits](#confluence-targeted-edits)) |
 | `confluence content versions diff` | ✅ | computed locally from the two bodies |
 | `confluence content versions get` | ✅ | |
 | `confluence content versions list` | ✅ | |
@@ -437,9 +438,9 @@ inferred rows.
 | `confluence remix maui get` | ⛔ | AI generation (Atlassian AI) |
 | `confluence search query` | ✅ |  |
 | `confluence search text` | ✅ |  |
-| `confluence space archive` | 📋 | #30 |
-| `confluence space create` | 📋 | #30 |
-| `confluence space delete` | 📋 | #30 |
+| `confluence space archive` | ✅ | #30 |
+| `confluence space create` | 🟡 | missing `--role-assignments-file` (#13) |
+| `confluence space delete` | ✅ | #30; permanent; takes only a key, ID, ARI or space URL, never a name or a content URL |
 | `confluence space get` | ✅ | `--labels` adds a `labels` array (#18) |
 | `confluence space instructions get` | ⛔ | Rovo space instructions |
 | `confluence space instructions set` | ⛔ | Rovo space instructions |
@@ -454,16 +455,16 @@ inferred rows.
 | `confluence space role mode` | 📋 | #13 (unscheduled); v2 space roles |
 | `confluence space role update` | 📋 | #13 (unscheduled); v2 space roles |
 | `confluence space star` | ⛔ | starring is only in the GraphQL gateway |
-| `confluence space unarchive` | 📋 | #30 |
+| `confluence space unarchive` | ✅ | #30 |
 | `confluence space unstar` | ⛔ | starring is only in the GraphQL gateway |
 | `confluence space unwatch` | 📋 | #13 (unscheduled); v1 user/watch |
-| `confluence space update` | 📋 | #30 |
+| `confluence space update` | ✅ | #30; `--homepage` is an atlx extra |
 | `confluence space watch` | 📋 | #13 (unscheduled); v1 user/watch |
 | `confluence templates get` | 📋 | #13 (unscheduled); v1 templates |
 | `confluence templates list` | 📋 | #13 (unscheduled); v1 templates |
-| `confluence tree` | 🟡 | missing `--type`; `--target` and `[ref]` take page IDs or URLs only, space targets are #30 |
+| `confluence tree` | ✅ | #30; pages or whole spaces, depth 10, at most 500 nodes then `truncated`; `--type` keeps the containers of matches |
 | `confluence content children` | ➕ | direct children of a page |
-| `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge` (#30); no confirmation is asked and `--yes` is ignored (#18) |
+| `confluence content delete` | ➕ | twg 1.4.4 splits this into `trash` and `purge`, which need `--yes` (#30); here no confirmation is asked and `--yes` is ignored (#18) |
 | `confluence content labels` | ➕ | old form `labels <ref>` of `confluence content labels list --id <ref>` (#18); hidden; prints a deprecation note in text mode on a terminal; removed in 0.3 |
 
 ## Bitbucket

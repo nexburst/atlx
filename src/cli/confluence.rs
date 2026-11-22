@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 mod comments;
+mod lifecycle;
 
 pub(crate) use comments::ConfCommentCmd;
 
@@ -34,15 +35,18 @@ pub(crate) enum ConfCmd {
     },
     /// Page ancestors and descendant tree
     Tree {
-        /// Page ID or URL (same as --target)
+        /// Page or space (same as --target)
         #[arg(value_name = "ref", conflicts_with = "target")]
         reference: Option<String>,
-        /// Page ID or URL
+        /// Page ID or URL, or space key, ID or URL
         #[arg(long)]
         target: Option<String>,
-        /// Max descendant depth (default 2, capped at 5)
+        /// Max descendant depth (default 2, capped at 10); at most 500 nodes
         #[arg(long, default_value_t = 2)]
         depth: usize,
+        /// Only this type, with whatever contains it
+        #[arg(long = "type", value_enum)]
+        node_type: Option<confluence::tree::NodeType>,
     },
 }
 
@@ -135,6 +139,18 @@ pub(crate) enum ContentCmd {
         format: TextFormat,
         #[arg(long)]
         draft: bool,
+        /// Only you can see and edit it
+        #[arg(long)]
+        private: bool,
+        /// narrow, wide or max
+        #[arg(long, value_enum)]
+        content_width: Option<confluence::lifecycle::Width>,
+        /// An emoji, or its hex code point such as 1f44d
+        #[arg(long)]
+        title_emoji: Option<String>,
+        /// Space key or ID for looking up --parent-id by exact title
+        #[arg(long)]
+        reference_space: Option<String>,
         /// Accepted for twg compatibility
         #[arg(long, short)]
         yes: bool,
@@ -230,6 +246,22 @@ pub(crate) enum ContentCmd {
         #[arg(long)]
         purge: bool,
     },
+    /// Move content under or beside other content
+    Move(lifecycle::MoveArgs),
+    /// Copy content under a parent or to a space
+    Copy(lifecycle::CopyArgs),
+    /// Move content to the trash
+    Trash(lifecycle::ActArgs),
+    /// Bring content back from the trash
+    Untrash(lifecycle::ActArgs),
+    /// Delete trashed content for good
+    Purge(lifecycle::ActArgs),
+    /// Archive a page
+    Archive(lifecycle::ArchiveArgs),
+    /// Publish a draft
+    Publish(lifecycle::PublishArgs),
+    /// Delete a draft that was never published
+    DeleteDraft(lifecycle::DraftArgs),
     /// Version history of a page or blog post
     Versions {
         #[command(subcommand)]
@@ -527,6 +559,16 @@ pub(crate) enum SpaceCmd {
     },
     /// Current user's personal space
     Me,
+    /// Create a space
+    Create(lifecycle::SpaceCreateArgs),
+    /// Change a space
+    Update(lifecycle::SpaceUpdateArgs),
+    /// Archive a space
+    Archive(lifecycle::SpaceRef),
+    /// Bring an archived space back
+    Unarchive(lifecycle::SpaceRef),
+    /// Delete a space and everything in it, for good
+    Delete(lifecycle::SpaceRef),
 }
 
 pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
@@ -683,8 +725,20 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 body_file,
                 format,
                 draft,
+                private,
+                content_width,
+                title_emoji,
+                reference_space,
                 ..
             } => {
+                use confluence::lifecycle as life;
+                let emoji = title_emoji.as_deref().map(life::emoji_code).transpose()?;
+                let parent_id = match (parent_id, &reference_space) {
+                    (Some(p), Some(_)) => {
+                        Some(life::exact_content(c, &p, reference_space.as_deref())?)
+                    }
+                    (p, _) => p,
+                };
                 let body = body_arg(body, body_file)?.unwrap_or_default();
                 let data = confluence::create(
                     c,
@@ -696,8 +750,22 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                         format,
                         parent: parent_id.as_deref(),
                         draft,
+                        private,
                     },
                 )?;
+                if emoji.is_some() || content_width.is_some() {
+                    let id = data["id"].as_str().unwrap_or_default();
+                    // It exists by now: say so, or a retry makes a second one.
+                    life::set_appearance(c, content_type, id, emoji.as_deref(), content_width)
+                        .map_err(|e| {
+                            let mut err = ApiError::from_anyhow(&e);
+                            err.message = format!(
+                                "created {id}, but could not set its width or emoji (don't create it again): {}",
+                                err.message
+                            );
+                            anyhow::Error::from(err)
+                        })?;
+                }
                 envelope("confluence.content.create", "confluence.content")
                     .request(json!({"spaceId": space_id, "title": title, "parentId": parent_id}))
                     .data(data)
@@ -842,6 +910,14 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
                 )
                 .into());
             }
+            ContentCmd::Move(a) => lifecycle::move_content(c, a)?,
+            ContentCmd::Copy(a) => lifecycle::copy(c, a)?,
+            ContentCmd::Trash(a) => lifecycle::trash(c, a)?,
+            ContentCmd::Untrash(a) => lifecycle::untrash(c, a)?,
+            ContentCmd::Purge(a) => lifecycle::purge(c, a)?,
+            ContentCmd::Archive(a) => lifecycle::archive(c, a)?,
+            ContentCmd::Publish(a) => lifecycle::publish(c, a)?,
+            ContentCmd::DeleteDraft(a) => lifecycle::delete_draft(c, a)?,
             ContentCmd::Delete {
                 reference,
                 yes: _,
@@ -899,17 +975,33 @@ pub(crate) fn confluence_cmd(c: &client::Client, cmd: ConfCmd) -> Result<Out> {
         ConfCmd::Space { cmd: SpaceCmd::Me } => envelope("confluence.space.me", "confluence.space")
             .request(json!({}))
             .data(confluence::space_me(c)?),
+        ConfCmd::Space {
+            cmd: SpaceCmd::Create(a),
+        } => lifecycle::space_create(c, a)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Update(a),
+        } => lifecycle::space_update(c, a)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Archive(a),
+        } => lifecycle::space_status(c, a, true)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Unarchive(a),
+        } => lifecycle::space_status(c, a, false)?,
+        ConfCmd::Space {
+            cmd: SpaceCmd::Delete(a),
+        } => lifecycle::space_delete(c, a)?,
         ConfCmd::Tree {
             reference,
             target,
             depth,
+            node_type,
         } => {
             let Some(reference) = target.or(reference) else {
-                return Err(ApiError::usage("pass a page ID or URL, or --target").into());
+                return Err(ApiError::usage("pass a page or space, or --target").into());
             };
             envelope("confluence.tree", "confluence.tree")
                 .request(json!({"target": reference, "depth": depth}))
-                .data(confluence::tree(c, &reference, depth)?)
+                .data(confluence::tree::tree(c, &reference, depth, node_type)?)
         }
     };
     Ok(Out::Data(data))
@@ -1235,6 +1327,43 @@ mod tests {
                 assert_eq!(cursor.as_deref(), Some("cur%3D"));
             }
             _ => panic!("unexpected parsed command"),
+        }
+    }
+
+    #[test]
+    fn parses_content_and_space_lifecycle() {
+        for ok in [
+            "atlx confluence content move 12345 --parent-id 67890 --yes",
+            "atlx confluence content move 12345 --target 67890 --position before --yes",
+            "atlx confluence content copy 12345 --parent-content-id 67890 --title Copy --yes",
+            "atlx confluence content copy 12345 --destination-space ENG --copy-labels --yes",
+            "atlx confluence content trash 12345 --yes",
+            "atlx confluence content untrash 12345 --yes",
+            "atlx confluence content purge 12345 --yes",
+            "atlx confluence content archive 12345 --wait --yes",
+            "atlx confluence content publish 12345 --content-type page --title T --yes",
+            "atlx confluence content delete-draft 12345 --yes",
+            "atlx confluence content create --space-id ENG --content-type page --title T --private --content-width wide --title-emoji 1f44d",
+            "atlx confluence space create --key NEW --name New --dry-run",
+            "atlx confluence space update ENG --name New --yes",
+            "atlx confluence space archive --key ENG --yes",
+            "atlx confluence space unarchive --id 99 --yes",
+            "atlx confluence space delete ENG --yes",
+            "atlx confluence tree --target ENG --type whiteboard --depth 10",
+        ] {
+            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
+                panic!("{ok}: {e}");
+            }
+        }
+        for bad in [
+            "atlx confluence content move 1 --parent-id 2 --before 3",
+            "atlx confluence content copy 1 --yes",
+            "atlx confluence space delete ENG --key OTHER",
+        ] {
+            assert!(
+                Cli::try_parse_from(shell_words(bad)).is_err(),
+                "expected error for: {bad}"
+            );
         }
     }
 

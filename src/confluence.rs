@@ -16,7 +16,9 @@ pub mod edits;
 pub mod formats;
 pub mod history;
 pub mod labels;
+pub mod lifecycle;
 pub mod sections;
+pub mod tree;
 
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
@@ -462,6 +464,8 @@ pub struct NewContent<'a> {
     pub format: TextFormat,
     pub parent: Option<&'a str>,
     pub draft: bool,
+    /// Only the creator can see and edit it.
+    pub private: bool,
 }
 
 /// `confluence content create`
@@ -478,7 +482,13 @@ pub fn create(c: &Client, n: NewContent) -> Result<Value> {
         }
         req["parentId"] = content_id(p)?.into();
     }
-    let v = c.post(&format!("/api/v2/{}", n.content_type.collection()), &req)?;
+    let q: &[(&str, &str)] = if n.private {
+        &[("private", "true")]
+    } else {
+        &[]
+    };
+    let path = format!("/api/v2/{}", n.content_type.collection());
+    let v = c.request("POST", &path, q, Some(&req))?;
     Ok(with_links(c, v))
 }
 
@@ -618,82 +628,6 @@ pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>)
         let mut p = p.clone();
         p["externalUrl"] = optional_content_url(c, &p);
         p
-    }))
-}
-
-const MAX_TREE_DEPTH: usize = 5;
-
-fn fetch_children_all(c: &Client, page_id: &str) -> Result<Vec<Value>> {
-    let mut out = Vec::new();
-    let mut cursor: Option<String> = None;
-    loop {
-        let mut q = vec![("limit", "250")];
-        if let Some(ref cur) = cursor {
-            q.push(("cursor", cur.as_str()));
-        }
-        let v = match c.get(&format!("/api/v2/pages/{}/children", enc(page_id)), &q) {
-            Ok(v) => v,
-            Err(e) if e.to_string().contains("HTTP 404") => return Ok(Vec::new()),
-            Err(e) => return Err(e),
-        };
-        out.extend(v["results"].as_array().into_iter().flatten().cloned());
-        match next_cursor(&v) {
-            Value::String(next) => cursor = Some(next),
-            _ => break,
-        }
-    }
-    Ok(out)
-}
-
-fn build_tree_nodes(c: &Client, page_id: &str, depth: usize) -> Result<Vec<Value>> {
-    if depth == 0 {
-        return Ok(Vec::new());
-    }
-    let items = fetch_children_all(c, page_id)?;
-    let mut nodes = Vec::with_capacity(items.len());
-    for item in items {
-        let child_id = item["id"].as_str().unwrap_or_default();
-        let is_page = item["type"].as_str().is_none_or(|t| t == "page");
-        let grandchildren = if depth > 1 && is_page && !child_id.is_empty() {
-            build_tree_nodes(c, child_id, depth - 1)?
-        } else {
-            Vec::new()
-        };
-        nodes.push(json!({
-            "id": item["id"],
-            "title": item["title"],
-            "type": item["type"],
-            "status": item["status"],
-            "children": grandchildren,
-        }));
-    }
-    Ok(nodes)
-}
-
-/// `confluence tree`
-pub fn tree(c: &Client, reference: &str, depth: usize) -> Result<Value> {
-    let id = content_id(reference)?;
-    let depth = depth.min(MAX_TREE_DEPTH);
-    let page = c.get(&format!("/api/v2/pages/{}", enc(&id)), &[])?;
-    let anc = c.get(
-        &format!("/api/v2/pages/{}/ancestors", enc(&id)),
-        &[("limit", "250")],
-    )?;
-    let ancestors: Vec<Value> = anc["results"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|a| json!({"id": a["id"], "type": a["type"], "title": a["title"]}))
-        .collect();
-    Ok(json!({
-        "id": page["id"],
-        "title": page["title"],
-        "status": page["status"],
-        "spaceId": page["spaceId"],
-        "externalUrl": content_url(c, &page),
-        "depth": depth,
-        "ancestors": ancestors,
-        "children": build_tree_nodes(c, &id, depth)?,
     }))
 }
 
@@ -1175,15 +1109,15 @@ mod tests {
         assert_eq!(ch["results"][0]["id"], "11");
         assert_eq!(ch["results"][0]["childPosition"], 1);
 
-        let tr = tree(&c, "10", 2).unwrap();
+        let tr = tree::tree(&c, "10", 2, None).unwrap();
         assert_eq!(tr["depth"], 2);
         assert_eq!(tr["ancestors"][0]["id"], "1");
         assert_eq!(tr["children"][0]["id"], "11");
         assert_eq!(tr["children"][0]["children"][0]["id"], "12");
         assert_eq!(tr["children"][0]["children"][0]["children"], json!([]));
 
-        let capped = tree(&c, "10", 99).unwrap();
-        assert_eq!(capped["depth"], MAX_TREE_DEPTH);
+        let capped = tree::tree(&c, "10", 99, None).unwrap();
+        assert_eq!(capped["depth"], tree::MAX_DEPTH);
     }
 
     #[test]

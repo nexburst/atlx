@@ -182,9 +182,9 @@ ok confluence content attachments download --attachment-id att456 --out file.bin
 ok confluence content comments reply --comment-id 777 --body 'Thanks'
 ok confluence content comments resolve --comment-id 777
 ok confluence content comments create --id 12345 --body 'Why?' --text-selection 'the service'
-gap #30 confluence content move 12345 --parent-id 67890
-gap #30 confluence content trash 12345
-gap #30 confluence content purge 12345
+ok confluence content move 12345 --parent-id 67890
+ok confluence content trash 12345
+ok confluence content purge 12345
 
 # --- bitbucket ---
 ok bitbucket repo query --workspace acme
