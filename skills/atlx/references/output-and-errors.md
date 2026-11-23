@@ -7,9 +7,9 @@ Jira, Confluence and user commands print an envelope: `command`, `request`,
 print REST objects without one.
 
 ```sh
-atlx jira workitem get PROJ-1 -o json --fields fields.status.name
+atlx jira issue get PROJ-1 -o json --fields status
 atlx confluence content get 12345 --body-only --output-file page.html -o json
-atlx jira workitem query --jql 'project = PROJ' -o jsonl
+atlx jira issue list --jql 'project = PROJ' -o jsonl
 ```
 
 ## Next page

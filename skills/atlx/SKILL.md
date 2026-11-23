@@ -24,10 +24,10 @@ Every command has `--help`. Check it rather than guessing a flag.
 
 | Task | Command |
 | --- | --- |
-| Find work items | `atlx jira workitem query --jql 'project = PROJ' --limit 20` |
-| Read a work item | `atlx jira workitem get PROJ-1 --comments` |
-| Who changed it | `atlx jira workitem changelog query --issue-id PROJ-1` |
-| Change it | `atlx jira workitem update --id PROJ-1 --status Done` |
+| Find work items | `atlx jira issue list --jql 'project = PROJ' --limit 20` |
+| Read a work item | `atlx jira issue get PROJ-1 --full` |
+| Who changed it | `atlx jira issue changelog list --issue PROJ-1` |
+| Change it | `atlx jira issue transition PROJ-1 --to Done` |
 | Find pages | `atlx confluence search query --cql 'title ~ "runbook"'` |
 | See a page's shape | `atlx confluence content get 12345 --detail outline` |
 | Read one section | `atlx confluence content get 12345 --section Rollback` |
@@ -67,7 +67,7 @@ More in the references, which you should open only as needed:
 ## Keep output small
 
 ```sh
-atlx jira workitem query --jql 'project = PROJ' -o json --fields issues.key,issues.summary
+atlx jira issue list --jql 'project = PROJ' -o json --fields key,title
 atlx bb pull-requests diff 42 --repo acme/api --output-file pr-42.diff
 ```
 
@@ -78,15 +78,15 @@ Use `--fields` to keep fields and `--output-file` for large results.
 Triage a work item:
 
 ```sh
-atlx jira workitem get PROJ-1 --comments -o json
-atlx jira workitem transitions query --id PROJ-1
-atlx jira workitem update --id PROJ-1 --priority High --add-labels triaged
+atlx jira issue get PROJ-1 --full -o json
+atlx jira transition list --issue PROJ-1
+atlx jira issue update PROJ-1 --priority High --add-label triaged
 ```
 
 Find who changed something:
 
 ```sh
-atlx jira workitem changelog query --issue-id PROJ-1 -o json
+atlx jira issue changelog list --issue PROJ-1 -o json
 atlx confluence content versions list --id 12345
 atlx confluence content versions diff --id 12345 --from 6 --to 7
 ```

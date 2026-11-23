@@ -97,16 +97,19 @@ fn lists_follow_short_pages_until_the_last() {
         ok(json!({"values": [{"id": "1"}], "isLastPage": false})),
         ok(json!({"values": [{"id": "2"}], "isLastPage": true})),
     ]);
-    let out = jsm::desks(&srv.client(), None, 0, 10).unwrap();
-    assert_eq!(out["size"], 2);
-    assert_eq!(out["isLastPage"], true);
+    let (items, next) = jsm::desks(&srv.client(), None, 10, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(next, None);
     assert_eq!(srv.requests()[1].query_param("start").as_deref(), Some("1"));
 
     let srv =
         MockServer::with_responses([ok(json!({"values": [{"id": "1"}], "isLastPage": false}))]);
     assert_eq!(
-        jsm::desks(&srv.client(), None, 0, 1).unwrap()["isLastPage"],
-        false
+        jsm::desks(&srv.client(), None, 1, None)
+            .unwrap()
+            .1
+            .as_deref(),
+        Some("o:1")
     );
 }
 
@@ -251,10 +254,9 @@ fn request_query_maps_status() {
     let o = jsm::RequestQuery {
         status: Some("open"),
         desk: Some("1"),
-        limit: 10,
         ..Default::default()
     };
-    jsm::query(&srv.client(), &o).unwrap();
+    jsm::requests(&srv.client(), &o, 10, None).unwrap();
     let r = &srv.requests()[0];
     assert_eq!(
         r.query_param("requestStatus").as_deref(),
@@ -275,16 +277,16 @@ fn read_endpoints() {
         page(json!([])),
     ]);
     let c = srv.client();
-    jsm::request_types(&c, Some("1"), Some("vpn"), 50).unwrap();
-    jsm::queues(&c, "1", 0, 50).unwrap();
-    jsm::queue_issues(&c, "1", "4", 0, 50).unwrap();
+    jsm::request_types(&c, Some("1"), Some("vpn"), 50, None).unwrap();
+    jsm::queues(&c, "1", 50, None).unwrap();
+    jsm::queue_issues(&c, "1", "4", 50, None).unwrap();
     assert_eq!(
-        jsm::sla(&c, "SD-5", Some("time to resolution")).unwrap()["id"],
+        jsm::sla(&c, "SD-5", "time to resolution").unwrap()["id"],
         "9"
     );
-    jsm::articles(&c, "1", "vpn", 50).unwrap();
+    jsm::articles(&c, Some("1"), "vpn", 50, None).unwrap();
     jsm::get(&c, "SD-5").unwrap();
-    jsm::comments(&c, "SD-5", 0, 50).unwrap();
+    jsm::comments(&c, "SD-5", 50, None).unwrap();
     let r = srv.requests();
     let paths: Vec<&str> = r
         .iter()

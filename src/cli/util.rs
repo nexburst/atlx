@@ -63,6 +63,7 @@ static PARTIAL_ERRORS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 static FAILED: AtomicBool = AtomicBool::new(false);
 
 /// Makes the run exit 1 after its result is printed.
+#[allow(dead_code)]
 pub(crate) fn mark_failed() {
     FAILED.store(true, Ordering::SeqCst);
 }
@@ -212,11 +213,6 @@ pub(crate) fn set_text_output(on: bool) {
 pub(crate) fn text_output() -> bool {
     TEXT.load(Ordering::SeqCst)
 }
-
-/// Transition shim for the old hidden command spellings, which product
-/// modules still call: it prints nothing. Product packages remove the
-/// hidden commands and these calls.
-pub(crate) fn deprecated(_old: &str, _new: &str) {}
 
 /// The current command line with `extra` appended, for hints.
 pub(crate) fn rerun_with(extra: &str) -> String {

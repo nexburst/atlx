@@ -109,10 +109,10 @@ fn json_out(o: &Output) -> Value {
 
 const COMMENT: &[&str] = &[
     "jira",
-    "workitem",
+    "issue",
     "comment",
     "create",
-    "--issue-id",
+    "--issue",
     "P-1",
     "--body",
     "hi",

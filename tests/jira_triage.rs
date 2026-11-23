@@ -1,143 +1,84 @@
-//! Offline tests for the Jira triage commands (#23): comments, changelog,
-//! edit metadata, link query and unlink, delete, and the type, status and
-//! priority lookups.
+//! Offline tests for issue comments, changelog, screens, links, delete and
+//! the type, status and priority lookups.
 
 mod common;
 
+use atlx::cache::Cache;
 use atlx::client::{ApiError, ErrorKind};
 use atlx::jira::{self, WeblinkRef};
-use atlx::markup::TextFormat;
+use atlx::markup::text_to_adf;
 use common::{MockResponse, MockServer};
-use serde_json::json;
+use serde_json::{Map, json};
+
+fn ok(v: serde_json::Value) -> MockResponse {
+    MockResponse::json(200, v)
+}
 
 #[test]
-fn comment_query_returns_one_page_with_a_cursor() {
+fn comments_page_by_offset_and_carry_their_issue() {
     let srv = MockServer::with_responses([
-        MockResponse::json(
-            200,
-            json!({
-                "startAt": 2, "maxResults": 2, "total": 5,
-                "comments": [
-                    {"id": "10002", "author": {"displayName": "Ann", "avatarUrls": {"48x48": "x"}},
-                     "body": {"type": "doc", "version": 1, "content": []}},
-                    {"id": "10003", "author": {"displayName": "Bo"}}
-                ]
-            }),
+        ok(
+            json!({"startAt": 0, "maxResults": 2, "total": 3, "comments": [{"id": "1"}, {"id": "2"}]}),
         ),
-        MockResponse::json(
-            200,
-            json!({"startAt": 4, "maxResults": 2, "total": 5, "comments": [{"id": "10004"}]}),
-        ),
+        ok(json!({"startAt": 2, "maxResults": 2, "total": 3, "comments": [{"id": "3"}]})),
     ]);
     let c = srv.client();
-
-    let page = jira::comment_query(&c, "PROJ-1", 2, 2, Some("-created")).unwrap();
-    assert_eq!(page.data.as_array().unwrap().len(), 2);
-    assert_eq!(page.data[0]["id"], "10002");
-    assert!(page.data[0]["author"].get("avatarUrls").is_none());
-    assert_eq!(page.data[0]["body"]["type"], "doc");
-    assert_eq!(page.next.as_deref(), Some("4"));
-    assert_eq!(
-        page.page_info(),
-        json!({"hasNextPage": true, "nextCursor": "4"})
-    );
-    assert_eq!(
-        page.pagination(),
-        json!({"startAt": 2, "maxResults": 2, "total": 5})
-    );
-
-    let last = jira::comment_query(&c, "PROJ-1", 4, 2, None).unwrap();
-    assert!(last.next.is_none());
-    assert_eq!(
-        last.page_info(),
-        json!({"hasNextPage": false, "nextCursor": null})
-    );
-
-    let reqs = srv.requests();
-    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1/comment");
-    assert_eq!(reqs[0].query_param("startAt").as_deref(), Some("2"));
-    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("2"));
-    assert_eq!(reqs[0].query_param("orderBy").as_deref(), Some("-created"));
-    assert!(reqs[1].query_param("orderBy").is_none());
+    let (items, next) = jira::comments(&c, "PROJ-1", true, 2, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["issue"], "PROJ-1");
+    assert_eq!(next.as_deref(), Some("o:2"));
+    let (rest, next) = jira::comments(&c, "PROJ-1", true, 25, Some("o:2")).unwrap();
+    assert_eq!(rest[0]["id"], "3");
+    assert_eq!(next, None);
+    let r = srv.requests();
+    assert_eq!(r[0].path, "/rest/api/3/issue/PROJ-1/comment");
+    assert_eq!(r[0].query_param("orderBy").as_deref(), Some("-created"));
+    assert_eq!(r[1].query_param("startAt").as_deref(), Some("2"));
+    let bad = jira::comments(&c, "PROJ-1", false, 2, Some("p:2")).unwrap_err();
+    assert_eq!(ApiError::find(&bad).unwrap().kind, ErrorKind::Usage);
 }
 
 #[test]
-fn offset_cursors_must_be_numbers() {
-    assert_eq!(jira::offset_cursor(None).unwrap(), 0);
-    assert_eq!(jira::offset_cursor(Some(" 40 ")).unwrap(), 40);
-    let err = jira::offset_cursor(Some("abc")).unwrap_err();
-    assert_eq!(ApiError::find(&err).unwrap().kind, ErrorKind::Usage);
-}
-
-#[test]
-fn changelog_query_passes_rest_entries_through() {
-    let srv = MockServer::with_responses([MockResponse::json(
-        200,
-        json!({
-            "startAt": 0, "maxResults": 100, "total": 1, "isLast": true,
-            "values": [{
-                "id": "10032",
-                "author": {"accountId": "a1", "avatarUrls": {"16x16": "x"}},
-                "created": "2026-01-01T00:00:00.000+0000",
-                "items": [{"field": "summary", "fromString": "Old", "toString": "New"}]
-            }]
-        }),
-    )]);
-    let c = srv.client();
-    let page = jira::changelog_query(&c, "PROJ-1", 0, 100).unwrap();
-    assert_eq!(page.data[0]["items"][0]["toString"], "New");
-    assert!(page.data[0]["author"].get("avatarUrls").is_none());
-    assert!(page.next.is_none());
-    let reqs = srv.requests();
-    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1/changelog");
-    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("100"));
+fn changelog_passes_rest_entries_through() {
+    let srv = MockServer::with_responses([ok(json!({
+        "values": [{"id": "1", "items": [{"field": "status", "fromString": "Open", "toString": "Done"}]}],
+        "isLast": true
+    }))]);
+    let (items, next) = jira::changelog(&srv.client(), "PROJ-1", 25, None).unwrap();
+    assert_eq!(items[0]["items"][0]["toString"], "Done");
+    assert_eq!(next, None);
+    assert_eq!(srv.requests()[0].path, "/rest/api/3/issue/PROJ-1/changelog");
 }
 
 #[test]
 fn comment_update_delete_and_reply() {
     let srv = MockServer::with_responses([
-        MockResponse::json(200, json!({"id": "10001", "author": {"avatarUrls": {}}})),
+        ok(json!({"id": "10001"})),
         MockResponse::empty(204),
         MockResponse::json(201, json!({"id": "10009"})),
     ]);
     let c = srv.client();
-
-    let up = jira::comment_update(&c, "PROJ-1", "10001", "Edited", TextFormat::Plain).unwrap();
-    assert_eq!(up["id"], "10001");
-    assert_eq!(up["issueKey"], "PROJ-1");
-    assert!(up["author"].get("avatarUrls").is_none());
-    assert!(
-        up["url"]
-            .as_str()
-            .unwrap()
-            .ends_with("/browse/PROJ-1?focusedCommentId=10001")
-    );
-
+    let up = jira::comment_update(&c, "PROJ-1", "10001", text_to_adf("Edited")).unwrap();
+    assert_eq!(up["issue"], "PROJ-1");
     let del = jira::comment_delete(&c, "PROJ-1", "10001").unwrap();
     assert_eq!(
         del,
-        json!({"id": "10001", "issueId": "PROJ-1", "deleted": true})
+        json!({"id": "10001", "issue": "PROJ-1", "deleted": true})
     );
-
     let reply = jira::comment(
         &c,
         "PROJ-1",
-        "Thanks",
-        TextFormat::Plain,
+        text_to_adf("Thanks"),
         None,
         false,
         Some("10001"),
     )
     .unwrap();
     assert_eq!(reply["id"], "10009");
-
     let reqs = srv.requests();
     assert_eq!(reqs[0].method, "PUT");
-    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1/comment/10001");
     assert_eq!(reqs[0].json_body()["body"]["type"], "doc");
     assert_eq!(reqs[1].method, "DELETE");
-    assert_eq!(reqs[1].path, "/rest/api/3/issue/PROJ-1/comment/10001");
-    assert_eq!(reqs[2].method, "POST");
     assert_eq!(reqs[2].json_body()["parentId"], 10001);
 }
 
@@ -146,13 +87,9 @@ fn delete_sends_delete_subtasks() {
     let srv = MockServer::with_responses([MockResponse::empty(204), MockResponse::empty(204)]);
     let c = srv.client();
     let out = jira::delete(&c, "PROJ-1", false).unwrap();
-    assert_eq!(
-        out,
-        json!({"id": "PROJ-1", "deleted": true, "deleteSubtasks": false})
-    );
+    assert_eq!(out, json!({"id": "PROJ-1", "deleted": true}));
     jira::delete(&c, "PROJ-2", true).unwrap();
     let reqs = srv.requests();
-    assert_eq!(reqs[0].method, "DELETE");
     assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1");
     assert_eq!(
         reqs[0].query_param("deleteSubtasks").as_deref(),
@@ -165,238 +102,125 @@ fn delete_sends_delete_subtasks() {
 }
 
 #[test]
-fn update_meta_shapes_editable_fields() {
-    let editmeta = json!({"fields": {
-        "summary": {"required": true, "schema": {"type": "string", "system": "summary"},
-                    "name": "Summary", "key": "summary", "operations": ["set"]},
-        "issuetype": {"required": true, "schema": {"type": "issuetype", "system": "issuetype"},
-                      "name": "Work type", "key": "issuetype", "operations": [], "allowedValues": []},
-        "customfield_10021": {"required": false,
-            "schema": {"type": "array", "items": "option", "custom": "x:multicheckboxes", "customId": 10021},
-            "name": "Flagged", "key": "customfield_10021", "operations": ["add", "set", "remove"],
-            "allowedValues": [{"self": "s", "value": "Impediment", "id": "1", "iconUrl": "i"}]},
-        "priority": {"required": false, "schema": {"type": "priority", "system": "priority"},
-                     "name": "Priority", "key": "priority", "operations": ["set"],
-                     "allowedValues": [{"name": "Highest", "id": "1"}]},
-        "labels": {"required": false, "schema": {"type": "array", "items": "string", "system": "labels"},
-                   "name": "Labels", "key": "labels", "autoCompleteUrl": "u", "operations": ["add", "set", "remove"]},
-        "comment": {"required": false, "schema": {"type": "comments-page", "system": "comment"},
-                    "name": "Comment", "key": "comment", "operations": ["add", "edit", "remove"]}
-    }});
+fn screens_list_fields_with_inputs_and_examples() {
     let srv = MockServer::with_responses([
-        MockResponse::json(200, editmeta.clone()),
-        MockResponse::json(200, editmeta),
-    ]);
-    let c = srv.client();
-
-    let custom = jira::update_meta(&c, "PROJ-1", false).unwrap();
-    let f = custom["fields"].as_array().unwrap();
-    assert_eq!(f.len(), 1);
-    assert_eq!(f[0]["id"], "customfield_10021");
-    assert_eq!(f[0]["acceptedInput"], "multi-option");
-    assert_eq!(f[0]["example"], "--field \"Flagged=Impediment\"");
-    assert!(f[0]["allowedValues"][0].get("iconUrl").is_none());
-
-    let all = jira::update_meta(&c, "PROJ-1", true).unwrap();
-    let ids: Vec<&str> = all["fields"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| f["id"].as_str().unwrap())
-        .collect();
-    // REST order; issuetype has no operations, so it is left out.
-    assert_eq!(
-        ids,
-        [
-            "summary",
-            "customfield_10021",
-            "priority",
-            "labels",
-            "comment"
-        ]
-    );
-    let by = |id: &str| {
-        all["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|f| f["id"] == id)
-            .unwrap()
-            .clone()
-    };
-    assert_eq!(by("summary")["acceptedInput"], "value");
-    assert_eq!(by("labels")["acceptedInput"], "value");
-    assert!(by("labels").get("autoCompleteUrl").is_none());
-    assert_eq!(by("priority")["acceptedInput"], "option");
-    assert_eq!(by("priority")["example"], "--field \"Priority=Highest\"");
-    assert!(
-        by("comment").get("example").is_none(),
-        "not settable, so no example"
-    );
-    assert_eq!(srv.requests()[0].path, "/rest/api/3/issue/PROJ-1/editmeta");
-}
-
-#[test]
-fn link_query_lists_issue_links() {
-    let srv = MockServer::with_responses([
-        MockResponse::json(
-            200,
-            json!({"key": "PROJ-1", "fields": {"issuelinks": [{
-                "id": "10500",
-                "type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
-                "outwardIssue": {"key": "PROJ-2", "fields": {"status": {"name": "Open", "iconUrl": "i"}}}
-            }]}}),
+        ok(json!({"fields": {
+            "summary": {"name": "Summary", "required": true, "schema": {"type": "string"}, "operations": ["set"]},
+            "customfield_1": {"name": "Flagged", "schema": {"type": "array", "items": "option"},
+                "allowedValues": [{"value": "Impediment"}], "operations": ["add", "set"]},
+            "created": {"name": "Created", "operations": []}
+        }})),
+        ok(json!({"issueTypes": [{"id": "1", "name": "Bug"}], "total": 1})),
+        ok(
+            json!({"fields": [{"fieldId": "customfield_2", "name": "Start", "required": false,
+            "schema": {"type": "date"}}], "total": 1}),
         ),
-        MockResponse::json(200, json!({"key": "PROJ-3", "fields": {}})),
     ]);
     let c = srv.client();
-    let links = jira::link_query(&c, "PROJ-1").unwrap();
-    assert_eq!(links[0]["id"], "10500");
-    assert_eq!(links[0]["outwardIssue"]["key"], "PROJ-2");
-    assert!(
-        links[0]["outwardIssue"]["fields"]["status"]
-            .get("iconUrl")
-            .is_none()
-    );
-    assert_eq!(jira::link_query(&c, "PROJ-3").unwrap(), json!([]));
-    let reqs = srv.requests();
-    assert_eq!(reqs[0].path, "/rest/api/3/issue/PROJ-1");
-    assert_eq!(reqs[0].query_param("fields").as_deref(), Some("issuelinks"));
+    let edit = jira::edit_fields(&c, "PROJ-1").unwrap();
+    assert_eq!(edit.len(), 2, "fields without operations are not editable");
+    assert_eq!(edit[1]["acceptedInput"], "multi-option");
+    assert_eq!(edit[1]["example"], "--field 'Flagged=Impediment'");
+    let create = jira::create_fields(&c, "PROJ", "bug").unwrap();
+    assert_eq!(create[0]["fieldId"], "customfield_2");
+    assert_eq!(create[0]["acceptedInput"], "date");
+    let r = srv.requests();
+    assert_eq!(r[0].path, "/rest/api/3/issue/PROJ-1/editmeta");
+    assert_eq!(r[2].path, "/rest/api/3/issue/createmeta/PROJ/issuetypes/1");
 }
 
 #[test]
-fn unlink_workitem_and_weblink_by_each_selector() {
-    let remote = json!([
-        {"id": 7, "object": {"url": "https://example.com/a", "title": "A"}},
-        {"id": 8, "object": {"url": "https://example.com/b", "title": "B"}},
-        {"id": 9, "object": {"url": "https://example.com/b/", "title": "B again"}}
+fn field_names_resolve_to_ids_through_the_cache() {
+    let dir = std::env::temp_dir().join(format!("atlx-field-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cache = Cache::at(&dir, std::time::Duration::from_secs(60));
+    let srv = MockServer::with_responses([
+        ok(
+            json!([{"id": "customfield_10016", "name": "Story Points"}, {"id": "labels", "name": "Labels"}]),
+        ),
+        ok(json!([{"id": "customfield_10016", "name": "Story Points"}])),
     ]);
+    let c = srv.client();
+    let mut m = Map::new();
+    m.insert("story points".into(), json!(3));
+    m.insert("customfield_1".into(), json!("x"));
+    let out = jira::resolve_field_names(&c, &cache, m.clone()).unwrap();
+    assert_eq!(out["customfield_10016"], 3);
+    assert_eq!(out["customfield_1"], "x");
+    // The second lookup is served from the cache: no request.
+    jira::resolve_field_names(&c, &cache, m).unwrap();
+    assert_eq!(srv.requests().len(), 1);
+    // An unknown name refetches once, then fails as a usage error.
+    let mut bad = Map::new();
+    bad.insert("Nope".into(), json!(1));
+    let e = jira::resolve_field_names(&c, &cache, bad).unwrap_err();
+    assert_eq!(ApiError::find(&e).unwrap().kind, ErrorKind::Usage);
+    assert_eq!(srv.requests().len(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn links_are_seen_from_the_issue() {
+    let srv = MockServer::with_responses([ok(json!({"fields": {"issuelinks": [
+        {"id": "1", "type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+         "inwardIssue": {"key": "PROJ-2", "fields": {"summary": "S", "status": {"name": "Open"}}}}
+    ]}}))]);
+    let links = jira::links(&srv.client(), "PROJ-1").unwrap();
+    assert_eq!(
+        links[0],
+        json!({"id": "1", "type": "Blocks", "direction": "inward", "relation": "is blocked by",
+               "issue": "PROJ-2", "title": "S", "status": "Open"})
+    );
+}
+
+#[test]
+fn link_delete_and_weblink_delete_by_each_selector() {
     let srv = MockServer::with_responses([
         MockResponse::empty(204),
         MockResponse::empty(204),
         MockResponse::empty(204),
-        MockResponse::json(200, remote.clone()),
+        ok(json!([{"id": 7, "object": {"url": "https://e.x/"}}])),
         MockResponse::empty(204),
-        MockResponse::json(200, remote.clone()),
-        MockResponse::json(200, remote),
     ]);
     let c = srv.client();
-
-    assert_eq!(
-        jira::unlink_workitem(&c, "10500").unwrap(),
-        json!({"linkId": "10500", "deleted": true})
-    );
-    let by_id = jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Id("7")).unwrap();
-    assert_eq!(by_id["linkId"], "7");
-    let by_global = jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::GlobalId("g-1")).unwrap();
-    assert_eq!(by_global["globalId"], "g-1");
-    let by_url =
-        jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Url("https://example.com/a")).unwrap();
-    assert_eq!(by_url["linkId"], "7");
-    assert_eq!(by_url["deleted"], true);
-
-    let missing =
-        jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Url("https://example.com/z")).unwrap_err();
-    assert_eq!(ApiError::find(&missing).unwrap().kind, ErrorKind::NotFound);
-    let several =
-        jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Url("https://example.com/b")).unwrap_err();
-    assert_eq!(ApiError::find(&several).unwrap().kind, ErrorKind::Usage);
-
-    let reqs = srv.requests();
-    assert_eq!(
-        reqs.len(),
-        7,
-        "nothing is deleted when the URL is ambiguous"
-    );
-    assert_eq!(reqs[0].method, "DELETE");
-    assert_eq!(reqs[0].path, "/rest/api/3/issueLink/10500");
-    assert_eq!(reqs[1].path, "/rest/api/3/issue/PROJ-1/remotelink/7");
-    assert_eq!(reqs[2].path, "/rest/api/3/issue/PROJ-1/remotelink");
-    assert_eq!(reqs[2].query_param("globalId").as_deref(), Some("g-1"));
-    assert_eq!(reqs[3].method, "GET");
-    assert_eq!(reqs[4].method, "DELETE");
-    assert_eq!(reqs[4].path, "/rest/api/3/issue/PROJ-1/remotelink/7");
+    jira::link_delete(&c, "10500").unwrap();
+    jira::weblink_delete(&c, "PROJ-1", WeblinkRef::Id("3")).unwrap();
+    jira::weblink_delete(&c, "PROJ-1", WeblinkRef::GlobalId("g")).unwrap();
+    let out = jira::weblink_delete(&c, "PROJ-1", WeblinkRef::Url("https://e.x")).unwrap();
+    assert_eq!(out["id"], "7");
+    let r = srv.requests();
+    assert_eq!(r[0].path, "/rest/api/3/issueLink/10500");
+    assert_eq!(r[1].path, "/rest/api/3/issue/PROJ-1/remotelink/3");
+    assert_eq!(r[2].query_param("globalId").as_deref(), Some("g"));
+    assert_eq!(r[4].path, "/rest/api/3/issue/PROJ-1/remotelink/7");
 }
 
 #[test]
-fn issue_types_for_a_project_and_by_id() {
+fn issue_types_statuses_and_priorities() {
     let srv = MockServer::with_responses([
-        MockResponse::json(200, json!({"id": "10000", "key": "PROJ"})),
-        MockResponse::json(
-            200,
-            json!([
-                {"id": "1", "name": "Task", "iconUrl": "i", "hierarchyLevel": 0},
-                {"id": "2", "name": "Bug", "hierarchyLevel": 0}
-            ]),
-        ),
-        MockResponse::json(200, json!({"id": "10001", "name": "Epic", "iconUrl": "i"})),
+        ok(json!([{"id": "1"}])),
+        ok(json!({"id": "10000", "key": "PROJ"})),
+        ok(json!([{"id": "2", "hierarchyLevel": -1}])),
+        ok(json!({"id": "3"})),
+        ok(json!([{"id": "s"}])),
+        ok(json!({"values": [{"id": "p"}], "isLast": true})),
     ]);
     let c = srv.client();
-    let (key, id) = jira::project_key_id(&c, "PROJ").unwrap();
-    assert_eq!((key.as_str(), id.as_str()), ("PROJ", "10000"));
-    let (types, found) = jira::issue_types(&c, &id, Some(0), 1).unwrap();
-    assert_eq!(found, 2);
+    assert_eq!(jira::issue_types(&c, None, None).unwrap()[0]["id"], "1");
     assert_eq!(
-        types,
-        json!([{"id": "1", "name": "Task", "hierarchyLevel": 0}])
+        jira::issue_types(&c, Some("PROJ"), Some(-1)).unwrap()[0]["id"],
+        "2"
     );
-    let got = jira::issue_types_get(
-        &c,
-        &[jira::entity_id("ari:cloud:jira:abc:issue-type/10001")],
-    )
-    .unwrap();
-    assert_eq!(got, json!([{"id": "10001", "name": "Epic"}]));
-
-    let reqs = srv.requests();
-    assert_eq!(reqs[0].path, "/rest/api/3/project/PROJ");
-    assert_eq!(reqs[1].path, "/rest/api/3/issuetype/project");
-    assert_eq!(reqs[1].query_param("projectId").as_deref(), Some("10000"));
-    assert_eq!(reqs[1].query_param("level").as_deref(), Some("0"));
-    assert_eq!(reqs[2].path, "/rest/api/3/issuetype/10001");
-}
-
-#[test]
-fn statuses_and_priorities_all_or_by_id() {
-    let srv = MockServer::with_responses([
-        MockResponse::json(
-            200,
-            json!([{"id": "3", "name": "In Progress", "iconUrl": "i"}]),
-        ),
-        MockResponse::json(200, json!({"id": "3", "name": "In Progress"})),
-        MockResponse::json(200, json!({"id": "10000", "name": "To Do"})),
-        MockResponse::json(
-            200,
-            json!({"isLast": true, "values": [{"id": "1", "name": "Highest", "iconUrl": "i"}]}),
-        ),
-        MockResponse::json(200, json!({"id": "2", "name": "High"})),
-    ]);
-    let c = srv.client();
-    assert_eq!(
-        jira::statuses(&c, &[]).unwrap(),
-        json!([{"id": "3", "name": "In Progress"}])
-    );
-    let some = jira::statuses(&c, &["3".into(), "10000".into()]).unwrap();
-    assert_eq!(some[1]["name"], "To Do");
-    assert_eq!(
-        jira::priorities(&c, &[]).unwrap(),
-        json!([{"id": "1", "name": "Highest"}])
-    );
-    assert_eq!(
-        jira::priorities(&c, &["2".into()]).unwrap()[0]["name"],
-        "High"
-    );
-
-    let paths: Vec<String> = srv.requests().into_iter().map(|r| r.path).collect();
-    assert_eq!(
-        paths,
-        [
-            "/rest/api/3/status",
-            "/rest/api/3/status/3",
-            "/rest/api/3/status/10000",
-            "/rest/api/3/priority/search",
-            "/rest/api/3/priority/2",
-        ]
-    );
+    jira::issue_type(&c, "ari:cloud:jira:x:issue-type/3").unwrap();
+    jira::statuses(&c, None).unwrap();
+    let (p, _) = jira::priorities(&c, 25, None).unwrap();
+    assert_eq!(p[0]["id"], "p");
+    let r = srv.requests();
+    assert_eq!(r[0].path, "/rest/api/3/issuetype");
+    assert_eq!(r[2].query_param("projectId").as_deref(), Some("10000"));
+    assert_eq!(r[2].query_param("level").as_deref(), Some("-1"));
+    assert_eq!(r[3].path, "/rest/api/3/issuetype/3");
+    assert_eq!(r[5].path, "/rest/api/3/priority/search");
 }
 
 #[test]
@@ -406,8 +230,8 @@ fn deletes_refuse_ids_that_would_address_the_parent() {
         let c = srv.client();
         for err in [
             jira::comment_delete(&c, "PROJ-1", id).unwrap_err(),
-            jira::unlink_weblink(&c, "PROJ-1", WeblinkRef::Id(id)).unwrap_err(),
-            jira::unlink_workitem(&c, id).unwrap_err(),
+            jira::weblink_delete(&c, "PROJ-1", WeblinkRef::Id(id)).unwrap_err(),
+            jira::link_delete(&c, id).unwrap_err(),
             jira::delete(&c, id, false).unwrap_err(),
         ] {
             assert_eq!(

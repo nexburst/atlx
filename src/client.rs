@@ -1242,13 +1242,6 @@ impl ApiError {
         Self::new(ErrorKind::Refused, message)
     }
 
-    /// Transition shim: something the public REST API cannot do. It is a
-    /// `usage` error now; product code moves to [`ApiError::usage`].
-    #[deprecated(note = "use ApiError::usage")]
-    pub fn unsupported(message: impl Into<String>) -> Self {
-        Self::usage(message)
-    }
-
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self

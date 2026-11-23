@@ -71,19 +71,18 @@ fn create_and_copy_are_private_by_default() {
 }
 
 #[test]
-fn query_pages_to_the_limit() {
+fn list_pages_to_the_limit() {
     let srv = MockServer::with_responses([
         ok(json!({"values": [{"id": "1"}], "isLast": false, "total": 2})),
         ok(json!({"values": [{"id": "2"}], "isLast": true, "total": 2})),
     ]);
     let o = Search {
         name: Some("Team"),
-        limit: 10,
         ..Search::default()
     };
-    let out = dashboards::query(&srv.client(), &o).unwrap();
-    assert_eq!(out["values"].as_array().unwrap().len(), 2);
-    assert_eq!(out["isLast"], true);
+    let (items, next) = dashboards::list(&srv.client(), &o, 10, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(next, None);
     assert_eq!(
         srv.requests()[1].query_param("startAt").as_deref(),
         Some("1")
@@ -103,24 +102,6 @@ fn deletes_cannot_reach_the_parent() {
         assert!(dashboards::property_delete(&c, "1", bad, "k").is_err());
     }
     assert!(srv.requests().is_empty());
-}
-
-#[test]
-fn bulk_edit_checks_the_details_for_the_action() {
-    let srv = MockServer::with_responses([ok(json!({"action": "changeOwner"}))]);
-    let c = srv.client();
-    let ids = ["1".to_string()];
-    let owner = json!({"newOwner": "acct", "autofixName": true});
-    assert!(
-        dashboards::bulk_edit(&c, &ids, "addPermission", Some(owner.clone()), None, None).is_err()
-    );
-    dashboards::bulk_edit(&c, &ids, "changeOwner", Some(owner.clone()), None, None).unwrap();
-    let r = srv.requests();
-    assert_eq!(r.len(), 1);
-    assert_eq!(
-        r[0].json_body(),
-        json!({"action": "changeOwner", "entityIds": [1], "changeOwnerDetails": owner})
-    );
 }
 
 #[test]
@@ -148,7 +129,7 @@ fn gadgets_and_properties() {
         ..Gadget::default()
     };
     dashboards::catalog(&c).unwrap();
-    dashboards::gadgets(&c, "1", &[], &[], &["5".into()]).unwrap();
+    dashboards::gadgets(&c, "1", &[], &["u".into()]).unwrap();
     dashboards::gadget_add(&c, "1", &placed, Some("mod:key"), None, None).unwrap();
     dashboards::gadget_update(&c, "1", "5", &titled).unwrap();
     dashboards::gadget_delete(&c, "1", "5").unwrap();

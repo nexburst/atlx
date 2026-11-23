@@ -1,27 +1,2 @@
 # Commands without a CommandMeta yet. Package owners empty this list;
 # unregistered_commands_only_shrink fails if it grows.
-jsm request create
-jsm request validate
-jsm request get
-jsm request query
-jsm request comment list
-jsm request comment create
-jsm request participant list
-jsm request participant add
-jsm request participant remove
-jsm request transition query
-jsm request transition create
-jsm request-type query
-jsm request-type field get
-jsm request-type fields get
-jsm request-type form get
-jsm approval list
-jsm approval get
-jsm approval approve
-jsm approval reject
-jsm portal query
-jsm servicedesk query
-jsm queue query
-jsm queue workitems query
-jsm sla get
-jsm knowledge-article query

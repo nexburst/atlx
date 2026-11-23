@@ -8,22 +8,17 @@
 
 mod api;
 mod auth;
-#[allow(deprecated)]
 mod bitbucket;
 mod cache;
 mod completion;
-#[allow(deprecated)]
 mod confluence;
 mod describe;
 mod doctor;
-#[allow(deprecated)]
 mod jira;
-#[allow(deprecated)]
 mod jsm;
 mod search;
 mod shape;
 mod skill;
-#[allow(deprecated)]
 mod user;
 mod util;
 
@@ -94,7 +89,7 @@ enum Cmd {
         #[arg(long)]
         strict: bool,
     },
-    /// Jira work items, metadata, boards and sprints
+    /// Jira issues, projects, boards, sprints, filters and dashboards
     Jira {
         #[command(subcommand)]
         cmd: jira::JiraCmd,
@@ -103,11 +98,6 @@ enum Cmd {
     Jsm {
         #[command(subcommand)]
         cmd: jsm::JsmCmd,
-    },
-    /// Atlassian users
-    User {
-        #[command(subcommand)]
-        cmd: user::UserCmd,
     },
     /// Confluence search, content and spaces
     Confluence {
@@ -181,7 +171,6 @@ pub(crate) const META_TABLES: &[&[CommandMeta]] = &[
     auth::META,
     jira::META,
     jsm::META,
-    user::META,
     confluence::META,
     bitbucket::META,
 ];
@@ -397,7 +386,7 @@ fn output_from_args(args: &[String]) -> Format {
     }
 }
 
-/// `jira workitem get` for `atlx jira workitem get ...`.
+/// `jira issue get` for `atlx jira issue get ...`.
 fn command_path(m: &clap::ArgMatches) -> String {
     let mut parts = Vec::new();
     let mut cur = m;
@@ -465,7 +454,6 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Doctor { strict } => return Ok(doctor::doctor(g, strict)),
         Cmd::Jira { cmd } => jira::jira_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Jsm { cmd } => jsm::jsm_cmd(&g.config()?.jira()?, cmd)?,
-        Cmd::User { cmd } => user::user_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Confluence { cmd } => {
             if let Some(out) = confluence::offline(&cmd) {
                 return out;
@@ -496,12 +484,12 @@ mod tests {
     #[test]
     fn parses_core_and_product_invocations() {
         for args in [
-            "atlx jira workitem get PROJ-1 PROJ-2 --comments -o json --site acme",
-            "atlx jira workitem query --jql 'project = X' --limit 5",
-            "atlx jira workitem create --space PROJ --type Bug --summary S --description-format markdown",
-            "atlx jira workitem comment create --issue-id PROJ-1 --body hi --body-format plain",
-            "atlx jira field list --query story --custom-only",
-            "atlx user search alice --limit 10 -o json",
+            "atlx jira issue get PROJ-1 PROJ-2 -o json --site acme",
+            "atlx jira issue list --jql 'project = X' --limit 5",
+            "atlx jira issue create --project PROJ --type Bug --summary S --body-format markdown",
+            "atlx jira issue comment create --issue PROJ-1 --body hi --body-format plain",
+            "atlx jira field list --query story --custom",
+            "atlx jira user search alice --limit 10 -o json",
             "atlx confluence search --cql type=page",
             "atlx confluence page get 12345 --body-format markdown --full",
             "atlx confluence page update 12345 --if-version 3 --body x --body-format markdown --dry-run",
@@ -509,13 +497,13 @@ mod tests {
             "atlx bb pr merge 930 --repo acme/api --strategy squash --yes",
             "atlx bb pipeline log 1234 --failed --repo acme/api",
             "atlx doctor --strict -o json",
-            "atlx jira workitem get PROJ-1 -o json --fields key,status --output-file /tmp/x.json",
-            "atlx jira workitem get PROJ-1 -o ids --full",
-            "atlx jira workitem get PROJ-1 --raw --max-chars 0",
-            "atlx --dry-run --read-only --no-cache jira workitem get PROJ-1",
+            "atlx jira issue get PROJ-1 -o json --fields key,status --output-file /tmp/x.json",
+            "atlx jira issue get PROJ-1 -o ids --full",
+            "atlx jira issue get PROJ-1 --raw --max-chars 0",
+            "atlx --dry-run --read-only --no-cache jira issue get PROJ-1",
             "atlx confluence page get 12345 --body-only --output-file ./page.md -o json",
-            "atlx -p work jira workitem get PROJ-1",
-            "atlx jira workitem get PROJ-1 --profile default",
+            "atlx -p work jira issue get PROJ-1",
+            "atlx jira issue get PROJ-1 --profile default",
             "atlx auth login --new-profile",
             "atlx auth login --new-profile work -s acme -u me@acme.com --token-cmd 'op read op://x/y' --no-verify",
             "atlx auth login -p work --force",
@@ -528,7 +516,7 @@ mod tests {
             "atlx auth profile rename default work",
             "atlx auth profile migrate --yes",
             "atlx describe",
-            "atlx describe jira workitem get",
+            "atlx describe jira issue get",
             "atlx describe --records",
             "atlx describe --errors",
             "atlx describe bitbucket --all",
@@ -548,8 +536,8 @@ mod tests {
             "atlx whoami",
             "atlx login",
             "atlx setup bitbucket",
-            "atlx jira workitem get P-1 --select key",
-            "atlx jira workitem get P-1 --output-summary",
+            "atlx jira issue get P-1 --select key",
+            "atlx jira issue get P-1 --output-summary",
         ] {
             assert!(Cli::try_parse_from(shell_words(args)).is_err(), "{args}");
         }
@@ -591,7 +579,7 @@ mod tests {
         for args in [
             "bb repo branch list -r acme/api --sort -name",
             "bb repo list --workspace acme --sort -updated_on",
-            "jira space query --sort-by -lastIssueUpdatedDate",
+            "jira project list --order-by -lastIssueUpdatedDate",
             "confluence page attachment list --page 1 --sort -created-date",
         ] {
             if let Err(e) = Cli::try_parse_from(["atlx"].into_iter().chain(args.split(' '))) {

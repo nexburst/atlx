@@ -51,43 +51,48 @@ fn json_run(body: Value, args: &str) -> (Option<i32>, Value) {
 
 #[test]
 fn jsonl_prints_each_record_then_a_trailer() {
-    let page = json!({"startAt": 0, "maxResults": 50, "total": 0, "isLast": true, "values": []});
-    let (_, out, _) = run_with(page, "jira filter query -o jsonl");
+    let page = json!({"isLast": true, "values": [{"id": "7", "name": "F"}]});
+    let (_, out, _) = run_with(page, "jira filter list -o jsonl");
     let lines: Vec<Value> = out
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
     assert_eq!(lines.len(), 2, "{out}");
-    assert_eq!(lines[0]["values"], json!([]));
+    assert_eq!(lines[0]["id"], "7");
+    assert_eq!(lines[1]["_end"]["next"], Value::Null);
     assert_eq!(lines[1]["_end"]["errors"], json!([]));
 }
 
 #[test]
-fn searches_print_the_page() {
+fn lists_print_records_and_next() {
     let page = json!({"startAt": 0, "maxResults": 50, "total": 1, "isLast": true, "values": [{"id": "7"}]});
-    let (_, v) = json_run(page.clone(), "jira filter query");
+    let (_, v) = json_run(page.clone(), "jira filter list");
     assert_eq!(v["ok"], true);
-    assert_eq!(v["data"]["values"][0]["id"], "7");
-    let (_, v) = json_run(page, "jira space versions query --key P");
-    assert_eq!(v["data"]["versions"][0]["id"], "7");
+    assert_eq!(v["data"][0]["id"], "7");
+    assert_eq!(v["next"], Value::Null);
+    let (_, v) = json_run(page, "jira project version list --project P");
+    assert_eq!(v["data"][0]["id"], "7");
 }
 
 #[test]
-fn space_query_defaults_to_fifty() {
+fn project_list_defaults_to_25() {
     let (_, _, reqs) = run_with(
         json!({"values": [], "total": 0, "isLast": true}),
-        "jira space query -o json",
+        "jira project list -o json",
     );
-    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("50"));
+    assert_eq!(reqs[0].query_param("maxResults").as_deref(), Some("25"));
 }
 
 #[test]
-fn space_statuses_are_listed_once() {
+fn project_statuses_are_listed_once() {
     let s = json!({"id": "1", "name": "To Do", "statusCategory": {"key": "new", "name": "To Do"}});
     let d = json!({"id": "2", "name": "Done", "statusCategory": {"key": "done", "name": "Done"}});
     let kinds = json!([{"name": "Task", "statuses": [d, s]}, {"name": "Bug", "statuses": [s]}]);
-    let (_, v) = json_run(kinds, "jira space status query --id-or-key P");
-    assert_eq!(v["data"], json!({"statuses": [s, d]}));
+    let (_, v) = json_run(kinds, "jira status list --project P");
+    assert_eq!(
+        v["data"],
+        json!([{"id": "2", "name": "Done", "category": "done"}, {"id": "1", "name": "To Do", "category": "new"}])
+    );
 }
 
 #[test]
@@ -100,54 +105,50 @@ fn bitbucket_output_is_enveloped_too() {
 
 #[test]
 fn board_get_is_a_list() {
-    let (_, v) = json_run(
-        json!({"id": 3, "name": "B"}),
-        "jira board get --id 3 --id 3",
-    );
+    let (_, v) = json_run(json!({"id": 3, "name": "B"}), "jira board get 3 3");
     assert_eq!(v["data"].as_array().unwrap().len(), 2);
 }
 
 #[test]
 fn property_and_worklog_feeds_are_bare_lists() {
-    let (_, v) = json_run(
-        json!({"keys": []}),
-        "jira workitem property query --issue-id P-1",
-    );
+    let (_, v) = json_run(json!({"keys": []}), "jira issue property list --issue P-1");
     assert_eq!(v["data"], json!([]));
     let page = json!({"values": [], "since": 1, "until": 2, "lastPage": true});
-    let (_, v) = json_run(page, "jira workitem worklog changed --since 1");
+    let (_, v) = json_run(page, "jira issue worklog list --changed-since 1");
     assert_eq!(v["data"], json!([]));
+    assert_eq!(v["next"], Value::Null);
 }
 
 #[test]
-fn bulk_get_partial_exits_3_with_ok_false() {
+fn many_issue_get_partial_exits_3_with_ok_false() {
+    // 21 or more issues are read with bulkfetch; Jira returns only P-1.
     let got = json!({"issues": [{"id": "1", "key": "P-1", "fields": {"summary": "S"}}]});
-    let (code, v) = json_run(got.clone(), "jira workitem bulk-get P-1 P-2");
+    let keys: Vec<String> = (1..=21).map(|i| format!("P-{i}")).collect();
+    let (code, v) = json_run(got, &format!("jira issue get {}", keys.join(" ")));
     assert_eq!(code, Some(3));
     assert_eq!(v["ok"], false);
-    assert_eq!(v["data"]["items"][0]["data"]["key"], "P-1");
-    assert_eq!(v["data"]["items"][1]["ok"], false);
+    assert_eq!(v["data"][0]["key"], "P-1");
+    assert_eq!(v["errors"].as_array().unwrap().len(), 20);
 
-    let (code, v) = json_run(got, "jira workitem bulk-get OLD-1");
+    let issue = json!({"id": "1", "key": "P-1", "fields": {"summary": "S"}});
+    let (code, v) = json_run(issue, "jira issue get P-1");
     assert_eq!(code, Some(0));
     assert_eq!(v["ok"], true);
-    assert_eq!(v["data"]["items"][0]["input"], "OLD-1");
+    assert_eq!(v["data"]["key"], "P-1");
 }
 
 #[test]
-fn user_lookup_prints_the_batch_whatever_the_exit_code() {
-    let found = json!({"values": [{"accountId": "a", "displayName": "Ann", "active": true}]});
-    for (args, want) in [
-        ("--account-id a", 0),
-        ("--account-id a --account-id b", 0),
-        ("--account-id a --account-id b --strict", 1),
-        ("--account-id b", 1),
-    ] {
-        let (code, v) = json_run(found.clone(), &format!("user bulk-lookup {args}"));
-        assert_eq!(code, Some(want), "{args}");
-        assert_eq!(v["ok"], want == 0, "{args}");
-        assert!(v["data"]["summary"]["requested"].is_u64(), "{args}");
-    }
+fn user_get_takes_several_users() {
+    let found = json!({"accountId": "a", "displayName": "Ann", "active": true});
+    let (code, v) = json_run(found.clone(), "jira user get a b");
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        v["data"][1],
+        json!({"id": "a", "name": "Ann", "email": null, "active": true})
+    );
+    let (code, v) = json_run(found, "jira user get a");
+    assert_eq!(code, Some(0));
+    assert_eq!(v["data"]["id"], "a");
 }
 
 /// Commands whose output is not JSON by design (shell scripts).

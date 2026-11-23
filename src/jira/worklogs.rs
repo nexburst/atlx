@@ -1,9 +1,9 @@
-//! `jira workitem worklog add|query|get|update|delete|changed|deleted`.
+//! `jira issue worklog list|get|create|update|delete`.
 
-use super::{OffsetPage, enc, offset_page, strip_media};
+use super::{Listed, Offsets, enc, offset_list, strip_media};
 use crate::client::{ApiError, Client};
-use crate::markup::{TextFormat, to_adf};
-use anyhow::Result;
+use crate::paging::{self, Page, Position};
+use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 
@@ -81,7 +81,8 @@ pub struct Entry<'a> {
     pub seconds: Option<u64>,
     /// Epoch milliseconds.
     pub started: Option<i64>,
-    pub comment: Option<(&'a str, TextFormat)>,
+    /// Already converted to ADF.
+    pub comment: Option<Value>,
     pub visibility: Option<Value>,
     pub properties: Option<Value>,
 }
@@ -98,8 +99,8 @@ impl Entry<'_> {
         if let Some(ms) = self.started {
             m.insert("started".into(), crate::time::jira_timestamp(ms).into());
         }
-        if let Some((text, f)) = self.comment {
-            m.insert("comment".into(), to_adf(text, f));
+        if let Some(c) = &self.comment {
+            m.insert("comment".into(), c.clone());
         }
         if let Some(v) = &self.visibility {
             m.insert("visibility".into(), v.clone());
@@ -156,7 +157,7 @@ pub fn update(c: &Client, key: &str, id: &str, e: &Entry, o: &WriteOpts) -> Resu
 
 pub fn delete(c: &Client, key: &str, id: &str, o: &WriteOpts) -> Result<Value> {
     c.delete(&item(key, id), &o.query()?)?;
-    Ok(json!({"id": id, "issueId": key, "deleted": true}))
+    Ok(json!({"id": id, "issue": key, "deleted": true}))
 }
 
 pub fn get(c: &Client, key: &str, id: &str, expand: Option<&str>) -> Result<Value> {
@@ -164,26 +165,32 @@ pub fn get(c: &Client, key: &str, id: &str, expand: Option<&str>) -> Result<Valu
     Ok(stripped(c.get(&item(key, id), &q)?))
 }
 
-/// One page, with optional bounds on `started` in epoch milliseconds.
-pub fn query(
+/// An issue's worklogs, with optional bounds on `started` in epoch ms.
+pub fn list(
     c: &Client,
     key: &str,
-    start: usize,
-    max: usize,
     after: Option<i64>,
     before: Option<i64>,
-    expand: Option<&str>,
-) -> Result<OffsetPage> {
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
     let (after, before) = (after.map(|v| v.to_string()), before.map(|v| v.to_string()));
     let q: Vec<(&str, &str)> = [
         ("startedAfter", after.as_deref()),
         ("startedBefore", before.as_deref()),
-        ("expand", expand),
     ]
     .into_iter()
     .filter_map(|(k, v)| v.map(|v| (k, v)))
     .collect();
-    offset_page(c, &path(key), "worklogs", &q, start, max)
+    offset_list(
+        c,
+        &path(key),
+        &q,
+        &[],
+        Offsets::values().list("worklogs").page(1000),
+        limit,
+        cursor,
+    )
 }
 
 /// Which change feed to read.
@@ -193,17 +200,35 @@ pub enum Feed {
     Deleted,
 }
 
-/// One page of IDs changed or deleted since `since`; pass the page's `until`
-/// as the next `--since` while `lastPage` is false.
-pub fn feed(c: &Client, feed: Feed, since: Option<i64>, expand: Option<&str>) -> Result<Value> {
+/// Site-wide IDs of worklogs changed or deleted since `since` (epoch ms).
+/// Jira pages the feed by time: the next cursor carries the page's `until`.
+pub fn feed(
+    c: &Client,
+    feed: Feed,
+    since: i64,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
     let segment = match feed {
         Feed::Changed => "updated",
         Feed::Deleted => "deleted",
     };
-    let since = since.map(|s| s.to_string());
-    let q: Vec<(&str, &str)> = [("since", since.as_deref()), ("expand", expand)]
-        .into_iter()
-        .filter_map(|(k, v)| v.map(|v| (k, v)))
-        .collect();
-    c.get(&format!("/rest/api/3/worklog/{segment}"), &q)
+    let path = format!("/rest/api/3/worklog/{segment}");
+    paging::collect(limit, cursor, |pos, _| {
+        let from = match pos {
+            Position::Start => since.to_string(),
+            Position::Token(t) => t.clone(),
+            _ => return Err(ApiError::usage("--cursor is not from this list").into()),
+        };
+        let v = c.get(&path, &[("since", from.as_str())])?;
+        let items = v["values"]
+            .as_array()
+            .cloned()
+            .ok_or_else(|| anyhow!("Jira answered {path} without a list"))?;
+        let next = match (v["lastPage"].as_bool(), &v["until"]) {
+            (Some(false), Value::Number(n)) => Some(Position::Token(n.to_string())),
+            _ => None,
+        };
+        Ok(Page { items, next })
+    })
 }

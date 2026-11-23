@@ -1,11 +1,12 @@
-//! Sprint lifecycle, board details, and the Agile fields of `workitem
+//! Sprint lifecycle, board details, and the Agile fields of `issue
 //! create|update` (sprint, story points, estimates, team).
 
 use super::{
-    Paged, board_values, enc, issue_project, issue_row, none_or, paginate_values, software_issues,
+    Listed, Offsets, enc, issue_project, none_or, offset_list, software_issues, software_list,
     trailing_number,
 };
 use crate::client::{ApiError, Client};
+use crate::paging::HARD_CAP;
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -13,7 +14,7 @@ use std::collections::BTreeMap;
 const AGILE: &str = "/rest/agile/1.0";
 /// The issue lists that replace the deprecated Agile ones.
 const SOFTWARE: &str = "/rest/software/1.0";
-/// The most work items one Agile move call accepts.
+/// The most issues one Agile move call accepts.
 const MOVE_BATCH: usize = 50;
 
 fn usage(message: String) -> anyhow::Error {
@@ -29,11 +30,10 @@ fn board_cannot_answer(e: &anyhow::Error) -> bool {
 fn all_boards(c: &Client, project: &str) -> Result<Vec<u64>> {
     let o = super::BoardQuery {
         project: Some(project),
-        limit: usize::MAX,
         ..Default::default()
     };
-    Ok(board_values(c, &o)?
-        .values
+    Ok(super::boards(c, &o, HARD_CAP, None)?
+        .0
         .iter()
         .filter_map(|b| b["id"].as_u64())
         .collect())
@@ -82,8 +82,8 @@ fn sprint_named(c: &Client, boards: &[u64], name: &str, state: Option<&str>) -> 
     for board in boards {
         let q: Vec<(&str, &str)> = state.iter().map(|s| ("state", *s)).collect();
         let path = format!("{AGILE}/board/{board}/sprint");
-        let sprints = match paginate_values(c, &path, &q, 0, usize::MAX) {
-            Ok(p) => p.values,
+        let sprints = match offset_list(c, &path, &q, &[], Offsets::values(), HARD_CAP, None) {
+            Ok(p) => p.0,
             Err(e) if boards.len() > 1 && board_cannot_answer(&e) => continue,
             Err(e) => return Err(e),
         };
@@ -255,7 +255,7 @@ pub fn move_issues(c: &Client, to: Destination, keys: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Every work item in the sprint that is not done. Subtasks are left out:
+/// Every issue in the sprint that is not done. Subtasks are left out:
 /// they follow their parent and Jira refuses to move them by themselves.
 fn unfinished(c: &Client, id: u64) -> Result<Vec<String>> {
     let q = [
@@ -266,7 +266,7 @@ fn unfinished(c: &Client, id: u64) -> Result<Vec<String>> {
         ),
     ];
     let path = format!("{SOFTWARE}/sprint/{id}/issue");
-    software_issues(c, &path, &q, 0, usize::MAX)?
+    software_issues(c, &path, &q)?
         .iter()
         .map(|issue| {
             issue["key"]
@@ -350,17 +350,27 @@ pub fn board_delete(c: &Client, id: u64) -> Result<Value> {
     Ok(json!({"id": id, "deleted": true}))
 }
 
-pub fn board_projects(c: &Client, id: u64, start: usize, limit: usize) -> Result<Paged> {
-    paginate_values(c, &format!("{}/project", board_path(id)), &[], start, limit)
+pub fn board_projects(c: &Client, id: u64, limit: usize, cursor: Option<&str>) -> Result<Listed> {
+    offset_list(
+        c,
+        &format!("{}/project", board_path(id)),
+        &[],
+        &[],
+        Offsets::values(),
+        limit,
+        cursor,
+    )
 }
 
-pub fn quick_filters(c: &Client, id: u64, start: usize, limit: usize) -> Result<Paged> {
-    paginate_values(
+pub fn quick_filters(c: &Client, id: u64, limit: usize, cursor: Option<&str>) -> Result<Listed> {
+    offset_list(
         c,
         &format!("{}/quickfilter", board_path(id)),
         &[],
-        start,
+        &[],
+        Offsets::values(),
         limit,
+        cursor,
     )
 }
 
@@ -400,9 +410,9 @@ pub fn backlog(
     board: u64,
     active_filters: &[String],
     jql: Option<&str>,
-    start: usize,
     limit: usize,
-) -> Result<Value> {
+    cursor: Option<&str>,
+) -> Result<Listed> {
     let mut filters = Vec::new();
     for id in active_filters {
         let f = quick_filter(c, board, id)?;
@@ -412,30 +422,43 @@ pub fn backlog(
         filters.push(q.to_string());
     }
     let jql = narrowed(&filters, jql);
-    let fields = super::LIST_FIELDS.join(",");
-    let path = format!("{SOFTWARE}/board/{board}/backlog");
-    let mut q = vec![("fields", fields.as_str())];
-    if let Some(j) = &jql {
-        q.push(("jql", j));
-    }
-    let issues: Vec<Value> = software_issues(c, &path, &q, start, limit)?
-        .iter()
-        .map(|i| issue_row(c, i, false))
-        .collect();
-    Ok(json!({"issues": issues, "startAt": start, "maxResults": limit}))
+    software_list(
+        c,
+        &format!("{SOFTWARE}/board/{board}/backlog"),
+        jql.as_deref(),
+        limit,
+        cursor,
+    )
+}
+
+/// Issues in a sprint, optionally narrowed by JQL.
+pub fn sprint_issues(
+    c: &Client,
+    sprint: u64,
+    jql: Option<&str>,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
+    software_list(
+        c,
+        &format!("{SOFTWARE}/sprint/{sprint}/issue"),
+        jql,
+        limit,
+        cursor,
+    )
 }
 
 // --- create and update fields ------------------------------------------------
 
-/// The work item being written.
+/// The issue being written.
 #[derive(Clone, Copy, Debug)]
 pub enum On<'a> {
     Issue(&'a str),
-    /// A work item about to be created in this space.
-    Space(&'a str),
+    /// A issue about to be created in this project.
+    Project(&'a str),
 }
 
-/// The Agile flags of `workitem create|update`.
+/// The Agile flags of `issue create|update`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Planning<'a> {
     pub sprint: Option<&'a str>,
@@ -503,7 +526,7 @@ fn project_of<'p>(c: &Client, on: On, cache: &'p mut Option<String>) -> Result<&
     if cache.is_none() {
         *cache = Some(match on {
             On::Issue(key) => issue_project(c, key)?,
-            On::Space(space) => space.to_string(),
+            On::Project(p) => p.to_string(),
         });
     }
     Ok(cache.as_deref().unwrap_or_default())

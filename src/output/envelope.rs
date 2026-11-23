@@ -24,41 +24,16 @@ pub struct Envelope {
     next: Option<Value>,
 }
 
-/// Start an envelope. The arguments are ignored (transition shim: the old
-/// envelope named the command and resource type; the caller already knows
-/// what it ran).
-pub fn envelope(_command: &str, _resource_type: &str) -> Envelope {
+/// Start a success envelope.
+pub fn envelope() -> Envelope {
     Envelope { next: None }
 }
 
 impl Envelope {
-    /// Transition shim: the envelope no longer echoes inputs.
-    #[deprecated(note = "the envelope no longer echoes the request; remove the call")]
-    pub fn request(self, _request: Value) -> Self {
-        self
-    }
-
     /// Mark a list result: `next` is the cursor, or `null` when there is no
     /// more.
     pub fn next_cursor(mut self, cursor: Option<impl Into<String>>) -> Self {
         self.next = Some(cursor.map_or(Value::Null, |c| Value::String(c.into())));
-        self
-    }
-
-    /// Transition shim for `{hasNextPage, nextCursor}`: sets `next` from
-    /// `nextCursor`.
-    pub fn page_info(mut self, page_info: Value) -> Self {
-        self.next = Some(match &page_info["nextCursor"] {
-            Value::String(s) => Value::String(s.clone()),
-            Value::Number(n) => Value::String(n.to_string()),
-            _ => Value::Null,
-        });
-        self
-    }
-
-    /// Transition shim: the envelope has no `meta` block.
-    #[deprecated(note = "the envelope has no meta block; remove the call")]
-    pub fn meta(self, _key: &str, _value: impl Into<Value>) -> Self {
         self
     }
 
@@ -76,7 +51,7 @@ impl Envelope {
 
 /// `{"ok":true,"data":data}`.
 pub fn success(data: Value) -> Value {
-    envelope("", "").data(data)
+    envelope().data(data)
 }
 
 /// The keys an envelope may have.
@@ -132,23 +107,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    #[allow(deprecated)]
     fn builds_the_success_envelope() {
-        let v = envelope("jira.x", "jira.y")
-            .request(json!({"jql": "x"}))
-            .meta("k", 1)
-            .next_cursor(Some("o:50"))
-            .data(json!([]));
+        let v = envelope().next_cursor(Some("o:50")).data(json!([]));
         assert_eq!(v.to_string(), r#"{"ok":true,"data":[],"next":"o:50"}"#);
-        let last = envelope("a", "b")
-            .next_cursor(None::<String>)
-            .data(json!([]));
+        let last = envelope().next_cursor(None::<String>).data(json!([]));
         assert_eq!(last["next"], Value::Null);
         assert!(success(json!({})).get("next").is_none());
-        let p = envelope("a", "b")
-            .page_info(json!({"hasNextPage": true, "nextCursor": "25"}))
-            .data(json!([]));
-        assert_eq!(p["next"], "25");
     }
 
     #[test]

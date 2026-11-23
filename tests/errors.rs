@@ -146,7 +146,7 @@ fn every_http_class_has_its_code_exit_code_hint_and_retry_flag() {
         let o = atlx(
             Some(&srv.base_url()),
             Some(TOKEN),
-            &["jira", "workitem", "get", id, "-o", "json"],
+            &["jira", "issue", "get", id, "-o", "json"],
         );
         assert_eq!(o.status.code(), Some(exit), "{id}: {}", stdout(&o));
         let v: Value = serde_json::from_str(&stdout(&o)).expect("one JSON document");
@@ -172,7 +172,7 @@ fn not_found_names_status_request_id_and_visibility() {
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "NOPE-1", "-o", "json"],
+        &["jira", "issue", "get", "NOPE-1", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(5));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -189,7 +189,7 @@ fn not_found_names_status_request_id_and_visibility() {
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "NOPE-1", "-o", "jsonl"],
+        &["jira", "issue", "get", "NOPE-1", "-o", "jsonl"],
     );
     assert_eq!(o.status.code(), Some(5));
     assert_eq!(stdout(&o).lines().count(), 1);
@@ -203,14 +203,14 @@ fn validation_errors_carry_field_messages_and_rate_limits_their_wait() {
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "BAD-1", "-o", "json"],
+        &["jira", "issue", "get", "BAD-1", "-o", "json"],
     );
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
     assert_eq!(v["error"]["fields"], json!({"summary": "is required"}));
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "BUSY-1", "-o", "json"],
+        &["jira", "issue", "get", "BUSY-1", "-o", "json"],
     );
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
     assert_eq!(v["error"]["retryAfterMs"], 0);
@@ -221,7 +221,7 @@ fn missing_token_is_config_and_tells_the_agent_to_ask() {
     let o = atlx(
         Some(NO_SITE),
         None,
-        &["jira", "workitem", "get", "A-1", "-o", "json"],
+        &["jira", "issue", "get", "A-1", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(4));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -248,12 +248,12 @@ fn text_mode_prints_readable_report_only_on_stderr() {
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "NOPE-1", "-o", "text"],
+        &["jira", "issue", "get", "NOPE-1", "-o", "text"],
     );
     assert_eq!(o.status.code(), Some(5));
     assert_eq!(stdout(&o), "");
     let err = stderr(&o);
-    assert!(err.starts_with("✗ Failed jira workitem get.\n"), "{err}");
+    assert!(err.starts_with("✗ Failed jira issue get.\n"), "{err}");
     assert!(
         err.contains("Error: Issue does not exist or you do not have permission to see it."),
         "{err}"
@@ -271,7 +271,7 @@ fn partial_batches_exit_3_and_strict_fails_whole() {
     let o = atlx(
         Some(&site),
         Some(TOKEN),
-        &["jira", "workitem", "get", "OK-1", "NOPE-1", "-o", "json"],
+        &["jira", "issue", "get", "OK-1", "NOPE-1", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(3), "{}", stdout(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -286,7 +286,7 @@ fn partial_batches_exit_3_and_strict_fails_whole() {
         Some(&site),
         Some(TOKEN),
         &[
-            "jira", "workitem", "get", "OK-1", "NOPE-1", "--strict", "-o", "json",
+            "jira", "issue", "get", "OK-1", "NOPE-1", "--strict", "-o", "json",
         ],
     );
     assert_eq!(o.status.code(), Some(5));
@@ -302,7 +302,7 @@ fn partial_batches_exit_3_and_strict_fails_whole() {
     let o = atlx(
         Some(&site),
         Some(TOKEN),
-        &["jira", "workitem", "get", "NOPE-1", "NOPE-2", "-o", "json"],
+        &["jira", "issue", "get", "NOPE-1", "NOPE-2", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(5));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -311,11 +311,7 @@ fn partial_batches_exit_3_and_strict_fails_whole() {
 
 #[test]
 fn clap_errors_are_structured_usage_errors_with_suggestions() {
-    let o = atlx(
-        None,
-        None,
-        &["jira", "workitem", "gett", "P-1", "-o", "json"],
-    );
+    let o = atlx(None, None, &["jira", "issue", "gett", "P-1", "-o", "json"]);
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(stderr(&o), "");
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -331,7 +327,7 @@ fn clap_errors_are_structured_usage_errors_with_suggestions() {
     let o = atlx(
         None,
         None,
-        &["jira", "workitem", "get", "P-1", "--bogus", "-o", "json"],
+        &["jira", "issue", "get", "P-1", "--bogus", "-o", "json"],
     );
     assert_eq!(o.status.code(), Some(2));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
@@ -347,7 +343,7 @@ fn clap_errors_are_structured_usage_errors_with_suggestions() {
     let o = atlx(
         None,
         None,
-        &["jira", "workitem", "get", "--bogus", "-o", "text"],
+        &["jira", "issue", "get", "--bogus", "-o", "text"],
     );
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(stdout(&o), "");
@@ -383,7 +379,7 @@ fn usage_errors_after_parsing_exit_2() {
 fn old_paths_and_removed_flags_are_plain_usage_errors() {
     for args in [
         &["whoami", "-o", "json"][..],
-        &["jira", "workitem", "query", "--select", "key", "-o", "json"][..],
+        &["jira", "issue", "list", "--select", "key", "-o", "json"][..],
     ] {
         let o = atlx(Some(NO_SITE), Some(TOKEN), args);
         assert_eq!(o.status.code(), Some(2), "{args:?}");
