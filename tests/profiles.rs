@@ -250,7 +250,7 @@ fn legacy_config_migrates_into_a_named_profile() {
 fn unknown_profile_is_a_config_error() {
     let sb = Sandbox::new("unknown");
     sb.write("site = \"acme.atlassian.net\"\n");
-    let o = sb.run(&["-p", "nope", "jira", "workitem", "get", "X-1", "-o", "json"]);
+    let o = sb.run(&["-p", "nope", "jira", "issue", "get", "X-1", "-o", "json"]);
     assert_eq!(o.status.code(), Some(4));
     let err = String::from_utf8_lossy(&o.stdout);
     assert!(err.contains("\"code\":\"config\""), "{err}");

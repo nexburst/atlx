@@ -1,6 +1,6 @@
-//! `jira workitem attachment query|get|download|thumbnail|upload|delete`.
+//! `jira issue attachment list|get|download|upload|delete`.
 
-use super::{enc, strip_media};
+use super::enc;
 use crate::client::{ApiError, Client, Part};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -10,23 +10,19 @@ use std::path::{Path, PathBuf};
 const NO_CHECK: (&str, &str) = ("X-Atlassian-Token", "no-check");
 
 /// The issue's `attachment` field.
-pub fn query(c: &Client, key: &str) -> Result<Value> {
+pub fn list(c: &Client, key: &str) -> Result<Vec<Value>> {
     let v = c.get(
         &format!("/rest/api/3/issue/{}", enc(key)),
         &[("fields", "attachment")],
     )?;
-    let mut list = match &v["fields"]["attachment"] {
-        Value::Array(a) => Value::Array(a.clone()),
-        _ => json!([]),
-    };
-    strip_media(&mut list);
-    Ok(list)
+    Ok(v["fields"]["attachment"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
 }
 
 pub fn get(c: &Client, id: &str) -> Result<Value> {
-    let mut v = c.get(&format!("/rest/api/3/attachment/{}", enc(id)), &[])?;
-    strip_media(&mut v);
-    Ok(v)
+    c.get(&format!("/rest/api/3/attachment/{}", enc(id)), &[])
 }
 
 /// Which bytes of an attachment to save.
@@ -57,7 +53,7 @@ pub fn download(
             let title = meta["filename"].as_str().unwrap_or_default();
             let name = crate::files::safe_file_name(title).ok_or_else(|| {
                 ApiError::usage(format!(
-                    "the attachment's name {title:?} is not safe to use as a file name; pass --output-path"
+                    "the attachment's name {title:?} is not safe to use as a file name; pass --path"
                 ))
             })?;
             PathBuf::from(format!("{prefix}{name}"))
@@ -73,7 +69,7 @@ pub fn download(
 }
 
 /// Upload all files in one multipart request, after checking each exists.
-pub fn upload(c: &Client, key: &str, files: &[PathBuf]) -> Result<Value> {
+pub fn upload(c: &Client, key: &str, files: &[PathBuf]) -> Result<Vec<Value>> {
     if files.is_empty() {
         return Err(ApiError::usage("pass at least one --file").into());
     }
@@ -81,13 +77,12 @@ pub fn upload(c: &Client, key: &str, files: &[PathBuf]) -> Result<Value> {
         return Err(ApiError::usage(format!("{} is not a readable file", bad.display())).into());
     }
     let parts: Vec<Part> = files.iter().map(|f| Part::file("file", f)).collect();
-    let mut v = c.post_multipart(
+    let v = c.post_multipart(
         &format!("/rest/api/3/issue/{}/attachments", enc(key)),
         &parts,
         &[NO_CHECK],
     )?;
-    strip_media(&mut v);
-    Ok(v)
+    Ok(v.as_array().cloned().unwrap_or_default())
 }
 
 pub fn delete(c: &Client, id: &str) -> Result<Value> {

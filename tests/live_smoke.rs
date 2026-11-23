@@ -14,7 +14,7 @@
 use atlx::bitbucket::{self, RepoQuery};
 use atlx::config::{Bitbucket, Config};
 use atlx::confluence::{self, Detail, GetOpts as ConfGetOpts, ReadFormat};
-use atlx::jira::{self, GetOpts as JiraGetOpts};
+use atlx::jira;
 
 fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
@@ -60,18 +60,7 @@ fn live_jira_myself_and_search() {
     );
 
     if let Some(key) = env_opt("ATLX_TEST_ISSUE") {
-        let issue = jira::get(
-            &client,
-            &key,
-            &JiraGetOpts {
-                fields: None,
-                extra: vec![],
-                comments: true,
-                remote_links: false,
-                full: false,
-            },
-        )
-        .expect("jira::get failed");
+        let issue = jira::issue(&client, &key).expect("jira::issue failed");
         assert_eq!(issue["key"], key);
     }
 }

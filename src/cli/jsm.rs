@@ -1,214 +1,111 @@
-//! `atlx jsm`: clap definitions and dispatch.
+//! `atlx jsm`: Jira Service Management. Same grammar as `atlx jira`.
 
-use super::util::{require_yes, text_arg};
+use super::jira::{Confirm, Many, Paging, listed, text_input};
 use crate::client::{ApiError, Client};
-use crate::output::envelope::envelope;
+use crate::jira::records::ISSUE_ROW;
+use crate::jsm::records::*;
+use crate::schema::{CommandMeta, Effect, Record};
 use crate::{jira, jsm};
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::PathBuf;
-
-pub(crate) const META: &[crate::schema::CommandMeta] = &[];
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum JsmCmd {
-    /// Customer requests
+    /// Customer requests and their comments, participants, approvals and
+    /// SLAs
     Request {
         #[command(subcommand)]
         cmd: RequestCmd,
+    },
+    /// The transitions a customer can make on a request
+    Transition {
+        #[command(subcommand)]
+        cmd: TransitionCmd,
+    },
+    /// Service desks
+    Desk {
+        #[command(subcommand)]
+        cmd: DeskCmd,
     },
     /// Request types and their fields
     RequestType {
         #[command(subcommand)]
         cmd: TypeCmd,
     },
-    /// Approvals on requests
-    Approval {
-        #[command(subcommand)]
-        cmd: ApprovalCmd,
-    },
-    /// Customer portals
-    Portal {
-        #[command(subcommand)]
-        cmd: DeskListCmd,
-    },
-    /// Service desks (atlx extra)
-    Servicedesk {
-        #[command(subcommand)]
-        cmd: DeskListCmd,
-    },
-    /// Agent queues (atlx extra)
+    /// Agent queues and the issues in them
     Queue {
         #[command(subcommand)]
         cmd: QueueCmd,
     },
-    /// Service level agreements
-    Sla {
-        #[command(subcommand)]
-        cmd: SlaCmd,
-    },
     /// Knowledge base articles
-    KnowledgeArticle {
+    Article {
         #[command(subcommand)]
         cmd: ArticleCmd,
     },
 }
 
-#[derive(Subcommand)]
-pub(crate) enum DeskListCmd {
-    /// List them
-    Query {
-        /// Project key or name contains
-        #[arg(long)]
-        query_term: Option<String>,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Zero-based offset (atlx extra)
-        #[arg(long, default_value_t = 0)]
-        start: usize,
-    },
+/// The request a sub-resource belongs to.
+#[derive(Args)]
+pub(crate) struct RequestArg {
+    /// Request key, ID or URL
+    #[arg(long)]
+    request: String,
 }
 
+/// A service desk.
 #[derive(Args)]
 pub(crate) struct DeskArg {
     /// Service desk ID, project key, exact name or portal URL
-    #[arg(long, aliases = ["service-desk-id", "servicedesk"])]
-    service_desk: String,
-}
-
-#[derive(Args)]
-pub(crate) struct TypeIds {
-    /// Service desk ID, project key or exact name
-    #[arg(long, alias = "service-desk")]
-    service_desk_id: String,
-    /// Request type ID or exact name
-    #[arg(long, alias = "request-type")]
-    request_type_id: String,
-}
-
-#[derive(Subcommand)]
-pub(crate) enum TypeCmd {
-    /// List request types, of one service desk or all
-    Query {
-        /// Portal (service desk) ID or URL
-        #[arg(long, aliases = ["service-desk", "servicedesk"])]
-        portal_id: Option<String>,
-        /// Name or description contains
-        #[arg(long)]
-        query_term: Option<String>,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-    },
-    /// A request type's fields
-    Field {
-        #[command(subcommand)]
-        cmd: FieldsCmd,
-    },
-    /// Same as `field`
-    Fields {
-        #[command(subcommand)]
-        cmd: FieldsCmd,
-    },
-    /// The form behind a request type
-    Form {
-        #[command(subcommand)]
-        cmd: FormCmd,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum FieldsCmd {
-    /// Get them, with allowed values
-    Get(TypeIds),
-}
-
-#[derive(Subcommand)]
-pub(crate) enum FormCmd {
-    /// Its fields, and an example answers document
-    Get {
-        #[command(flatten)]
-        desk: DeskArg,
-        /// Request type ID or exact name
-        #[arg(long)]
-        request_type: Option<String>,
-        /// Only the example answers document
-        #[arg(long)]
-        example_only: bool,
-    },
-}
-
-#[derive(Args)]
-pub(crate) struct NewRequestArgs {
-    #[command(flatten)]
-    desk: DeskArg,
-    /// Request type ID or exact name; without it the error lists the types
-    #[arg(long, aliases = ["request-type-id"])]
-    request_type: Option<String>,
-    /// Summary
     #[arg(long)]
-    summary: Option<String>,
-    /// Description; `-` reads stdin
-    #[arg(long)]
-    description: Option<String>,
-    /// FIELD_ID=VALUE, sent as given (parsed as JSON when valid); repeatable
-    #[arg(long)]
-    field: Vec<String>,
-    /// JSON object of field IDs to REST values
-    #[arg(long)]
-    fields_json: Option<String>,
-    /// Question=value, by label or field ID; options by their label
-    #[arg(long, value_name = "QUESTION=VALUE")]
-    answer: Vec<String>,
-    /// JSON object of answers
-    #[arg(long, conflicts_with = "answers_file")]
-    answers_json: Option<String>,
-    /// File holding a JSON object of answers
-    #[arg(long)]
-    answers_file: Option<PathBuf>,
+    desk: String,
 }
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum RequestCmd {
-    /// Create a request
-    Create {
-        #[command(flatten)]
-        new: NewRequestArgs,
-        /// Raise it for this customer (atlx extra)
-        #[arg(long)]
-        on_behalf_of: Option<String>,
-    },
-    /// Check a request's values without creating it
-    Validate {
-        #[command(flatten)]
-        new: NewRequestArgs,
-    },
-    /// One request (atlx extra)
-    Get {
-        /// Request key, ID or URL
-        request: String,
-    },
-    /// Your requests (atlx extra)
-    Query {
+    /// Requests you can see, by status, desk, type or text
+    List {
         /// open, closed or all
         #[arg(long, value_parser = ["open", "closed", "all"])]
         status: Option<String>,
         /// Service desk ID, project key or exact name
-        #[arg(long, alias = "servicedesk")]
-        service_desk: Option<String>,
-        /// Request type ID or exact name (needs --service-desk)
-        #[arg(long, requires = "service_desk")]
+        #[arg(long)]
+        desk: Option<String>,
+        /// Request type ID or exact name (needs --desk)
+        #[arg(long = "type", requires = "desk")]
         request_type: Option<String>,
         /// Summary contains
-        #[arg(long)]
+        #[arg(short, long)]
         query: Option<String>,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Zero-based offset
-        #[arg(long, default_value_t = 0)]
-        start: usize,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// Requests by key, ID or URL
+    Get {
+        /// Request keys (`-` reads them from stdin)
+        #[arg(required = true)]
+        keys: Vec<String>,
+        #[command(flatten)]
+        many: Many,
+    },
+    /// Raise a request; the values are checked against the type's fields
+    /// first (preview with --dry-run)
+    Create(CreateArgs),
+    /// Make a customer transition (customers see it)
+    Transition {
+        /// Request key, ID or URL
+        key: String,
+        /// Transition ID or exact name
+        #[arg(long)]
+        to: String,
+        /// Comment, seen by customers
+        #[arg(long)]
+        comment: Option<String>,
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Comments on a request
     Comment {
@@ -220,204 +117,426 @@ pub(crate) enum RequestCmd {
         #[command(subcommand)]
         cmd: ParticipantCmd,
     },
-    /// Customer transitions (atlx extra)
-    Transition {
+    /// Approvals on a request
+    Approval {
         #[command(subcommand)]
-        cmd: TransitionCmd,
+        cmd: ApprovalCmd,
     },
+    /// Service level agreements on a request
+    Sla {
+        #[command(subcommand)]
+        cmd: SlaCmd,
+    },
+}
+
+#[derive(Args)]
+pub(crate) struct CreateArgs {
+    #[command(flatten)]
+    desk: DeskArg,
+    /// Request type ID or exact name; without it the error lists the types
+    #[arg(long = "type")]
+    request_type: Option<String>,
+    /// Summary
+    #[arg(long)]
+    summary: Option<String>,
+    /// Description (plain text; `-` reads stdin)
+    #[arg(long)]
+    description: Option<String>,
+    /// FIELD_ID=VALUE, sent as given (parsed as JSON when valid); repeatable
+    #[arg(long)]
+    field: Vec<String>,
+    /// JSON object of field IDs to REST values
+    #[arg(long)]
+    fields_json: Option<String>,
+    /// Question=value, by label or field ID; options by their label
+    #[arg(long, value_name = "QUESTION=VALUE")]
+    answer: Vec<String>,
+    /// JSON object of answers (see `request-type get`'s `example`)
+    #[arg(long, conflicts_with = "answers_file")]
+    answers_json: Option<String>,
+    /// File holding a JSON object of answers
+    #[arg(long)]
+    answers_file: Option<PathBuf>,
+    /// Raise it for this customer
+    #[arg(long)]
+    on_behalf_of: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum CommentCmd {
-    /// List comments, public and internal
+    /// A request's comments, public and internal
     List {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// Zero-based offset
-        #[arg(long, default_value_t = 0)]
-        start: usize,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        paging: Paging,
     },
-    /// Add a comment: customers see it unless --internal
+    /// Add a comment; customers see it unless --internal
     Create {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// Plain text or wiki markup; `-` reads stdin
-        #[arg(long)]
-        body: String,
+        #[command(flatten)]
+        request: RequestArg,
+        /// Plain text (`-` reads stdin)
+        #[arg(
+            long,
+            required_unless_present = "body_file",
+            conflicts_with = "body_file"
+        )]
+        body: Option<String>,
+        /// Read the body from this file
+        #[arg(long, value_name = "PATH")]
+        body_file: Option<PathBuf>,
         /// An internal note, hidden from customers
         #[arg(long)]
         internal: bool,
+        #[command(flatten)]
+        confirm: Confirm,
     },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ParticipantCmd {
-    /// List participants
+    /// A request's participants
     List {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        paging: Paging,
     },
     /// Add participants
-    Add {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// me, an email or an account ID; repeatable
-        #[arg(long, required = true)]
-        participant: Vec<String>,
+    Create {
+        /// me, an email or an account ID
+        #[arg(required = true)]
+        users: Vec<String>,
+        #[command(flatten)]
+        request: RequestArg,
     },
     /// Remove participants
-    Remove {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// me, an email or an account ID; repeatable
-        #[arg(long, required = true)]
-        participant: Vec<String>,
-        /// Confirm the removal (required)
-        #[arg(long, short)]
-        yes: bool,
+    Delete {
+        /// me, an email or an account ID
+        #[arg(required = true)]
+        users: Vec<String>,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        confirm: Confirm,
     },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum TransitionCmd {
-    /// The transitions you can make
-    Query {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-    },
-    /// Make one
-    Create {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// Transition ID or exact name
-        #[arg(long)]
-        transition: String,
-        /// Comment, seen by customers
-        #[arg(long)]
-        comment: Option<String>,
-    },
-}
-
-#[derive(Args)]
-pub(crate) struct DecideArgs {
-    /// Request key, ID or URL
-    #[arg(long)]
-    request: String,
-    /// Approval ID [default: the only pending one you can answer]
-    #[arg(long)]
-    approval_id: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ApprovalCmd {
-    /// List a request's approvals
+    /// A request's approvals
     List {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        paging: Paging,
     },
-    /// One approval
+    /// Approvals by ID
     Get {
-        /// Request key, ID or URL
-        #[arg(long)]
-        request: String,
-        /// Approval ID
-        #[arg(long)]
-        approval_id: String,
+        /// Approval IDs (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        many: Many,
     },
     /// Approve, as yourself
-    Approve(DecideArgs),
+    Approve {
+        /// Approval ID [default: the only pending one you can answer]
+        id: Option<String>,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        confirm: Confirm,
+    },
     /// Decline, as yourself
-    Reject(DecideArgs),
-}
-
-#[derive(Subcommand)]
-pub(crate) enum QueueCmd {
-    /// A service desk's queues, with counts
-    Query {
+    Decline {
+        /// Approval ID [default: the only pending one you can answer]
+        id: Option<String>,
         #[command(flatten)]
-        desk: DeskArg,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Zero-based offset
-        #[arg(long, default_value_t = 0)]
-        start: usize,
-    },
-    /// What is in a queue
-    Workitems {
-        #[command(subcommand)]
-        cmd: QueueItemsCmd,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum QueueItemsCmd {
-    /// List the work items
-    Query {
+        request: RequestArg,
         #[command(flatten)]
-        desk: DeskArg,
-        /// Queue ID
-        #[arg(long)]
-        queue: String,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Zero-based offset
-        #[arg(long, default_value_t = 0)]
-        start: usize,
+        confirm: Confirm,
     },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum SlaCmd {
-    /// A work item's SLAs
+    /// A request's SLAs
+    List {
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// SLAs by ID or name
     Get {
-        /// Work item key
+        /// SLA IDs or names (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        many: Many,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TransitionCmd {
+    /// The transitions you can make on a request
+    List {
+        #[command(flatten)]
+        request: RequestArg,
+        #[command(flatten)]
+        paging: Paging,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum DeskCmd {
+    /// Service desks, by project key or name
+    List {
+        /// Project key or name contains
+        #[arg(short, long)]
+        query: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TypeCmd {
+    /// Request types, of one service desk or all
+    List {
+        /// Service desk ID, project key or exact name
         #[arg(long)]
-        workitem: String,
-        /// Only this SLA: name or ID
+        desk: Option<String>,
+        /// Name or description contains
+        #[arg(short, long)]
+        query: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// Request types by ID or exact name, with their fields and an example
+    /// answers document (use --full to see them)
+    Get {
+        /// Request type IDs or names (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        desk: DeskArg,
+        #[command(flatten)]
+        many: Many,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum QueueCmd {
+    /// A service desk's queues, with counts
+    List {
+        #[command(flatten)]
+        desk: DeskArg,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// The issues in a queue
+    Issue {
+        #[command(subcommand)]
+        cmd: QueueIssueCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum QueueIssueCmd {
+    /// The issues in a queue
+    List {
+        /// Queue ID
         #[arg(long)]
-        sla: Option<String>,
+        queue: String,
+        #[command(flatten)]
+        desk: DeskArg,
+        #[command(flatten)]
+        paging: Paging,
     },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ArticleCmd {
-    /// Search a project's knowledge base
-    Query {
-        /// Project ID, key, ARI or URL
+    /// Knowledge base articles matching text, in one desk or all
+    Search {
+        /// Words to look for
+        #[arg(required = true)]
+        text: Vec<String>,
+        /// Service desk ID, project key or exact name
         #[arg(long)]
-        project_id: String,
-        /// Text to search for; REST needs one (atlx extra)
-        #[arg(long)]
-        query: Option<String>,
-        /// Most articles to return (atlx extra)
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
+        desk: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
     },
 }
+
+const R: Effect = Effect::Read;
+const W: Effect = Effect::Write;
+const D: Effect = Effect::Destructive;
+
+const fn m(
+    path: &'static str,
+    effect: Effect,
+    record: &'static Record,
+    examples: &'static [&'static str],
+) -> CommandMeta {
+    CommandMeta::new(path, effect)
+        .record(record)
+        .examples(examples)
+}
+
+/// Anything customers see (public comments, transitions, approvals) is
+/// destructive: it needs `--yes`.
+pub(crate) const META: &[CommandMeta] = &[
+    m(
+        "jsm request list",
+        R,
+        &REQUEST,
+        &[
+            "atlx jsm request list --status open --desk HELP",
+            "atlx jsm request list -q vpn --limit 10",
+        ],
+    ),
+    m(
+        "jsm request get",
+        R,
+        &REQUEST,
+        &["atlx jsm request get HELP-12"],
+    ),
+    m(
+        "jsm request create",
+        W,
+        &REQUEST,
+        &[
+            "atlx jsm request create --desk HELP --type 'Get IT help' --summary 'VPN down' --description 'Since 9am'",
+            "atlx jsm request create --desk HELP --type 'Get IT help' --answers-file answers.json --dry-run",
+        ],
+    ),
+    m(
+        "jsm request transition",
+        D,
+        &TRANSITIONED,
+        &["atlx jsm request transition HELP-12 --to Resolve --comment 'Fixed' --yes"],
+    ),
+    m(
+        "jsm request comment list",
+        R,
+        &COMMENT,
+        &["atlx jsm request comment list --request HELP-12"],
+    ),
+    m(
+        "jsm request comment create",
+        D,
+        &COMMENT,
+        &[
+            "atlx jsm request comment create --request HELP-12 --body 'Looking into it' --yes",
+            "atlx jsm request comment create --request HELP-12 --body 'Agent note' --internal --yes",
+        ],
+    ),
+    m(
+        "jsm request participant list",
+        R,
+        &PARTICIPANT,
+        &["atlx jsm request participant list --request HELP-12"],
+    ),
+    m(
+        "jsm request participant create",
+        W,
+        &PARTICIPANT,
+        &["atlx jsm request participant create alice@example.com --request HELP-12"],
+    ),
+    m(
+        "jsm request participant delete",
+        D,
+        &PARTICIPANT,
+        &["atlx jsm request participant delete alice@example.com --request HELP-12 --yes"],
+    ),
+    m(
+        "jsm request approval list",
+        R,
+        &APPROVAL,
+        &["atlx jsm request approval list --request HELP-12"],
+    ),
+    m(
+        "jsm request approval get",
+        R,
+        &APPROVAL,
+        &["atlx jsm request approval get 7 --request HELP-12"],
+    ),
+    m(
+        "jsm request approval approve",
+        D,
+        &APPROVAL,
+        &["atlx jsm request approval approve --request HELP-12 --yes"],
+    ),
+    m(
+        "jsm request approval decline",
+        D,
+        &APPROVAL,
+        &["atlx jsm request approval decline 7 --request HELP-12 --yes"],
+    ),
+    m(
+        "jsm request sla list",
+        R,
+        &SLA,
+        &["atlx jsm request sla list --request HELP-12"],
+    ),
+    m(
+        "jsm request sla get",
+        R,
+        &SLA,
+        &["atlx jsm request sla get 'Time to resolution' --request HELP-12"],
+    ),
+    m(
+        "jsm transition list",
+        R,
+        &TRANSITION,
+        &["atlx jsm transition list --request HELP-12"],
+    ),
+    m("jsm desk list", R, &DESK, &["atlx jsm desk list -q help"]),
+    m(
+        "jsm request-type list",
+        R,
+        &REQUEST_TYPE,
+        &["atlx jsm request-type list --desk HELP"],
+    ),
+    m(
+        "jsm request-type get",
+        R,
+        &REQUEST_TYPE,
+        &["atlx jsm request-type get 'Get IT help' --desk HELP --full"],
+    ),
+    m(
+        "jsm queue list",
+        R,
+        &QUEUE,
+        &["atlx jsm queue list --desk HELP"],
+    ),
+    m(
+        "jsm queue issue list",
+        R,
+        &ISSUE_ROW,
+        &["atlx jsm queue issue list --queue 3 --desk HELP"],
+    ),
+    m(
+        "jsm article search",
+        R,
+        &ARTICLE,
+        &["atlx jsm article search vpn --desk HELP"],
+    ),
+];
 
 fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
 }
 
-fn out(c: &Client, command: &str, kind: &str, request: Value, data: Value) -> Result<Value> {
-    let mut request = request;
-    request["site"] = jira::site(c).into();
-    Ok(envelope(&format!("jsm.{command}"), &format!("jsm.{kind}"))
-        .request(request)
-        .data(data))
-}
-
-fn answers(a: &NewRequestArgs) -> Result<Vec<(String, Value)>> {
+fn answers(a: &CreateArgs) -> Result<Vec<(String, Value)>> {
     let mut out = Vec::new();
     let document = match (&a.answers_json, &a.answers_file) {
         (Some(text), _) => Some(text.clone()),
@@ -427,8 +546,7 @@ fn answers(a: &NewRequestArgs) -> Result<Vec<(String, Value)>> {
         (None, None) => None,
     };
     if let Some(text) = document {
-        let v: Value = serde_json::from_str(&text)
-            .map_err(|e| usage(format!("the answers are not valid JSON: {e}")))?;
+        let v = jira::json_value("the answers", &text)?;
         let map = v
             .as_object()
             .ok_or_else(|| usage("the answers must be a JSON object"))?;
@@ -443,12 +561,11 @@ fn answers(a: &NewRequestArgs) -> Result<Vec<(String, Value)>> {
     Ok(out)
 }
 
-/// `request create`, or `validate` when there is no `create`.
-fn new_request(c: &Client, a: NewRequestArgs, create: Option<Option<String>>) -> Result<Value> {
+fn create(c: &Client, a: CreateArgs) -> Result<Value> {
     let answers = answers(&a)?;
     let fields = jira::extra_fields(a.fields_json.as_deref(), &a.field)?;
-    let description = a.description.map(text_arg).transpose()?;
-    let desk = jsm::resolve_desk(c, &a.desk.service_desk)?;
+    let description = text_input(a.description.clone(), None)?;
+    let desk = jsm::resolve_desk(c, &a.desk.desk)?;
     let request_type = jsm::resolve_type(c, &desk, a.request_type.as_deref())?;
     let values = jsm::Values {
         summary: a.summary.as_deref(),
@@ -456,40 +573,19 @@ fn new_request(c: &Client, a: NewRequestArgs, create: Option<Option<String>>) ->
         fields,
         answers,
     };
-    let (verb, data) = match create {
-        Some(who) => (
-            "create",
-            jsm::create(c, &desk, &request_type, &values, who.as_deref())?,
-        ),
-        None => ("validate", jsm::validate(c, &desk, &request_type, &values)?),
-    };
-    let echo = json!({"serviceDeskId": desk, "requestTypeId": request_type});
-    out(c, &format!("request.{verb}"), "request", echo, data)
+    jsm::create(c, &desk, &request_type, &values, a.on_behalf_of.as_deref())
 }
 
 fn request(c: &Client, cmd: RequestCmd) -> Result<Value> {
     match cmd {
-        RequestCmd::Create { new, on_behalf_of } => new_request(c, new, Some(on_behalf_of)),
-        RequestCmd::Validate { new } => new_request(c, new, None),
-        RequestCmd::Get { request } => {
-            let data = jsm::get(c, &request)?;
-            out(
-                c,
-                "request.get",
-                "request",
-                json!({"request": request}),
-                data,
-            )
-        }
-        RequestCmd::Query {
+        RequestCmd::List {
             status,
-            service_desk,
+            desk,
             request_type,
             query,
-            limit,
-            start,
+            paging,
         } => {
-            let desk = service_desk
+            let desk = desk
                 .as_deref()
                 .map(|d| jsm::resolve_desk(c, d))
                 .transpose()?;
@@ -497,275 +593,167 @@ fn request(c: &Client, cmd: RequestCmd) -> Result<Value> {
                 (Some(d), Some(t)) => Some(jsm::resolve_type(c, d, Some(t))?),
                 _ => None,
             };
-            let data = jsm::query(
+            let q = jsm::RequestQuery {
+                status: status.as_deref(),
+                desk: desk.as_deref(),
+                request_type: kind.as_deref(),
+                search: query.as_deref(),
+            };
+            Ok(listed(jsm::requests(
                 c,
-                &jsm::RequestQuery {
-                    status: status.as_deref(),
-                    desk: desk.as_deref(),
-                    request_type: kind.as_deref(),
-                    search: query.as_deref(),
-                    start,
-                    limit,
-                },
-            )?;
-            out(
-                c,
-                "request.query",
-                "request",
-                json!({"status": status, "serviceDeskId": desk}),
-                data,
-            )
+                &q,
+                paging.limit(),
+                paging.cursor(),
+            )?))
         }
+        RequestCmd::Get { keys, many } => many.run(keys, |k| jsm::get(c, k)),
+        RequestCmd::Create(a) => create(c, a),
+        RequestCmd::Transition {
+            key,
+            to,
+            comment,
+            confirm: _,
+        } => jsm::transition(c, &key, &to, comment.as_deref()),
         RequestCmd::Comment { cmd } => match cmd {
-            CommentCmd::List {
-                request,
-                start,
-                limit,
-            } => {
-                let data = jsm::comments(c, &request, start, limit)?;
-                let echo = json!({"request": request, "start": start, "limit": limit});
-                out(c, "request.comment.list", "comment", echo, data)
-            }
+            CommentCmd::List { request, paging } => Ok(listed(jsm::comments(
+                c,
+                &request.request,
+                paging.limit(),
+                paging.cursor(),
+            )?)),
             CommentCmd::Create {
                 request,
                 body,
+                body_file,
                 internal,
+                confirm: _,
             } => {
-                let data = jsm::comment_create(c, &request, &text_arg(body)?, internal)?;
-                let echo = json!({"request": request, "internal": internal});
-                out(c, "request.comment.create", "comment", echo, data)
+                let body = text_input(body, body_file)?.unwrap_or_default();
+                jsm::comment_create(c, &request.request, &body, internal)
             }
         },
-        RequestCmd::Participant { cmd } => {
-            let (verb, request, data) = match cmd {
-                ParticipantCmd::List { request } => {
-                    let data = jsm::participants(c, &request)?;
-                    ("list", request, data)
-                }
-                ParticipantCmd::Add {
-                    request,
-                    participant,
-                } => {
-                    let data = jsm::participants_change(c, &request, &participant, true)?;
-                    ("add", request, data)
-                }
-                ParticipantCmd::Remove {
-                    request,
-                    participant,
-                    yes,
-                } => {
-                    require_yes(yes, "removing the participants")?;
-                    let data = jsm::participants_change(c, &request, &participant, false)?;
-                    ("remove", request, data)
-                }
-            };
-            let command = format!("request.participant.{verb}");
-            out(
-                c,
-                &command,
-                "participant",
-                json!({"request": request}),
-                data,
-            )
-        }
-        RequestCmd::Transition { cmd } => match cmd {
-            TransitionCmd::Query { request } => {
-                let data = jsm::transitions(c, &request)?;
-                out(
-                    c,
-                    "request.transition.query",
-                    "transition",
-                    json!({"request": request}),
-                    data,
-                )
+        RequestCmd::Participant { cmd } => match cmd {
+            ParticipantCmd::List { request, paging } => {
+                paging.local(jsm::participants(c, &request.request)?)
             }
-            TransitionCmd::Create {
+            ParticipantCmd::Create { users, request } => {
+                jsm::participants_change(c, &request.request, &users, true)
+            }
+            ParticipantCmd::Delete {
+                users,
                 request,
-                transition,
-                comment,
-            } => {
-                let data = jsm::transition(c, &request, &transition, comment.as_deref())?;
-                let echo = json!({"request": request, "transition": transition});
-                out(c, "request.transition.create", "transition", echo, data)
+                confirm: _,
+            } => jsm::participants_change(c, &request.request, &users, false),
+        },
+        RequestCmd::Approval { cmd } => match cmd {
+            ApprovalCmd::List { request, paging } => {
+                paging.local(jsm::approvals(c, &request.request)?)
+            }
+            ApprovalCmd::Get { ids, request, many } => {
+                many.run(ids, |id| jsm::approval_get(c, &request.request, id))
+            }
+            ApprovalCmd::Approve {
+                id,
+                request,
+                confirm: _,
+            } => jsm::approval_decide(c, &request.request, id.as_deref(), true),
+            ApprovalCmd::Decline {
+                id,
+                request,
+                confirm: _,
+            } => jsm::approval_decide(c, &request.request, id.as_deref(), false),
+        },
+        RequestCmd::Sla { cmd } => match cmd {
+            SlaCmd::List { request, paging } => paging.local(jsm::slas(c, &request.request)?),
+            SlaCmd::Get { ids, request, many } => {
+                many.run(ids, |id| jsm::sla(c, &request.request, id))
             }
         },
     }
-}
-
-fn request_type(c: &Client, cmd: TypeCmd) -> Result<Value> {
-    let fields = |ids: TypeIds, group: &str| {
-        let desk = jsm::resolve_desk(c, &ids.service_desk_id)?;
-        let kind = jsm::resolve_type(c, &desk, Some(&ids.request_type_id))?;
-        let data = jsm::fields(c, &desk, &kind)?;
-        let echo = json!({"serviceDeskId": desk, "requestTypeId": kind});
-        out(
-            c,
-            &format!("request-type.{group}.get"),
-            "request-type-field",
-            echo,
-            data,
-        )
-    };
-    match cmd {
-        TypeCmd::Query {
-            portal_id,
-            query_term,
-            limit,
-        } => {
-            let desk = portal_id
-                .as_deref()
-                .map(|p| jsm::resolve_desk(c, p))
-                .transpose()?;
-            let data = jsm::request_types(c, desk.as_deref(), query_term.as_deref(), limit)?;
-            out(
-                c,
-                "request-type.query",
-                "request-type",
-                json!({"portalId": desk}),
-                data,
-            )
-        }
-        TypeCmd::Field {
-            cmd: FieldsCmd::Get(ids),
-        } => fields(ids, "field"),
-        TypeCmd::Fields {
-            cmd: FieldsCmd::Get(ids),
-        } => fields(ids, "fields"),
-        TypeCmd::Form {
-            cmd:
-                FormCmd::Get {
-                    desk,
-                    request_type,
-                    example_only,
-                },
-        } => {
-            let desk = jsm::resolve_desk(c, &desk.service_desk)?;
-            let kind = jsm::resolve_type(c, &desk, request_type.as_deref())?;
-            let mut data = jsm::fields(c, &desk, &kind)?;
-            let example = jsm::example_answers(&data)?;
-            if example_only {
-                data = example;
-            } else {
-                data["exampleAnswers"] = example;
-            }
-            let echo = json!({"serviceDeskId": desk, "requestTypeId": kind});
-            out(c, "request-type.form.get", "request-type-form", echo, data)
-        }
-    }
-}
-
-fn approval(c: &Client, cmd: ApprovalCmd) -> Result<Value> {
-    let (verb, request, data) = match cmd {
-        ApprovalCmd::List { request } => {
-            let data = jsm::approvals(c, &request)?;
-            ("list", request, data)
-        }
-        ApprovalCmd::Get {
-            request,
-            approval_id,
-        } => {
-            let data = jsm::approval_get(c, &request, &approval_id)?;
-            ("get", request, data)
-        }
-        ApprovalCmd::Approve(a) => {
-            let data = jsm::approval_decide(c, &a.request, a.approval_id.as_deref(), true)?;
-            ("approve", a.request, data)
-        }
-        ApprovalCmd::Reject(a) => {
-            let data = jsm::approval_decide(c, &a.request, a.approval_id.as_deref(), false)?;
-            ("reject", a.request, data)
-        }
-    };
-    out(
-        c,
-        &format!("approval.{verb}"),
-        "approval",
-        json!({"request": request}),
-        data,
-    )
-}
-
-fn desks(c: &Client, cmd: DeskListCmd, group: &str) -> Result<Value> {
-    let DeskListCmd::Query {
-        query_term,
-        limit,
-        start,
-    } = cmd;
-    let data = jsm::desks(c, query_term.as_deref(), start, limit)?;
-    let echo = json!({"queryTerm": query_term, "limit": limit});
-    out(c, &format!("{group}.query"), group, echo, data)
 }
 
 pub(crate) fn jsm_cmd(c: &Client, cmd: JsmCmd) -> Result<Value> {
     match cmd {
         JsmCmd::Request { cmd } => request(c, cmd),
-        JsmCmd::RequestType { cmd } => request_type(c, cmd),
-        JsmCmd::Approval { cmd } => approval(c, cmd),
-        JsmCmd::Portal { cmd } => desks(c, cmd, "portal"),
-        JsmCmd::Servicedesk { cmd } => desks(c, cmd, "servicedesk"),
-        JsmCmd::Queue {
-            cmd: QueueCmd::Query { desk, limit, start },
+        JsmCmd::Transition {
+            cmd: TransitionCmd::List { request, paging },
+        } => paging.local(jsm::transitions(c, &request.request)?),
+        JsmCmd::Desk {
+            cmd: DeskCmd::List { query, paging },
+        } => Ok(listed(jsm::desks(
+            c,
+            query.as_deref(),
+            paging.limit(),
+            paging.cursor(),
+        )?)),
+        JsmCmd::RequestType { cmd } => match cmd {
+            TypeCmd::List {
+                desk,
+                query,
+                paging,
+            } => {
+                let desk = desk
+                    .as_deref()
+                    .map(|d| jsm::resolve_desk(c, d))
+                    .transpose()?;
+                Ok(listed(jsm::request_types(
+                    c,
+                    desk.as_deref(),
+                    query.as_deref(),
+                    paging.limit(),
+                    paging.cursor(),
+                )?))
+            }
+            TypeCmd::Get { ids, desk, many } => {
+                let desk = jsm::resolve_desk(c, &desk.desk)?;
+                many.run(ids, |id| {
+                    let kind = jsm::resolve_type(c, &desk, Some(id))?;
+                    jsm::request_type(c, &desk, &kind)
+                })
+            }
+        },
+        JsmCmd::Queue { cmd } => match cmd {
+            QueueCmd::List { desk, paging } => {
+                let desk = jsm::resolve_desk(c, &desk.desk)?;
+                Ok(listed(jsm::queues(
+                    c,
+                    &desk,
+                    paging.limit(),
+                    paging.cursor(),
+                )?))
+            }
+            QueueCmd::Issue {
+                cmd:
+                    QueueIssueCmd::List {
+                        queue,
+                        desk,
+                        paging,
+                    },
+            } => {
+                let desk = jsm::resolve_desk(c, &desk.desk)?;
+                Ok(listed(jsm::queue_issues(
+                    c,
+                    &desk,
+                    &queue,
+                    paging.limit(),
+                    paging.cursor(),
+                )?))
+            }
+        },
+        JsmCmd::Article {
+            cmd: ArticleCmd::Search { text, desk, paging },
         } => {
-            let desk = jsm::resolve_desk(c, &desk.service_desk)?;
-            let data = jsm::queues(c, &desk, start, limit)?;
-            out(
+            let desk = desk
+                .as_deref()
+                .map(|d| jsm::resolve_desk(c, d))
+                .transpose()?;
+            Ok(listed(jsm::articles(
                 c,
-                "queue.query",
-                "queue",
-                json!({"serviceDeskId": desk}),
-                data,
-            )
-        }
-        JsmCmd::Queue {
-            cmd:
-                QueueCmd::Workitems {
-                    cmd:
-                        QueueItemsCmd::Query {
-                            desk,
-                            queue,
-                            limit,
-                            start,
-                        },
-                },
-        } => {
-            let desk = jsm::resolve_desk(c, &desk.service_desk)?;
-            let data = jsm::queue_issues(c, &desk, &queue, start, limit)?;
-            let echo = json!({"serviceDeskId": desk, "queueId": queue});
-            out(c, "queue.workitems.query", "workitem", echo, data)
-        }
-        JsmCmd::Sla {
-            cmd: SlaCmd::Get { workitem, sla },
-        } => {
-            let data = jsm::sla(c, &workitem, sla.as_deref())?;
-            out(
-                c,
-                "sla.get",
-                "sla",
-                json!({"workitem": workitem, "sla": sla}),
-                data,
-            )
-        }
-        JsmCmd::KnowledgeArticle {
-            cmd:
-                ArticleCmd::Query {
-                    project_id,
-                    query,
-                    limit,
-                },
-        } => {
-            let query = query.ok_or_else(|| {
-                usage("pass --query: the REST API can only search articles, not list them")
-            })?;
-            let desk = jsm::desk_of_project(c, &project_id)?;
-            let data = jsm::articles(c, &desk, &query, limit)?;
-            let echo = json!({"projectId": project_id, "query": query});
-            out(
-                c,
-                "knowledge-article.query",
-                "knowledge-article",
-                echo,
-                data,
-            )
+                desk.as_deref(),
+                &text.join(" "),
+                paging.limit(),
+                paging.cursor(),
+            )?))
         }
     }
 }
@@ -777,48 +765,44 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn parses_jsm() {
+    fn parses_the_jsm_tree() {
         for ok in [
-            "atlx jsm servicedesk query",
-            "atlx jsm portal query --query-term IT --limit 5",
-            "atlx jsm request-type query --portal-id 1",
-            "atlx jsm request-type field get --service-desk-id 1 --request-type-id 10",
-            "atlx jsm request-type fields get --service-desk-id 1 --request-type-id 10",
-            "atlx jsm request-type form get --service-desk IT --request-type Laptop --example-only",
-            "atlx jsm request create --service-desk-id 1 --request-type-id 10 --summary Laptop --answer 'Model=Pro' --on-behalf-of ann",
-            "atlx jsm request validate --service-desk IT --request-type Laptop --answers-json {}",
-            "atlx jsm request get SD-1",
-            "atlx jsm request query --status open --service-desk 1 --request-type 10",
-            "atlx jsm request comment list --request SD-1",
-            "atlx jsm request comment create --request SD-1 --body hi --internal",
-            "atlx jsm request participant list --request SD-1",
-            "atlx jsm request participant add --request SD-1 --participant me",
-            "atlx jsm request participant remove --request SD-1 --participant me --yes",
-            "atlx jsm request transition query --request SD-1",
-            "atlx jsm request transition create --request SD-1 --transition Resolve",
-            "atlx jsm approval list --request SD-1",
-            "atlx jsm approval get --request SD-1 --approval-id 3",
-            "atlx jsm approval approve --request SD-1",
-            "atlx jsm approval reject --request SD-1 --approval-id 3",
-            "atlx jsm queue query --service-desk 1",
-            "atlx jsm queue workitems query --service-desk 1 --queue 4",
-            "atlx jsm sla get --workitem SD-1 --sla 'Time to resolution'",
-            "atlx jsm knowledge-article query --project-id SD --query vpn",
-        ] {
-            if let Err(e) = Cli::try_parse_from(shell_words(ok)) {
-                panic!("{ok}: {e}");
-            }
-        }
-        for bad in [
-            "atlx jsm request create --summary x",
-            "atlx jsm request participant add --request SD-1",
-            "atlx jsm request query --request-type 10",
-            "atlx jsm approval get --request SD-1",
+            "atlx jsm request list --status open --desk HELP --type 'IT help' -q vpn --limit 5",
+            "atlx jsm request get HELP-1 HELP-2",
+            "atlx jsm request create --desk HELP --type 1 --summary S --answer 'Urgency=High' --on-behalf-of a@example.com",
+            "atlx jsm request transition HELP-1 --to Resolve --yes",
+            "atlx jsm request comment list --request HELP-1",
+            "atlx jsm request comment create --request HELP-1 --body x --internal --yes",
+            "atlx jsm request participant list --request HELP-1",
+            "atlx jsm request participant create me a@example.com --request HELP-1",
+            "atlx jsm request participant delete me --request HELP-1 --yes",
+            "atlx jsm request approval list --request HELP-1",
+            "atlx jsm request approval get 7 --request HELP-1",
+            "atlx jsm request approval approve --request HELP-1 --yes",
+            "atlx jsm request approval decline 7 --request HELP-1 --yes",
+            "atlx jsm request sla list --request HELP-1",
+            "atlx jsm request sla get 1 --request HELP-1",
+            "atlx jsm transition list --request HELP-1",
+            "atlx jsm desk list -q help",
+            "atlx jsm request-type list --desk HELP",
+            "atlx jsm request-type get 1 --desk HELP",
+            "atlx jsm queue list --desk HELP",
+            "atlx jsm queue issue list --queue 3 --desk HELP",
+            "atlx jsm article search vpn reset --desk HELP",
         ] {
             assert!(
-                Cli::try_parse_from(shell_words(bad)).is_err(),
-                "expected error for: {bad}"
+                Cli::try_parse_from(shell_words(ok)).is_ok(),
+                "{ok}: {:?}",
+                Cli::try_parse_from(shell_words(ok)).err()
             );
+        }
+        for bad in [
+            "atlx jsm request query",
+            "atlx jsm servicedesk query",
+            "atlx jsm request list --type x",
+            "atlx jsm request comment create --request HELP-1",
+        ] {
+            assert!(Cli::try_parse_from(shell_words(bad)).is_err(), "{bad}");
         }
     }
 }

@@ -1,47 +1,93 @@
-//! `jira sprint` lifecycle, `jira board` details, and the Agile flags of
-//! `workitem create|update`.
+//! `jira board`, `jira board quick-filter` and `jira sprint`.
 
-use crate::cli::util::require_yes;
+use super::{Confirm, Many, Paging, listed};
 use crate::client::{ApiError, Client};
 use crate::jira::{self, agile};
-use crate::output::envelope::envelope;
 use crate::time::epoch_millis;
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Agile flags on `workitem create` and `workitem update`.
-#[derive(Args)]
-pub(crate) struct PlanningArgs {
-    /// Sprint ID, ARI, URL or name (active and future sprints), or "none"
-    /// for the backlog
-    #[arg(long)]
-    sprint: Option<String>,
-    /// Story points, or "none"; the field comes from the space's boards
-    #[arg(long)]
-    story_points: Option<String>,
-    /// Original estimate: a duration like "1d 4h", or seconds
-    #[arg(long)]
-    original_estimate: Option<String>,
-    /// Remaining estimate: a duration like 2h, or seconds
-    #[arg(long)]
-    remaining_estimate: Option<String>,
-    /// Team ID or ARI, or "none"
-    #[arg(long)]
-    team: Option<String>,
+#[derive(Subcommand)]
+pub(crate) enum BoardCmd {
+    /// Agile boards, by project, type, name or filter
+    List {
+        /// Project key or ID
+        #[arg(long)]
+        project: Option<String>,
+        /// Board type
+        #[arg(long = "type", value_enum)]
+        board_type: Option<jira::BoardType>,
+        /// Name contains
+        #[arg(short, long)]
+        query: Option<String>,
+        /// Boards showing this filter (ID or URL)
+        #[arg(long)]
+        filter: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// Boards by ID, URL or exact name, with columns and estimation
+    Get {
+        /// Board IDs (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        many: Many,
+    },
+    /// Create a board on a filter
+    Create {
+        /// Board name
+        #[arg(long)]
+        name: String,
+        /// Board type
+        #[arg(long = "type", value_enum)]
+        board_type: jira::BoardType,
+        /// The filter it shows (ID or URL)
+        #[arg(long)]
+        filter: String,
+    },
+    /// Delete a board
+    Delete {
+        /// Board ID, URL or exact name
+        id: String,
+        #[command(flatten)]
+        confirm: Confirm,
+    },
+    /// A board's quick filters
+    QuickFilter {
+        #[command(subcommand)]
+        cmd: QuickFilterCmd,
+    },
 }
 
-impl PlanningArgs {
-    pub(super) fn planning(&self) -> agile::Planning<'_> {
-        agile::Planning {
-            sprint: self.sprint.as_deref(),
-            story_points: self.story_points.as_deref(),
-            original_estimate: self.original_estimate.as_deref(),
-            remaining_estimate: self.remaining_estimate.as_deref(),
-            team: self.team.as_deref(),
-        }
-    }
+#[derive(Args)]
+pub(crate) struct BoardArg {
+    /// Board ID, URL or exact name
+    #[arg(long)]
+    board: String,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum QuickFilterCmd {
+    /// A board's quick filters
+    List {
+        #[command(flatten)]
+        board: BoardArg,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// Quick filters by ID
+    Get {
+        /// Quick filter IDs (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        board: BoardArg,
+        #[command(flatten)]
+        many: Many,
+    },
 }
 
 #[derive(Args)]
@@ -60,199 +106,99 @@ pub(crate) struct SprintFields {
     end_date: Option<String>,
 }
 
+/// A sprint given by ID, ARI or URL, or by exact name with --board.
 #[derive(Args)]
 pub(crate) struct SprintTarget {
-    /// Sprint ID, ARI or URL, or its exact name with --board-id
-    #[arg(long)]
+    /// Sprint ID, ARI or URL, or its exact name with --board
     id: String,
     /// The board to look a sprint name up on
     #[arg(long)]
-    board_id: Option<String>,
+    board: Option<String>,
 }
 
-#[derive(Args)]
-pub(crate) struct GetArgs {
-    /// Sprint ID, ARI or URL
-    #[arg(value_name = "id", conflicts_with = "id")]
-    id_arg: Option<String>,
-    /// Same as the positional argument
-    #[arg(long)]
-    id: Option<String>,
-}
-
-#[derive(Args)]
-pub(crate) struct CreateArgs {
-    /// Board ID, ARI, URL or exact name
-    #[arg(long)]
-    board_id: String,
-    #[command(flatten)]
-    fields: SprintFields,
-}
-
-#[derive(Args)]
-pub(crate) struct UpdateSprintArgs {
-    #[command(flatten)]
-    target: SprintTarget,
-    #[command(flatten)]
-    fields: SprintFields,
-    /// future, active or closed
-    #[arg(long, value_parser = ["future", "active", "closed"])]
-    state: Option<String>,
-    /// When closing: a sprint ID, ARI or URL, or "backlog", for work that
-    /// isn't done
-    #[arg(long)]
-    incomplete_issues_destination_id: Option<String>,
-}
-
-#[derive(Args)]
-pub(crate) struct StartArgs {
-    #[command(flatten)]
-    target: SprintTarget,
-    #[command(flatten)]
-    fields: SprintFields,
-    /// Length in days or weeks, e.g. 10d or 2w (atlx extra)
-    #[arg(long, conflicts_with = "end_date")]
-    duration: Option<String>,
-}
-
-#[derive(Args)]
-pub(crate) struct CompleteArgs {
-    #[command(flatten)]
-    target: SprintTarget,
-    #[command(flatten)]
-    fields: SprintFields,
-    /// A sprint ID, ARI or URL, or "backlog", for work that isn't done
-    /// [default: Jira decides]
-    #[arg(long, alias = "move-open-to")]
-    incomplete_issues_destination_id: Option<String>,
-}
-
-#[derive(Args)]
-pub(crate) struct DeleteArgs {
-    /// Sprint ID, ARI or URL, or its exact name with --board-id
-    #[arg(long, conflicts_with = "sprint_id")]
-    id: Option<String>,
-    /// Same as --id
-    #[arg(long)]
-    sprint_id: Option<String>,
-    /// The board to look a sprint name up on
-    #[arg(long)]
-    board_id: Option<String>,
-    /// Accepted for compatibility; nothing asks for confirmation
-    #[arg(long, short, hide = true)]
-    yes: bool,
-}
-
-#[derive(Args)]
-pub(crate) struct BoardGetArgs {
-    /// Board ID, ARI, URL or exact name; repeatable
-    #[arg(long, required = true)]
-    id: Vec<String>,
-}
-
-#[derive(Args)]
-pub(crate) struct BoardCreateArgs {
-    /// Board name
-    #[arg(long)]
-    name: String,
-    /// The filter the board shows (ID or URL)
-    #[arg(long)]
-    filter_id: String,
-    /// Board type
-    #[arg(long = "type", value_enum)]
-    board_type: jira::BoardType,
-}
-
-#[derive(Args)]
-pub(crate) struct BoardDeleteArgs {
-    /// Board ID, ARI, URL or exact name
-    #[arg(
-        long,
-        conflicts_with = "board_id",
-        required_unless_present = "board_id"
-    )]
-    id: Option<String>,
-    /// Same as --id
-    #[arg(long)]
-    board_id: Option<String>,
-    /// Confirm the delete (required)
-    #[arg(long, short)]
-    yes: bool,
+impl SprintTarget {
+    fn resolve(&self, c: &Client) -> Result<u64> {
+        agile::resolve_sprint(c, &self.id, self.board.as_deref())
+    }
 }
 
 #[derive(Subcommand)]
-pub(crate) enum BacklogCmd {
-    /// The work items in a board's backlog
-    Query {
-        /// Board ID, ARI, URL or exact name
-        #[arg(
-            long,
-            conflicts_with = "board_id",
-            required_unless_present = "board_id"
-        )]
-        id: Option<String>,
-        /// Same as --id
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum SprintCmd {
+    /// A board's sprints
+    List {
+        /// Board ID, URL or exact name
+        #[arg(long, conflicts_with_all = ["project", "issue"])]
+        board: Option<String>,
+        /// Use the only board of this project
+        #[arg(long, conflicts_with = "issue")]
+        project: Option<String>,
+        /// Use the only board of this issue's project
         #[arg(long)]
-        board_id: Option<String>,
-        /// Comma-separated IDs of quick filters to apply
+        issue: Option<String>,
+        /// Comma-separated states: active, future, closed
+        #[arg(long, conflicts_with = "current")]
+        state: Option<String>,
+        /// Only the active sprint
         #[arg(long)]
-        active_quick_filters: Option<String>,
-        /// Extra JQL (atlx extra)
-        #[arg(long)]
-        jql: Option<String>,
-        /// Most work items to return (atlx extra)
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
+        current: bool,
+        #[command(flatten)]
+        paging: Paging,
     },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum BoardProjectsCmd {
-    /// The spaces (projects) on a board
-    Query {
-        /// Board ID, ARI, URL or exact name
-        #[arg(
-            long,
-            conflicts_with = "board_id",
-            required_unless_present = "board_id"
-        )]
-        id: Option<String>,
-        /// Same as --id
-        #[arg(long)]
-        board_id: Option<String>,
-        #[arg(long, default_value_t = 50)]
-        max_results: usize,
-        /// Zero-based offset of the first space
-        #[arg(long, default_value_t = 0)]
-        start_at: usize,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum QuickFilterCmd {
-    /// A board's quick filters
-    Query {
-        /// Board ID, ARI, URL or exact name
-        #[arg(long)]
-        board_id: String,
-        #[arg(long, default_value_t = 50)]
-        max_results: usize,
-        /// Zero-based offset of the first filter
-        #[arg(long, default_value_t = 0)]
-        start_at: usize,
-    },
-    /// One quick filter
+    /// Sprints by ID, ARI or URL
     Get {
-        /// Board ID, ARI, URL or exact name
+        /// Sprint IDs (`-` reads them from stdin)
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[command(flatten)]
+        many: Many,
+    },
+    /// Create a future sprint on a board
+    Create {
+        /// Board ID, URL or exact name
         #[arg(long)]
-        board_id: String,
-        /// Quick filter ID
+        board: String,
+        #[command(flatten)]
+        fields: SprintFields,
+    },
+    /// Change some of a sprint's fields
+    Update {
+        #[command(flatten)]
+        target: SprintTarget,
+        #[command(flatten)]
+        fields: SprintFields,
+    },
+    /// Start a sprint; it needs --end-date or --duration unless it has an end
+    Start {
+        #[command(flatten)]
+        target: SprintTarget,
+        #[command(flatten)]
+        fields: SprintFields,
+        /// Length in days or weeks, e.g. 10d or 2w
+        #[arg(long, conflicts_with = "end_date")]
+        duration: Option<String>,
+    },
+    /// Complete an active sprint
+    Complete {
+        #[command(flatten)]
+        target: SprintTarget,
+        #[command(flatten)]
+        fields: SprintFields,
+        /// Where unfinished issues go: a sprint ID, ARI or URL, or backlog
+        /// [default: Jira decides]
         #[arg(long)]
-        quick_filter_id: String,
+        move_open_to: Option<String>,
+    },
+    /// Delete a sprint
+    Delete {
+        #[command(flatten)]
+        target: SprintTarget,
+        #[command(flatten)]
+        confirm: Confirm,
     },
 }
 
-fn usage(message: &str) -> anyhow::Error {
+fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
 }
 
@@ -262,7 +208,7 @@ fn date(flag: &str, value: Option<&str>) -> Result<Option<i64>> {
         return Ok(None);
     };
     if v.ends_with(['h', 'd', 'w', 'm', 'y']) {
-        return Err(usage(&format!(
+        return Err(usage(format!(
             "{flag} takes a date or timestamp, not '{v}'; use `sprint start --duration` for a length"
         )));
     }
@@ -302,7 +248,7 @@ fn destination(value: Option<&str>) -> Result<Option<agile::Destination>> {
                 agile::sprint_id(v)
                     .map(agile::Destination::Sprint)
                     .ok_or_else(|| {
-                        usage(&format!(
+                        usage(format!(
                             "destination '{v}' is not a sprint ID, ARI, URL or backlog"
                         ))
                     })
@@ -311,183 +257,130 @@ fn destination(value: Option<&str>) -> Result<Option<agile::Destination>> {
         .transpose()
 }
 
-fn sprint_out(c: &Client, verb: &str, request: Value, data: Value) -> Result<Value> {
-    let mut request = request;
-    request["site"] = jira::site(c).into();
-    Ok(envelope(&format!("jira.sprint.{verb}"), "jira.sprint")
-        .request(request)
-        .data(data))
-}
-
-pub(super) fn sprint_get(c: &Client, a: GetArgs) -> Result<Value> {
-    let id = a
-        .id_arg
-        .or(a.id)
-        .ok_or_else(|| usage("pass the sprint as an argument or with --id"))?;
-    let id = agile::resolve_sprint(c, &id, None)?;
-    sprint_out(c, "get", json!({"id": id}), agile::sprint_get(c, id)?)
-}
-
-pub(super) fn sprint_create(c: &Client, a: CreateArgs) -> Result<Value> {
-    let sprint = a.fields.sprint()?;
-    if sprint.name.is_none() {
-        return Err(usage("pass --name"));
-    }
-    let board = jira::resolve_board(c, &a.board_id)?;
-    let data = agile::sprint_create(c, board, &sprint)?;
-    sprint_out(c, "create", json!({"boardId": board}), data)
-}
-
-pub(super) fn sprint_update(c: &Client, a: UpdateSprintArgs) -> Result<Value> {
-    let sprint = agile::Sprint {
-        state: a.state.as_deref(),
-        ..a.fields.sprint()?
-    };
-    let to = destination(a.incomplete_issues_destination_id.as_deref())?;
-    if to.is_some() && sprint.state != Some("closed") {
-        return Err(usage(
-            "--incomplete-issues-destination-id needs --state closed",
-        ));
-    }
-    let id = agile::resolve_sprint(c, &a.target.id, a.target.board_id.as_deref())?;
-    let data = match to {
-        Some(_) => agile::sprint_complete(c, id, &sprint, to)?,
-        None => agile::sprint_update(c, id, &sprint)?,
-    };
-    sprint_out(c, "update", json!({"id": id}), data)
-}
-
-pub(super) fn sprint_start(c: &Client, a: StartArgs) -> Result<Value> {
-    let sprint = a.fields.sprint()?;
-    let length = a.duration.as_deref().map(duration).transpose()?;
-    let id = agile::resolve_sprint(c, &a.target.id, a.target.board_id.as_deref())?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
-    let data = agile::sprint_start(c, id, &sprint, length, now)?;
-    sprint_out(c, "start", json!({"id": id}), data)
-}
-
-pub(super) fn sprint_complete(c: &Client, a: CompleteArgs) -> Result<Value> {
-    let sprint = a.fields.sprint()?;
-    let to = destination(a.incomplete_issues_destination_id.as_deref())?;
-    let id = agile::resolve_sprint(c, &a.target.id, a.target.board_id.as_deref())?;
-    let data = agile::sprint_complete(c, id, &sprint, to)?;
-    sprint_out(c, "complete", json!({"id": id}), data)
-}
-
-pub(super) fn sprint_delete(c: &Client, a: DeleteArgs) -> Result<Value> {
-    let id =
-        a.id.or(a.sprint_id)
-            .ok_or_else(|| usage("pass --id or --sprint-id"))?;
-    let id = agile::resolve_sprint(c, &id, a.board_id.as_deref())?;
-    sprint_out(c, "delete", json!({"id": id}), agile::sprint_delete(c, id)?)
-}
-
-fn board_out(c: &Client, verb: &str, kind: &str, request: Value, data: Value) -> Result<Value> {
-    let mut request = request;
-    request["site"] = jira::site(c).into();
-    Ok(envelope(&format!("jira.board.{verb}"), kind)
-        .request(request)
-        .data(data))
-}
-
-/// `--id` or `--board-id`.
-fn board(c: &Client, id: Option<String>, board_id: Option<String>) -> Result<u64> {
-    let r = id
-        .or(board_id)
-        .ok_or_else(|| usage("pass --id or --board-id"))?;
-    jira::resolve_board(c, &r)
-}
-
-pub(super) fn board_get(c: &Client, a: BoardGetArgs) -> Result<Value> {
-    let mut ids = Vec::new();
-    let mut boards = Vec::new();
-    for given in &a.id {
-        let id = jira::resolve_board(c, given)?;
-        boards.push(agile::board_get(c, id)?);
-        ids.push(id.to_string());
-    }
-    board_out(c, "get", "jira.board", json!({"ids": ids}), boards.into())
-}
-
-pub(super) fn board_create(c: &Client, a: BoardCreateArgs) -> Result<Value> {
-    let filter: u64 = jira::filter_ref(&a.filter_id)
-        .parse()
-        .map_err(|_| usage("--filter-id must be a filter ID or URL"))?;
-    let data = agile::board_create(c, &a.name, a.board_type, filter)?;
-    let request = json!({"name": a.name, "filterId": filter});
-    board_out(c, "create", "jira.board", request, data)
-}
-
-pub(super) fn board_delete(c: &Client, a: BoardDeleteArgs) -> Result<Value> {
-    require_yes(a.yes, "deleting the board")?;
-    let id = board(c, a.id, a.board_id)?;
-    let data = agile::board_delete(c, id)?;
-    board_out(c, "delete", "jira.board", json!({"boardId": id}), data)
-}
-
-pub(super) fn backlog(c: &Client, cmd: BacklogCmd) -> Result<Value> {
-    let BacklogCmd::Query {
-        id,
-        board_id,
-        active_quick_filters,
-        jql,
-        limit,
-    } = cmd;
-    let id = board(c, id, board_id)?;
-    let filters = active_quick_filters
-        .as_deref()
-        .map(jira::csv)
-        .unwrap_or_default();
-    let data = agile::backlog(c, id, &filters, jql.as_deref(), 0, limit)?;
-    let request = json!({"boardId": id, "jql": jql});
-    board_out(c, "backlog.query", "jira.workitem", request, data)
-}
-
-pub(super) fn projects(c: &Client, cmd: BoardProjectsCmd) -> Result<Value> {
-    let BoardProjectsCmd::Query {
-        id,
-        board_id,
-        max_results,
-        start_at,
-    } = cmd;
-    let id = board(c, id, board_id)?;
-    let data = agile::board_projects(c, id, start_at, max_results)?.to_value("projects");
-    board_out(
-        c,
-        "projects.query",
-        "jira.board-project",
-        json!({"boardId": id.to_string()}),
-        data,
-    )
-}
-
-pub(super) fn quick_filter(c: &Client, cmd: QuickFilterCmd) -> Result<Value> {
-    const KIND: &str = "jira.quick-filter";
+pub(super) fn board(c: &Client, cmd: BoardCmd) -> Result<Value> {
     match cmd {
-        QuickFilterCmd::Query {
-            board_id,
-            max_results,
-            start_at,
+        BoardCmd::List {
+            project,
+            board_type,
+            query,
+            filter,
+            paging,
         } => {
-            let id = jira::resolve_board(c, &board_id)?;
-            let data = agile::quick_filters(c, id, start_at, max_results)?.to_value("quickFilters");
-            board_out(
+            let project = project.map(|p| jira::project_ref(&p));
+            let filter = filter.as_deref().map(jira::filter_ref);
+            let q = jira::BoardQuery {
+                project: project.as_deref(),
+                board_type,
+                name: query.as_deref(),
+                filter_id: filter.as_deref(),
+            };
+            Ok(listed(jira::boards(
                 c,
-                "quick-filter.query",
-                "jira.board-quick-filter",
-                json!({"boardId": id.to_string()}),
-                data,
-            )
+                &q,
+                paging.limit(),
+                paging.cursor(),
+            )?))
         }
-        QuickFilterCmd::Get {
-            board_id,
-            quick_filter_id,
+        BoardCmd::Get { ids, many } => {
+            many.run(ids, |id| agile::board_get(c, jira::resolve_board(c, id)?))
+        }
+        BoardCmd::Create {
+            name,
+            board_type,
+            filter,
         } => {
-            let id = jira::resolve_board(c, &board_id)?;
-            let filter = jira::entity_id(&quick_filter_id);
-            let data = agile::quick_filter(c, id, &filter)?;
-            let request = json!({"boardId": id, "quickFilterId": filter});
-            board_out(c, "quick-filter.get", KIND, request, data)
+            let filter: u64 = jira::filter_ref(&filter)
+                .parse()
+                .map_err(|_| usage("--filter must be a filter ID or URL"))?;
+            agile::board_create(c, &name, board_type, filter)
         }
+        BoardCmd::Delete { id, confirm: _ } => agile::board_delete(c, jira::resolve_board(c, &id)?),
+        BoardCmd::QuickFilter { cmd } => match cmd {
+            QuickFilterCmd::List { board, paging } => {
+                let id = jira::resolve_board(c, &board.board)?;
+                Ok(listed(agile::quick_filters(
+                    c,
+                    id,
+                    paging.limit(),
+                    paging.cursor(),
+                )?))
+            }
+            QuickFilterCmd::Get { ids, board, many } => {
+                let id = jira::resolve_board(c, &board.board)?;
+                many.run(ids, |q| agile::quick_filter(c, id, &jira::entity_id(q)))
+            }
+        },
+    }
+}
+
+pub(super) fn sprint(c: &Client, cmd: SprintCmd) -> Result<Value> {
+    match cmd {
+        SprintCmd::List {
+            board,
+            project,
+            issue,
+            state,
+            current,
+            paging,
+        } => {
+            let board = match (board, project, issue) {
+                (Some(b), _, _) => jira::resolve_board(c, &b)?,
+                (None, Some(p), _) => jira::project_board(c, &jira::project_ref(&p))?,
+                (None, None, Some(i)) => {
+                    jira::project_board(c, &jira::issue_project(c, &jira::issue_ref(&i))?)?
+                }
+                (None, None, None) => {
+                    return Err(ApiError::usage("pass --board, --project or --issue").into());
+                }
+            };
+            let state = if current {
+                Some("active".into())
+            } else {
+                state
+            };
+            Ok(listed(jira::sprints(
+                c,
+                board,
+                state.as_deref(),
+                paging.limit(),
+                paging.cursor(),
+            )?))
+        }
+        SprintCmd::Get { ids, many } => {
+            many.run(ids, |id| agile::sprint_get(c, jira::sprint_ref(id)?))
+        }
+        SprintCmd::Create { board, fields } => {
+            let sprint = fields.sprint()?;
+            if sprint.name.is_none() {
+                return Err(usage("pass --name"));
+            }
+            let board = jira::resolve_board(c, &board)?;
+            agile::sprint_create(c, board, &sprint)
+        }
+        SprintCmd::Update { target, fields } => {
+            let sprint = fields.sprint()?;
+            agile::sprint_update(c, target.resolve(c)?, &sprint)
+        }
+        SprintCmd::Start {
+            target,
+            fields,
+            duration: length,
+        } => {
+            let sprint = fields.sprint()?;
+            let length = length.as_deref().map(duration).transpose()?;
+            let id = target.resolve(c)?;
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+            agile::sprint_start(c, id, &sprint, length, now)
+        }
+        SprintCmd::Complete {
+            target,
+            fields,
+            move_open_to,
+        } => {
+            let sprint = fields.sprint()?;
+            let to = destination(move_open_to.as_deref())?;
+            agile::sprint_complete(c, target.resolve(c)?, &sprint, to)
+        }
+        SprintCmd::Delete { target, confirm: _ } => agile::sprint_delete(c, target.resolve(c)?),
     }
 }

@@ -220,8 +220,8 @@ fn board_commands_use_agile_endpoints() {
     );
     agile::board_create(&c, "Team", BoardType::Scrum, 100).unwrap();
     agile::board_delete(&c, 13).unwrap();
-    agile::board_projects(&c, 12, 0, 50).unwrap();
-    agile::quick_filters(&c, 12, 0, 50).unwrap();
+    agile::board_projects(&c, 12, 50, None).unwrap();
+    agile::quick_filters(&c, 12, 50, None).unwrap();
     agile::quick_filter(&c, 12, "1").unwrap();
     let r = srv.requests();
     let paths: Vec<&str> = r
@@ -269,11 +269,11 @@ fn backlog_applies_quick_filters_and_jql() {
         12,
         &filters,
         Some("a = 1 ORDER BY rank"),
-        0,
         50,
+        None,
     )
     .unwrap();
-    assert_eq!(out["issues"][0]["key"], "PROJ-1");
+    assert_eq!(out.0[0]["key"], "PROJ-1");
     let r = &srv.requests()[1];
     assert_eq!(r.path, "/rest/software/1.0/board/12/backlog");
     assert_eq!(
@@ -345,7 +345,7 @@ fn plan_finds_sprints_by_name_across_the_spaces_boards() {
         page(json!([{"id": 9, "name": "Alpha"}])),
         page(json!([])),
     ]);
-    let err = agile::plan(&srv.client(), On::Space("PROJ"), &p).unwrap_err();
+    let err = agile::plan(&srv.client(), On::Project("PROJ"), &p).unwrap_err();
     assert!(is_usage(&err));
     assert!(
         err.to_string().contains('7') && err.to_string().contains('9'),
@@ -391,7 +391,7 @@ fn plan_falls_back_to_field_names_and_lists_ambiguity() {
     assert_eq!(out.fields["customfield_2"], 3);
 
     let srv = MockServer::with_responses([page(json!([])), fields()]);
-    let err = agile::plan(&srv.client(), On::Space("PROJ"), &p).unwrap_err();
+    let err = agile::plan(&srv.client(), On::Project("PROJ"), &p).unwrap_err();
     assert!(is_usage(&err));
     assert!(err.to_string().contains("customfield_1"), "{err}");
 }
@@ -419,7 +419,7 @@ fn update_can_only_move_to_a_sprint() {
         ..Default::default()
     };
     let out = jira::update(&srv.client(), "PROJ-1", u).unwrap();
-    assert_eq!(out["sprint"], 42);
+    assert_eq!(out["sprint"], "42");
     let r = srv.requests();
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].path, "/rest/agile/1.0/sprint/42/issue");

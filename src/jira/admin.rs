@@ -1,8 +1,6 @@
 //! Space (project) lifecycle and lookups, versions, components and filters.
 
-use super::{
-    OffsetPage, enc, offset_page, paginate_values, resolve_account, strip_media, trailing_number,
-};
+use super::{Listed, Offsets, enc, offset_list, resolve_account, strip_media, trailing_number};
 use crate::client::{ApiError, Client};
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value, json};
@@ -38,10 +36,10 @@ pub fn numeric_id(what: &str, s: &str) -> Result<String> {
     id.ok_or_else(|| usage(format!("'{s}' is not a {what} ID")))
 }
 
-/// A space key or ID, given plainly, as a project ARI or as a `/projects/`
-/// URL. Stricter than the read commands: a work item key or URL names a
-/// space too, and must never be enough to delete or archive one.
-pub fn exact_space(s: &str) -> Result<String> {
+/// A project key or ID, given plainly, as a project ARI or as a `/projects/`
+/// URL. Stricter than the read commands: an issue key or URL names a
+/// project too, and must never be enough to delete or archive one.
+pub fn exact_project(s: &str) -> Result<String> {
     let s = s.trim();
     let candidate = if s.starts_with("ari:") {
         s.rsplit_once(":project/").map(|(_, id)| id)
@@ -61,7 +59,7 @@ pub fn exact_space(s: &str) -> Result<String> {
         .map(String::from)
         .ok_or_else(|| {
             usage(format!(
-                "'{s}' is not a space key, ID, ARI or /projects/ URL"
+                "'{s}' is not a project key, ID, ARI or /projects/ URL"
             ))
         })
 }
@@ -73,19 +71,22 @@ fn non_empty(body: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-// --- spaces ------------------------------------------------------------------
+// --- projects ------------------------------------------------------------------
 
-fn space_path(space: &str) -> Result<String> {
-    Ok(format!("/rest/api/3/project/{}", enc(&exact_space(space)?)))
+fn project_path(project: &str) -> Result<String> {
+    Ok(format!(
+        "/rest/api/3/project/{}",
+        enc(&exact_project(project)?)
+    ))
 }
 
-pub fn space_create(c: &Client, body: Map<String, Value>) -> Result<Value> {
+pub fn project_create(c: &Client, body: Map<String, Value>) -> Result<Value> {
     Ok(clean(c.post("/rest/api/3/project", &Value::Object(body))?))
 }
 
-pub fn space_update(
+pub fn project_update(
     c: &Client,
-    space: &str,
+    project: &str,
     body: Map<String, Value>,
     expand: Option<&str>,
 ) -> Result<Value> {
@@ -93,102 +94,35 @@ pub fn space_update(
     let q: Vec<(&str, &str)> = expand.iter().map(|e| ("expand", *e)).collect();
     Ok(clean(c.request(
         "PUT",
-        &space_path(space)?,
+        &project_path(project)?,
         &q,
         Some(&Value::Object(body)),
     )?))
 }
 
-/// Moves the space to the trash, from where it can be restored.
-pub fn space_delete(c: &Client, space: &str) -> Result<Value> {
-    c.delete(&space_path(space)?, &[("enableUndo", "true")])?;
-    Ok(json!({"idOrKey": exact_space(space)?, "deleted": true, "restorable": true}))
+/// Moves the project to the trash, from where it can be restored.
+pub fn project_delete(c: &Client, project: &str) -> Result<Value> {
+    c.delete(&project_path(project)?, &[("enableUndo", "true")])?;
+    Ok(json!({"id": exact_project(project)?, "deleted": true}))
 }
 
-pub fn space_archive(c: &Client, space: &str) -> Result<Value> {
+pub fn project_archive(c: &Client, project: &str) -> Result<Value> {
     c.request(
         "POST",
-        &format!("{}/archive", space_path(space)?),
+        &format!("{}/archive", project_path(project)?),
         &[],
         None,
     )?;
-    Ok(json!({"idOrKey": exact_space(space)?, "archived": true}))
+    Ok(json!({"key": exact_project(project)?, "archived": true}))
 }
 
-pub fn space_restore(c: &Client, space: &str) -> Result<Value> {
+pub fn project_restore(c: &Client, project: &str) -> Result<Value> {
     Ok(clean(c.request(
         "POST",
-        &format!("{}/restore", space_path(space)?),
+        &format!("{}/restore", project_path(project)?),
         &[],
         None,
     )?))
-}
-
-/// The statuses of each of the space's issue types.
-/// `{statuses}`: each of the space's statuses once, though Jira lists them
-/// per work item type.
-pub fn space_statuses(c: &Client, space: &str) -> Result<Value> {
-    let v = c.get(&format!("{}/statuses", space_path(space)?), &[])?;
-    let mut seen = std::collections::HashSet::new();
-    let mut statuses: Vec<Value> = v
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|kind| kind["statuses"].as_array().into_iter().flatten())
-        .filter(|s| seen.insert(s["id"].to_string()))
-        .map(|s| {
-            let category = &s["statusCategory"];
-            json!({
-                "id": s["id"],
-                "name": s["name"],
-                "statusCategory": {"key": category["key"], "name": category["name"]},
-            })
-        })
-        .collect();
-    // twg's order: by category, as Jira gave them within one.
-    statuses.sort_by_key(|s| match s["statusCategory"]["key"].as_str() {
-        Some("new") => 0,
-        Some("indeterminate") => 1,
-        Some("done") => 2,
-        _ => 3,
-    });
-    Ok(json!({"statuses": statuses}))
-}
-
-/// A space's `{key, name, id}` and its work item types.
-pub fn space_issue_types(c: &Client, space: &str, limit: usize) -> Result<(Value, Value)> {
-    let v = c.get(&space_path(space)?, &[])?;
-    let id = match &v["id"] {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        _ => return Err(anyhow!("space {space} has no ID")),
-    };
-    let (mut types, _) = super::issue_types(c, &id, None, limit)?;
-    for t in types.as_array_mut().into_iter().flatten() {
-        t["issueTypeId"] = t["id"].clone();
-    }
-    Ok((json!({"key": v["key"], "name": v["name"], "id": id}), types))
-}
-
-pub fn notification_scheme(c: &Client, space: &str, expand: Option<&str>) -> Result<Value> {
-    let q: Vec<(&str, &str)> = expand.iter().map(|e| ("expand", *e)).collect();
-    Ok(clean(c.get(
-        &format!("{}/notificationscheme", space_path(space)?),
-        &q,
-    )?))
-}
-
-/// Project types: all, or the given keys.
-pub fn space_types(c: &Client, keys: &[String]) -> Result<Value> {
-    if keys.is_empty() {
-        return Ok(clean(c.get("/rest/api/3/project/type", &[])?));
-    }
-    let mut out = Vec::new();
-    for key in keys {
-        let key = key.rsplit('/').next().unwrap_or(key);
-        out.push(c.get(&format!("/rest/api/3/project/type/{}", enc(key)), &[])?);
-    }
-    Ok(clean(out.into()))
 }
 
 // --- versions ----------------------------------------------------------------
@@ -206,11 +140,15 @@ pub struct VersionQuery<'a> {
     /// Comma-separated `released`, `unreleased`, `archived`.
     pub status: Option<&'a str>,
     pub order_by: Option<&'a str>,
-    pub start: usize,
-    pub limit: usize,
 }
 
-pub fn versions(c: &Client, space: &str, o: &VersionQuery) -> Result<OffsetPage> {
+pub fn versions(
+    c: &Client,
+    project: &str,
+    o: &VersionQuery,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
     let q: Vec<(&str, &str)> = [
         ("query", o.search),
         ("status", o.status),
@@ -219,27 +157,28 @@ pub fn versions(c: &Client, space: &str, o: &VersionQuery) -> Result<OffsetPage>
     .into_iter()
     .filter_map(|(k, v)| v.map(|v| (k, v)))
     .collect();
-    offset_page(
+    offset_list(
         c,
-        &format!("{}/version", space_path(space)?),
-        "values",
+        &format!("{}/version", project_path(project)?),
         &q,
-        o.start,
-        o.limit,
+        &[],
+        Offsets::values(),
+        limit,
+        cursor,
     )
 }
 
-pub fn version_create(c: &Client, space: &str, mut body: Map<String, Value>) -> Result<Value> {
-    let (_, id) = super::project_key_id(c, &exact_space(space)?)?;
+pub fn version_create(c: &Client, project: &str, mut body: Map<String, Value>) -> Result<Value> {
+    let (_, id) = super::project_key_id(c, &exact_project(project)?)?;
     let id: u64 = id
         .parse()
-        .map_err(|_| anyhow!("space ID '{id}' is not a number"))?;
+        .map_err(|_| anyhow!("project ID '{id}' is not a number"))?;
     body.insert("projectId".into(), id.into());
     c.post("/rest/api/3/version", &Value::Object(body))
 }
 
 pub fn version_get(c: &Client, id: &str) -> Result<Value> {
-    c.get(&version_path(id)?, &[])
+    c.get(&version_path(id)?, &[("expand", "issuesstatus")])
 }
 
 pub fn version_update(c: &Client, id: &str, body: Map<String, Value>) -> Result<Value> {
@@ -265,7 +204,7 @@ pub fn version_delete(
             let to = numeric_id("version", to)?;
             if to == this {
                 return Err(usage(
-                    "a version's work items can't move to the version being deleted",
+                    "a version's issues can't move to the version being deleted",
                 ));
             }
             let to: u64 = to
@@ -290,7 +229,7 @@ pub fn version_merge(c: &Client, id: &str, into: &str) -> Result<Value> {
         &[],
         None,
     )?;
-    Ok(json!({"id": from, "mergedInto": into, "deleted": true}))
+    Ok(json!({"id": from, "issue": into, "deleted": true}))
 }
 
 pub fn version_move(
@@ -310,10 +249,6 @@ pub fn version_move(
     c.post(&format!("{}/move", version_path(id)?), &body)
 }
 
-pub fn version_counts(c: &Client, id: &str) -> Result<Value> {
-    c.get(&format!("{}/relatedIssueCounts", version_path(id)?), &[])
-}
-
 // --- components --------------------------------------------------------------
 
 fn component_path(id: &str) -> Result<String> {
@@ -323,15 +258,14 @@ fn component_path(id: &str) -> Result<String> {
     ))
 }
 
-pub fn components(c: &Client, space: &str) -> Result<Value> {
-    Ok(clean(
-        c.get(&format!("{}/components", space_path(space)?), &[])?,
-    ))
+pub fn components(c: &Client, project: &str) -> Result<Vec<Value>> {
+    let v = c.get(&format!("{}/components", project_path(project)?), &[])?;
+    Ok(v.as_array().cloned().unwrap_or_default())
 }
 
-pub fn component_create(c: &Client, space: &str, mut body: Map<String, Value>) -> Result<Value> {
+pub fn component_create(c: &Client, project: &str, mut body: Map<String, Value>) -> Result<Value> {
     // The endpoint takes a key, never an ID.
-    let (key, _) = super::project_key_id(c, &exact_space(space)?)?;
+    let (key, _) = super::project_key_id(c, &exact_project(project)?)?;
     body.insert("project".into(), key.into());
     Ok(clean(
         c.post("/rest/api/3/component", &Value::Object(body))?,
@@ -353,16 +287,12 @@ pub fn component_delete(c: &Client, id: &str, move_to: Option<&str>) -> Result<V
     let to = move_to.map(|t| numeric_id("component", t)).transpose()?;
     if to.as_deref() == Some(this.as_str()) {
         return Err(usage(
-            "a component's work items can't move to the component being deleted",
+            "a component's issues can't move to the component being deleted",
         ));
     }
     let q: Vec<(&str, &str)> = to.iter().map(|t| ("moveIssuesTo", t.as_str())).collect();
     c.delete(&path, &q)?;
     Ok(json!({"id": this, "deleted": true}))
-}
-
-pub fn component_counts(c: &Client, id: &str) -> Result<Value> {
-    c.get(&format!("{}/relatedIssueCounts", component_path(id)?), &[])
 }
 
 // --- filters -----------------------------------------------------------------
@@ -392,15 +322,16 @@ pub fn resolve_filter(c: &Client, r: &str) -> Result<String> {
     if r.is_empty() {
         return Err(usage("pass a filter ID or name"));
     }
-    let found = paginate_values(
+    let (found, _) = offset_list(
         c,
         "/rest/api/3/filter/search",
         &[("filterName", r)],
-        0,
-        usize::MAX,
+        &[],
+        Offsets::values(),
+        crate::paging::HARD_CAP,
+        None,
     )?;
     let ids: Vec<String> = found
-        .values
         .iter()
         .filter(|f| {
             f["name"]
@@ -439,11 +370,9 @@ pub struct FilterQuery<'a> {
     pub order_by: Option<&'a str>,
     pub expand: Option<&'a str>,
     pub override_shares: Option<bool>,
-    pub start: usize,
-    pub limit: usize,
 }
 
-pub fn filters(c: &Client, o: &FilterQuery) -> Result<OffsetPage> {
+pub fn filters(c: &Client, o: &FilterQuery, limit: usize, cursor: Option<&str>) -> Result<Listed> {
     let owner = match (o.owner_account, o.owner) {
         (Some(id), _) => Some(id.to_string()),
         (None, Some(who)) => Some(resolve_account(c, who)?),
@@ -472,18 +401,20 @@ pub fn filters(c: &Client, o: &FilterQuery) -> Result<OffsetPage> {
     .filter_map(|(k, v)| v.map(|v| (k, v)))
     .collect();
     q.extend(ids.iter().map(|i| ("id", i.as_str())));
-    offset_page(
+    offset_list(
         c,
         "/rest/api/3/filter/search",
-        "values",
         &q,
-        o.start,
-        o.limit,
+        &[],
+        Offsets::values(),
+        limit,
+        cursor,
     )
 }
 
-pub fn favourite_filters(c: &Client) -> Result<Value> {
-    Ok(clean(c.get("/rest/api/3/filter/favourite", &[])?))
+pub fn favourite_filters(c: &Client) -> Result<Vec<Value>> {
+    let v = c.get("/rest/api/3/filter/favourite", &[])?;
+    Ok(v.as_array().cloned().unwrap_or_default())
 }
 
 pub fn filter_get(c: &Client, id: &str, expand: Option<&str>) -> Result<Value> {
@@ -582,27 +513,32 @@ pub fn filter_owner(c: &Client, id: &str, account: &str) -> Result<Value> {
     Ok(json!({"id": id, "accountId": account}))
 }
 
-pub fn filter_columns(c: &Client, id: &str) -> Result<Value> {
-    c.get(&format!("{}/columns", filter_path(id)), &[])
+pub fn filter_columns(c: &Client, id: &str) -> Result<Vec<Value>> {
+    let v = c.get(&format!("{}/columns", filter_path(id)), &[])?;
+    Ok(v.as_array().cloned().unwrap_or_default())
 }
 
-pub fn filter_columns_set(c: &Client, id: &str, columns: &[String]) -> Result<Value> {
+/// Sets the columns; returns them as `column list` shows them (without
+/// labels, which Jira does not echo).
+pub fn filter_columns_set(c: &Client, id: &str, columns: &[String]) -> Result<Vec<Value>> {
     c.put(
         &format!("{}/columns", filter_path(id)),
         &json!({"columns": columns}),
     )?;
-    Ok(json!({"id": id, "columns": columns}))
+    Ok(columns
+        .iter()
+        .map(|c| json!({"label": null, "value": c}))
+        .collect())
 }
 
 pub fn filter_columns_reset(c: &Client, id: &str) -> Result<Value> {
     c.delete(&format!("{}/columns", filter_path(id)), &[])?;
-    Ok(json!({"id": id, "columnsReset": true}))
+    Ok(json!({"id": id, "deleted": true}))
 }
 
-pub fn filter_shares(c: &Client, id: &str) -> Result<Value> {
-    Ok(clean(
-        c.get(&format!("{}/permission", filter_path(id)), &[])?,
-    ))
+pub fn filter_shares(c: &Client, id: &str) -> Result<Vec<Value>> {
+    let v = c.get(&format!("{}/permission", filter_path(id)), &[])?;
+    Ok(v.as_array().cloned().unwrap_or_default())
 }
 
 pub fn filter_share_add(c: &Client, id: &str, permission: &Value) -> Result<Value> {
@@ -623,18 +559,19 @@ pub fn filter_share_add(c: &Client, id: &str, permission: &Value) -> Result<Valu
 pub fn filter_share_remove(c: &Client, id: &str, permission: &str) -> Result<Value> {
     let p = numeric_id("share permission", permission)?;
     c.delete(&format!("{}/permission/{p}", filter_path(id)), &[])?;
-    Ok(json!({"id": id, "permissionId": p, "deleted": true}))
+    Ok(json!({"id": p, "filter": id, "deleted": true}))
 }
 
-pub fn filter_subscriptions(c: &Client, id: &str, start: usize, limit: usize) -> Result<Value> {
-    let end = start.saturating_add(limit.max(1) - 1);
-    let expand = format!("subscriptions[{start}:{end}]");
-    Ok(clean(
-        c.get(&filter_path(id), &[("expand", expand.as_str())])?["subscriptions"].clone(),
-    ))
+/// A filter's subscriptions (Jira returns them with the filter).
+pub fn filter_subscriptions(c: &Client, id: &str) -> Result<Vec<Value>> {
+    let v = c.get(&filter_path(id), &[("expand", "subscriptions")])?;
+    Ok(v["subscriptions"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
 }
 
-/// `workitem query --filter`: the filter's JQL.
+/// `issue list --filter`: the filter's JQL.
 pub fn filter_jql(c: &Client, r: &str) -> Result<String> {
     let id = resolve_filter(c, r)?;
     c.get(&filter_path(&id), &[])?["jql"]

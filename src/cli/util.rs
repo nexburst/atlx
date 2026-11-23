@@ -63,6 +63,7 @@ static PARTIAL_ERRORS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 static FAILED: AtomicBool = AtomicBool::new(false);
 
 /// Makes the run exit 1 after its result is printed.
+#[allow(dead_code)]
 pub(crate) fn mark_failed() {
     FAILED.store(true, Ordering::SeqCst);
 }

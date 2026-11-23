@@ -1,9 +1,10 @@
-//! Offline tests for Jira bulk commands, properties and user lookups.
+//! Offline tests for multi-issue reads and writes, properties and user
+//! lookups.
 
 mod common;
 
 use atlx::client::{ApiError, ErrorKind};
-use atlx::jira::bulk::{self, Fetch, Who};
+use atlx::jira::{self, bulk};
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
 
@@ -20,97 +21,84 @@ fn strings(v: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn fetch_batches_by_hundred_and_keeps_the_order_asked() {
-    let ids: Vec<String> = (1..=101).rev().map(|i| i.to_string()).collect();
+fn issues_batch_by_hundred_as_reads_and_keep_the_order_asked() {
+    let ids: Vec<String> = (1..=101).rev().map(|i| format!("P-{i}")).collect();
     let issues = |from: usize, to: usize| -> Vec<Value> {
         (from..=to)
             .map(|i| json!({"id": i.to_string(), "key": format!("P-{i}"), "fields": {}}))
             .collect()
     };
     let srv = MockServer::with_responses([
-        ok(json!({"issues": issues(2, 101)})),
+        ok(json!({"issues": issues(2, 101), "names": {"customfield_1": "Points"}})),
         ok(json!({"issues": issues(1, 1)})),
     ]);
-    let out = bulk::fetch(&srv.client(), &ids, &Fetch::default()).unwrap();
-    assert_eq!(out["issues"][0]["id"], "101");
-    assert_eq!(out["issues"][100]["id"], "1");
-    assert_eq!(out["missing"], json!([]));
+    let c = srv.client().with_mode(atlx::client::Mode::ReadOnly);
+    let (found, missing) = jira::issues(&c, &ids).unwrap();
+    assert_eq!(found[0]["key"], "P-101");
+    assert_eq!(found[100]["key"], "P-1");
+    assert_eq!(found[0]["names"]["customfield_1"], "Points");
+    assert!(missing.is_empty());
     let r = srv.requests();
-    assert_eq!(r.len(), 2);
+    assert_eq!(r.len(), 2, "bulkfetch is a read, allowed in read-only mode");
     assert_eq!(r[0].path, "/rest/api/3/issue/bulkfetch");
     assert_eq!(
         r[0].json_body()["issueIdsOrKeys"].as_array().unwrap().len(),
         100
     );
+    assert_eq!(r[0].json_body()["expand"], json!(["names"]));
 }
 
 #[test]
-fn fetch_names_what_is_missing_but_not_what_moved() {
+fn issues_name_what_is_missing_and_match_one_moved_issue() {
     let srv = MockServer::with_responses([
-        ok(json!({"issues": [{"id": "1", "key": "P-1", "fields": {}, "properties": {"k": 2}}]})),
+        ok(json!({"issues": [{"id": "1", "key": "P-1", "fields": {}}]})),
         ok(json!({"issues": [{"id": "9", "key": "NEW-9", "fields": {}}]})),
     ]);
     let c = srv.client();
-    let out = bulk::fetch(&c, &strings(&["P-1", "P-2"]), &Fetch::default()).unwrap();
-    assert_eq!(out["missing"], json!(["P-2"]));
-    assert_eq!(out["issues"][0]["properties"]["k"], 2);
-    let moved = bulk::fetch(&c, &strings(&["OLD-3"]), &Fetch::default()).unwrap();
-    assert_eq!(moved["missing"], json!([]));
+    let (found, missing) = jira::issues(&c, &strings(&["P-1", "P-2"])).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(missing, ["P-2"]);
+    let (moved, missing) = jira::issues(&c, &strings(&["OLD-3"])).unwrap();
+    assert_eq!(moved[0]["key"], "NEW-9");
+    assert!(missing.is_empty());
 }
 
 #[test]
-fn create_checks_every_item_first() {
+fn create_checks_every_item_first_and_names_failures() {
     let item = json!({"fields": {"summary": "s"}});
     assert!(is_usage(
         &bulk::create_input(json!([item.clone(), {"summary": "bare"}])).unwrap_err()
     ));
     assert!(bulk::create_input(Value::Array(vec![item.clone(); 51])).is_err());
-    let items = bulk::create_input(json!({"issueUpdates": [item]})).unwrap();
+    let items = bulk::create_input(json!({"issueUpdates": [item.clone(), item]})).unwrap();
     let srv = MockServer::with_responses([MockResponse::json(
         201,
-        json!({"issues": [{"id": "1", "key": "P-1"}], "errors": []}),
+        json!({"issues": [{"id": "1", "key": "P-1"}], "errors": [
+            {"failedElementNumber": 1, "status": 400,
+             "elementErrors": {"errorMessages": [], "errors": {"summary": "too long"}}}
+        ]}),
     )]);
-    let out = bulk::create(&srv.client(), &items).unwrap();
-    assert_eq!(out["issues"][0]["key"], "P-1");
+    let (created, failed) = bulk::create(&srv.client(), &items).unwrap();
+    assert_eq!(created[0]["key"], "P-1");
+    assert_eq!(failed[0].0, "#2");
+    assert_eq!(failed[0].1.message, "summary: too long");
+    assert_eq!(failed[0].1.fields, Some(json!({"summary": "too long"})));
     let r = &srv.requests()[0];
     assert_eq!(r.path, "/rest/api/3/issue/bulk");
-    assert_eq!(
-        r.json_body(),
-        json!({"issueUpdates": [{"fields": {"summary": "s"}}]})
-    );
 }
 
 #[test]
-fn transition_dry_run_sends_nothing() {
-    let srv = MockServer::with_responses([MockResponse::json(201, json!({"taskId": "t-1"}))]);
-    let c = srv.client();
-    let ids = strings(&["P-1", "p-1", "P-2"]);
-    let dry = bulk::transition(&c, &ids, "31", false, true).unwrap();
-    assert!(srv.requests().is_empty());
-    let out = bulk::transition(&c, &ids, "31", false, false).unwrap();
-    assert_eq!(out["taskId"], "t-1");
-    let r = &srv.requests()[0];
-    assert_eq!(r.path, "/rest/api/3/bulk/issues/transition");
-    assert_eq!(r.json_body(), dry["request"]);
-    assert_eq!(
-        r.json_body(),
-        json!({"bulkTransitionInputs": [{"selectedIssueIdsOrKeys": ["P-1", "P-2"],
-                "transitionId": "31"}],
-               "sendBulkNotification": false})
-    );
-    assert!(is_usage(
-        &bulk::transition(&c, &ids, "Done", false, true).unwrap_err()
-    ));
-}
-
-#[test]
-fn archive_and_unarchive() {
+fn archive_and_restore_report_failed_keys() {
     let srv = MockServer::with_responses([
-        ok(json!({"numberOfIssuesUpdated": 1})),
+        ok(json!({"numberOfIssuesUpdated": 1, "errors": {
+            "issueIsSubtask": {"count": 1, "issueIdsOrKeys": ["P-2"], "message": "subtasks can't be archived"}
+        }})),
         ok(json!({"numberOfIssuesUpdated": 1})),
     ]);
     let c = srv.client();
-    bulk::archive(&c, &strings(&["P-1"]), true).unwrap();
+    let (done, failed) = bulk::archive(&c, &strings(&["P-1", "P-2"]), true).unwrap();
+    assert_eq!(done, [json!({"key": "P-1", "archived": true})]);
+    assert_eq!(failed[0].0, "P-2");
     bulk::archive(&c, &strings(&["P-1"]), false).unwrap();
     assert!(is_usage(
         &bulk::archive(&c, &strings(&[" "]), true).unwrap_err()
@@ -127,13 +115,13 @@ fn archive_and_unarchive() {
 #[test]
 fn properties_round_trip_and_cannot_reach_the_issue() {
     let srv = MockServer::with_responses([
-        ok(json!({"keys": []})),
+        ok(json!({"keys": [{"key": "a"}]})),
         ok(json!({"key": "a b", "value": 1})),
         MockResponse::empty(201),
         MockResponse::empty(204),
     ]);
     let c = srv.client();
-    bulk::properties(&c, "P-1").unwrap();
+    assert_eq!(bulk::properties(&c, "P-1").unwrap()[0]["key"], "a");
     bulk::property(&c, "P-1", "a b").unwrap();
     bulk::property_set(&c, "P-1", "k", &json!([1, "two"])).unwrap();
     bulk::property_delete(&c, "P-1", "k").unwrap();
@@ -150,38 +138,39 @@ fn properties_round_trip_and_cannot_reach_the_issue() {
 }
 
 #[test]
-fn lookup_takes_only_exact_emails() {
+fn user_get_takes_me_ids_aris_and_only_exact_emails() {
     let srv = MockServer::with_responses([
-        ok(json!({"values": [{"accountId": "abc", "displayName": "Ann"}]})),
+        ok(json!({"accountId": "me-1"})),
+        ok(json!({"accountId": "abc", "displayName": "Ann"})),
         ok(json!([{"accountId": "x", "emailAddress": "ann@example.com.au"}])),
         ok(json!([{"accountId": "y", "emailAddress": "Bo@Example.com"}])),
     ]);
-    let who = [
-        Who::Account("ari:cloud:identity::user/abc".into()),
-        Who::Email("ann@example.com".into()),
-        Who::Email("bo@example.com".into()),
-    ];
-    let out = bulk::lookup(&srv.client(), &who).unwrap();
-    assert_eq!(out["items"][0]["data"]["accountId"], "abc");
-    assert_eq!(out["items"][1]["ok"], false);
-    assert_eq!(out["items"][2]["data"]["accountId"], "y");
+    let c = srv.client();
+    assert_eq!(jira::user_get(&c, "me").unwrap()["accountId"], "me-1");
     assert_eq!(
-        out["summary"],
-        json!({"requested": 3, "succeeded": 2, "failed": 1})
+        jira::user_get(&c, "ari:cloud:identity::user/abc").unwrap()["displayName"],
+        "Ann"
     );
-    let r = &srv.requests()[0];
-    assert_eq!(r.path, "/rest/api/3/user/bulk");
-    assert_eq!(r.query_param("accountId").as_deref(), Some("abc"));
+    let e = jira::user_get(&c, "ann@example.com").unwrap_err();
+    assert_eq!(ApiError::find(&e).unwrap().kind, ErrorKind::NotFound);
+    assert_eq!(
+        jira::user_get(&c, "bo@example.com").unwrap()["accountId"],
+        "y"
+    );
+    let r = srv.requests();
+    assert_eq!(r[0].path, "/rest/api/3/myself");
+    assert_eq!(r[1].query_param("accountId").as_deref(), Some("abc"));
+    assert_eq!(r[2].path, "/rest/api/3/user/search");
 }
 
 #[test]
-fn user_defaults_to_the_caller() {
-    let srv = MockServer::with_responses([
-        ok(json!({"accountId": "me"})),
-        ok(json!({"accountId": "abc", "displayName": "Ann"})),
-    ]);
-    let c = srv.client();
-    assert_eq!(bulk::user(&c, None).unwrap()["accountId"], "me");
-    assert_eq!(bulk::user(&c, Some("abc")).unwrap()["name"], "Ann");
-    assert_eq!(srv.requests()[0].path, "/rest/api/3/myself");
+fn user_search_pages_by_offset() {
+    let srv = MockServer::with_responses([ok(json!([{"accountId": "a"}, {"accountId": "b"}]))]);
+    let (items, next) = jira::user_search(&srv.client(), "ann", 2, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(next.as_deref(), Some("o:2"), "a full page may have more");
+    let r = &srv.requests()[0];
+    assert_eq!(r.query_param("query").as_deref(), Some("ann"));
+    assert_eq!(r.query_param("maxResults").as_deref(), Some("2"));
+    assert!(jira::user_search(&srv.client(), " ", 2, None).is_err());
 }

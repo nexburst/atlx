@@ -1,14 +1,12 @@
 //! Dashboards, their gadgets and gadget item properties.
 
 use super::admin::numeric_id;
-use super::{enc, strip_media};
+use super::{Listed, Offsets, enc, offset_list, strip_media};
 use crate::client::{ApiError, Client};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 const BASE: &str = "/rest/api/3/dashboard";
-/// The most dashboards one bulk edit takes.
-const EDIT_MAX: usize = 100;
 
 fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
@@ -27,62 +25,36 @@ fn path(id: &str) -> Result<String> {
 pub struct Search<'a> {
     pub name: Option<&'a str>,
     pub account_id: Option<&'a str>,
-    pub owner: Option<&'a str>,
     pub group_name: Option<&'a str>,
     pub group_id: Option<&'a str>,
     pub project_id: Option<&'a str>,
     pub order_by: Option<&'a str>,
-    pub expand: Option<&'a str>,
-    pub start: usize,
-    pub limit: usize,
 }
 
-/// One REST page, or as many as `limit` needs, in REST's page shape.
-pub fn query(c: &Client, o: &Search) -> Result<Value> {
-    if o.limit == 0 {
-        return Err(usage("--first must be at least 1"));
-    }
-    let mut all: Vec<Value> = Vec::new();
-    let (mut total, mut last, mut first_page) = (None, true, None);
-    while all.len() < o.limit {
-        let start = (o.start + all.len()).to_string();
-        let size = (o.limit - all.len()).min(100).to_string();
-        let mut q = vec![("startAt", start.as_str()), ("maxResults", size.as_str())];
-        for (k, v) in [
-            ("dashboardName", o.name),
-            ("accountId", o.account_id),
-            ("owner", o.owner),
-            ("groupname", o.group_name),
-            ("groupId", o.group_id),
-            ("projectId", o.project_id),
-            ("orderBy", o.order_by),
-            ("expand", o.expand),
-        ] {
-            if let Some(v) = v {
-                q.push((k, v));
-            }
-        }
-        let v = c.get(&format!("{BASE}/search"), &q)?;
-        let page = v["values"]
-            .as_array()
-            .ok_or_else(|| anyhow!("Jira returned no dashboard list"))?;
-        all.extend(page.iter().cloned());
-        first_page = first_page.or_else(|| v["self"].as_str().map(str::to_string));
-        total = v["total"].as_u64();
-        last = page.is_empty() || v["isLast"].as_bool() != Some(false);
-        if last {
-            break;
+/// `dashboard list` (REST `dashboard/search`).
+pub fn list(c: &Client, o: &Search, limit: usize, cursor: Option<&str>) -> Result<Listed> {
+    let mut q = vec![("expand", "description,owner,favourite,viewUrl")];
+    for (k, v) in [
+        ("dashboardName", o.name),
+        ("accountId", o.account_id),
+        ("groupname", o.group_name),
+        ("groupId", o.group_id),
+        ("projectId", o.project_id),
+        ("orderBy", o.order_by),
+    ] {
+        if let Some(v) = v {
+            q.push((k, v));
         }
     }
-    all.truncate(o.limit);
-    Ok(clean(json!({
-        "self": first_page,
-        "values": all,
-        "startAt": o.start,
-        "maxResults": o.limit,
-        "total": total,
-        "isLast": last,
-    })))
+    offset_list(
+        c,
+        &format!("{BASE}/search"),
+        &q,
+        &[],
+        Offsets::values().page(100),
+        limit,
+        cursor,
+    )
 }
 
 pub fn get(c: &Client, id: &str) -> Result<Value> {
@@ -117,7 +89,7 @@ impl Edit<'_> {
 }
 
 /// Permissions as a write takes them. `loggedin` is how reads print
-/// `authenticated`, and a share with a space the caller can't see comes back
+/// `authenticated`, and a share with a project the caller can't see comes back
 /// as `project-unknown`, which can't be written.
 fn permissions(what: &str, v: Value) -> Result<Value> {
     let Value::Array(mut items) = v else {
@@ -127,7 +99,7 @@ fn permissions(what: &str, v: Value) -> Result<Value> {
         match p["type"].as_str() {
             Some("project-unknown") => {
                 return Err(usage(format!(
-                    "{what} include a space you can't see, so writing them back would lose it"
+                    "{what} include a project you can't see, so writing them back would lose it"
                 )));
             }
             Some("loggedin") => p["type"] = "authenticated".into(),
@@ -182,7 +154,7 @@ pub fn update(c: &Client, id: &str, e: &Edit) -> Result<Value> {
             Some(v) => v.clone(),
             None if now[key].is_array() => now[key].clone(),
             None => {
-                return Err(anyhow!(
+                return Err(anyhow::anyhow!(
                     "Jira didn't show the current {what}, so the update would clear them; pass them"
                 ));
             }
@@ -206,55 +178,16 @@ pub fn delete(c: &Client, id: &str) -> Result<Value> {
     Ok(json!({"id": id, "deleted": true}))
 }
 
-pub fn bulk_edit(
-    c: &Client,
-    ids: &[String],
-    action: &str,
-    owner: Option<Value>,
-    permission: Option<Value>,
-    admin: Option<bool>,
-) -> Result<Value> {
-    let mut entities: Vec<u64> = Vec::new();
-    for id in ids {
-        let id: u64 = numeric_id("dashboard", id)?
-            .parse()
-            .map_err(|_| usage(format!("'{id}' is out of range")))?;
-        if !entities.contains(&id) {
-            entities.push(id);
-        }
-    }
-    if entities.is_empty() || entities.len() > EDIT_MAX {
-        return Err(usage(format!("pass 1 to {EDIT_MAX} dashboards")));
-    }
-    let (key, details) = match (action, owner, permission) {
-        ("changeOwner", Some(o), None) => ("changeOwnerDetails", o),
-        ("changeOwner", ..) => {
-            return Err(usage(
-                "changeOwner takes --change-owner-details-json and no permission details",
-            ));
-        }
-        (_, None, Some(p)) => ("permissionDetails", p),
-        _ => {
-            return Err(usage(
-                "this action takes --permission-details-json and no owner details",
-            ));
-        }
-    };
-    if !details.is_object() {
-        return Err(usage("the details must be a JSON object"));
-    }
-    let mut body = json!({"action": action, "entityIds": entities});
-    body[key] = details;
-    if let Some(admin) = admin {
-        body["extendAdminPermissions"] = admin.into();
-    }
-    Ok(clean(c.put(&format!("{BASE}/bulk/edit"), &body)?))
-}
-
 // --- gadgets -----------------------------------------------------------------
 
-pub fn catalog(c: &Client) -> Result<Value> {
-    c.get(&format!("{BASE}/gadgets"), &[])
+/// The gadgets that can be added to a dashboard.
+pub fn catalog(c: &Client) -> Result<Vec<Value>> {
+    let v = c.get(&format!("{BASE}/gadgets"), &[])?;
+    Ok(v["gadgets"]
+        .as_array()
+        .or(v.as_array())
+        .cloned()
+        .unwrap_or_default())
 }
 
 pub fn gadgets(
@@ -262,14 +195,13 @@ pub fn gadgets(
     id: &str,
     module_keys: &[String],
     uris: &[String],
-    gadget_ids: &[String],
-) -> Result<Value> {
+) -> Result<Vec<Value>> {
     let url = format!("{}/gadget", path(id)?);
     let mut q: Vec<(&str, &str)> = Vec::new();
     q.extend(module_keys.iter().map(|v| ("moduleKey", v.as_str())));
     q.extend(uris.iter().map(|v| ("uri", v.as_str())));
-    q.extend(gadget_ids.iter().map(|v| ("gadgetId", v.as_str())));
-    c.get(&url, &q)
+    let v = c.get(&url, &q)?;
+    Ok(v["gadgets"].as_array().cloned().unwrap_or_default())
 }
 
 #[derive(Debug, Default)]
@@ -345,13 +277,15 @@ pub fn gadget_update(c: &Client, id: &str, gadget: &str, g: &Gadget) -> Result<V
     if body.is_empty() {
         return Err(usage("nothing to update"));
     }
-    c.put(&url, &Value::Object(body))?;
-    Ok(json!({"dashboardId": id, "gadgetId": gadget, "updated": true}))
+    c.put(&url, &Value::Object(body.clone()))?;
+    let mut out = Value::Object(body);
+    out["id"] = numeric_id("gadget", gadget)?.into();
+    Ok(out)
 }
 
 pub fn gadget_delete(c: &Client, id: &str, gadget: &str) -> Result<Value> {
     c.delete(&gadget_path(id, gadget)?, &[])?;
-    Ok(json!({"dashboardId": id, "gadgetId": gadget, "deleted": true}))
+    Ok(json!({"id": gadget, "deleted": true}))
 }
 
 // --- item properties ---------------------------------------------------------
@@ -370,8 +304,9 @@ fn property_path(id: &str, item: &str, key: &str) -> Result<String> {
     Ok(format!("{}/{}", properties_path(id, item)?, enc(key)))
 }
 
-pub fn properties(c: &Client, id: &str, item: &str) -> Result<Value> {
-    c.get(&properties_path(id, item)?, &[])
+pub fn properties(c: &Client, id: &str, item: &str) -> Result<Vec<Value>> {
+    let v = c.get(&properties_path(id, item)?, &[])?;
+    Ok(v["keys"].as_array().cloned().unwrap_or_default())
 }
 
 pub fn property(c: &Client, id: &str, item: &str, key: &str) -> Result<Value> {
@@ -380,10 +315,10 @@ pub fn property(c: &Client, id: &str, item: &str, key: &str) -> Result<Value> {
 
 pub fn property_set(c: &Client, id: &str, item: &str, key: &str, value: &Value) -> Result<Value> {
     c.put(&property_path(id, item, key)?, value)?;
-    Ok(json!({"dashboardId": id, "itemId": item, "key": key, "value": value}))
+    Ok(json!({"key": key, "value": value}))
 }
 
 pub fn property_delete(c: &Client, id: &str, item: &str, key: &str) -> Result<Value> {
     c.delete(&property_path(id, item, key)?, &[])?;
-    Ok(json!({"dashboardId": id, "itemId": item, "key": key, "deleted": true}))
+    Ok(json!({"id": key, "deleted": true}))
 }

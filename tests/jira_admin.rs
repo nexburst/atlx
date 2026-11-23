@@ -3,7 +3,7 @@
 mod common;
 
 use atlx::client::{ApiError, ErrorKind};
-use atlx::jira::admin;
+use atlx::jira::{self, admin};
 use common::{MockResponse, MockServer};
 use serde_json::{Map, Value, json};
 
@@ -38,11 +38,11 @@ fn destructive_space_commands_refuse_anything_but_an_exact_space() {
         let srv = MockServer::with_responses([]);
         let c = srv.client();
         assert!(
-            is_usage(&admin::space_delete(&c, bad).unwrap_err()),
+            is_usage(&admin::project_delete(&c, bad).unwrap_err()),
             "{bad}"
         );
         assert!(
-            is_usage(&admin::space_archive(&c, bad).unwrap_err()),
+            is_usage(&admin::project_archive(&c, bad).unwrap_err()),
             "{bad}"
         );
         assert!(srv.requests().is_empty(), "{bad} was sent");
@@ -56,12 +56,12 @@ fn destructive_space_commands_refuse_anything_but_an_exact_space() {
             "PROJ",
         ),
     ] {
-        assert_eq!(admin::exact_space(good).unwrap(), want);
+        assert_eq!(admin::exact_project(good).unwrap(), want);
     }
 }
 
 #[test]
-fn space_lifecycle_endpoints() {
+fn project_lifecycle_endpoints() {
     let srv = MockServer::with_responses([
         ok(json!({})),
         ok(json!({})),
@@ -70,11 +70,11 @@ fn space_lifecycle_endpoints() {
         ok(json!({})),
     ]);
     let c = srv.client();
-    admin::space_create(&c, map(json!({"key": "NEW", "name": "New"}))).unwrap();
-    admin::space_update(&c, "PROJ", map(json!({"name": "P"})), Some("lead")).unwrap();
-    admin::space_delete(&c, "PROJ").unwrap();
-    admin::space_archive(&c, "PROJ").unwrap();
-    admin::space_restore(&c, "PROJ").unwrap();
+    admin::project_create(&c, map(json!({"key": "NEW", "name": "New"}))).unwrap();
+    admin::project_update(&c, "PROJ", map(json!({"name": "P"})), Some("lead")).unwrap();
+    admin::project_delete(&c, "PROJ").unwrap();
+    admin::project_archive(&c, "PROJ").unwrap();
+    admin::project_restore(&c, "PROJ").unwrap();
     let r = srv.requests();
     assert_eq!(r[0].path, "/rest/api/3/project");
     assert_eq!(r[1].query_param("expand").as_deref(), Some("lead"));
@@ -85,24 +85,14 @@ fn space_lifecycle_endpoints() {
 }
 
 #[test]
-fn space_lookups() {
-    let srv =
-        MockServer::with_responses([ok(json!([])), ok(json!({})), ok(json!([])), ok(json!({}))]);
-    let c = srv.client();
-    admin::space_statuses(&c, "PROJ").unwrap();
-    admin::notification_scheme(&c, "PROJ", None).unwrap();
-    admin::space_types(&c, &[]).unwrap();
-    admin::space_types(&c, &["software".into()]).unwrap();
-    let paths: Vec<String> = srv.requests().iter().map(|r| r.path.clone()).collect();
-    assert_eq!(
-        paths,
-        [
-            "/rest/api/3/project/PROJ/statuses",
-            "/rest/api/3/project/PROJ/notificationscheme",
-            "/rest/api/3/project/type",
-            "/rest/api/3/project/type/software"
-        ]
-    );
+fn project_statuses_are_listed_once() {
+    let srv = MockServer::with_responses([ok(json!([
+        {"name": "Bug", "statuses": [{"id": "1", "name": "Open"}, {"id": "2", "name": "Done"}]},
+        {"name": "Task", "statuses": [{"id": "1", "name": "Open"}]}
+    ]))]);
+    let all = jira::statuses(&srv.client(), Some("PROJ")).unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(srv.requests()[0].path, "/rest/api/3/project/PROJ/statuses");
 }
 
 #[test]
@@ -113,12 +103,10 @@ fn versions_page_with_filters() {
     let o = admin::VersionQuery {
         search: Some("1."),
         status: Some("released"),
-        start: 2,
-        limit: 2,
         ..Default::default()
     };
-    let page = admin::versions(&srv.client(), "PROJ", &o).unwrap();
-    assert_eq!(page.next.as_deref(), Some("4"));
+    let (_, next) = admin::versions(&srv.client(), "PROJ", &o, 2, Some("o:2")).unwrap();
+    assert_eq!(next.as_deref(), Some("o:4"));
     let r = &srv.requests()[0];
     assert_eq!(r.path, "/rest/api/3/project/PROJ/version");
     assert_eq!(r.query_param("status").as_deref(), Some("released"));
@@ -144,7 +132,6 @@ fn version_writes() {
     admin::version_merge(&c, "5", "6").unwrap();
     admin::version_move(&c, "5", Some("6"), None).unwrap();
     admin::version_get(&c, "5").unwrap();
-    admin::version_counts(&c, "5").unwrap();
     let r = srv.requests();
     assert_eq!(r[1].json_body(), json!({"name": "1.0", "projectId": 10000}));
     assert_eq!(r[2].json_body(), json!({"released": true}));
@@ -153,7 +140,7 @@ fn version_writes() {
     assert_eq!(r[4].path, "/rest/api/3/version/5/mergeto/6");
     let after = r[5].json_body()["after"].as_str().unwrap().to_string();
     assert!(after.ends_with("/rest/api/3/version/6"), "{after}");
-    assert_eq!(r[7].path, "/rest/api/3/version/5/relatedIssueCounts");
+    assert_eq!(r[6].query_param("expand").as_deref(), Some("issuesstatus"));
 }
 
 #[test]
@@ -196,7 +183,6 @@ fn component_endpoints() {
     admin::component_get(&c, "7").unwrap();
     admin::component_update(&c, "7", map(json!({"name": "Core"}))).unwrap();
     admin::component_delete(&c, "7", Some("8")).unwrap();
-    admin::component_counts(&c, "7").unwrap();
     let r = srv.requests();
     assert_eq!(r[0].path, "/rest/api/3/project/PROJ/components");
     assert_eq!(r[2].json_body(), json!({"name": "API", "project": "PROJ"}));
@@ -241,10 +227,9 @@ fn filter_query_passes_search_fields() {
     let o = admin::FilterQuery {
         name: Some("open"),
         owner_account: Some("acct"),
-        limit: 10,
         ..Default::default()
     };
-    admin::filters(&srv.client(), &o).unwrap();
+    admin::filters(&srv.client(), &o, 10, None).unwrap();
     let r = &srv.requests()[0];
     assert_eq!(r.path, "/rest/api/3/filter/search");
     assert_eq!(r.query_param("filterName").as_deref(), Some("open"));
@@ -288,7 +273,7 @@ fn filter_sub_resources() {
         ok(json!([])),
         ok(json!([])),
         empty(),
-        ok(json!({"subscriptions": {"size": 0}})),
+        ok(json!({"subscriptions": {"size": 0, "items": []}})),
         ok(json!([])),
     ]);
     let c = srv.client();
@@ -302,10 +287,7 @@ fn filter_sub_resources() {
     admin::filter_shares(&c, "9").unwrap();
     admin::filter_share_add(&c, "9", &json!({"type": "loggedin"})).unwrap();
     admin::filter_share_remove(&c, "9", "3").unwrap();
-    assert_eq!(
-        admin::filter_subscriptions(&c, "9", 0, 50).unwrap()["size"],
-        0
-    );
+    assert!(admin::filter_subscriptions(&c, "9").unwrap().is_empty());
     admin::favourite_filters(&c).unwrap();
     let r = srv.requests();
     assert_eq!(r[3].json_body(), json!({"accountId": "acct"}));
@@ -316,12 +298,12 @@ fn filter_sub_resources() {
     assert_eq!(r[9].path, "/rest/api/3/filter/9/permission/3");
     assert_eq!(
         r[10].query_param("expand").as_deref(),
-        Some("subscriptions[0:49]")
+        Some("subscriptions")
     );
 }
 
 #[test]
-fn workitem_query_filter_uses_the_saved_jql() {
+fn issue_list_filter_uses_the_saved_jql() {
     let srv = MockServer::with_responses([ok(json!({"jql": "project = P"}))]);
     assert_eq!(
         admin::filter_jql(&srv.client(), "9").unwrap(),

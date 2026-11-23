@@ -1,9 +1,14 @@
 //! Jira Service Management over the public Service Desk REST API.
+//!
+//! List functions return the REST objects and the next cursor; the command
+//! line projects them onto the records in [`records`].
 
 use crate::client::{ApiError, Client, ErrorKind};
-use crate::jira::resolve_account;
+use crate::jira::{Listed, Offsets, local_list, offset_list, resolve_account};
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value, json};
+
+pub mod records;
 
 const API: &str = "/rest/servicedeskapi";
 /// The most items read to resolve a name or check every entry.
@@ -38,21 +43,29 @@ fn clean(mut v: Value) -> Value {
 
 /// One collected range of a list.
 #[derive(Debug)]
-pub struct Page {
-    pub values: Vec<Value>,
-    pub start: usize,
-    pub last: bool,
+struct Page {
+    values: Vec<Value>,
+    last: bool,
 }
 
-impl Page {
-    pub fn to_value(&self) -> Value {
-        clean(json!({
-            "values": self.values,
-            "start": self.start,
-            "size": self.values.len(),
-            "isLastPage": self.last,
-        }))
-    }
+/// A Service Desk list from `cursor`.
+fn list(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    headers: &[(&str, &str)],
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
+    offset_list(
+        c,
+        path,
+        query,
+        headers,
+        Offsets::servicedesk(),
+        limit,
+        cursor,
+    )
 }
 
 /// Follow a paged list from `start` until `limit`.
@@ -66,7 +79,6 @@ fn page(
 ) -> Result<Page> {
     let mut out = Page {
         values: Vec::new(),
-        start,
         last: false,
     };
     while out.values.len() < limit {
@@ -244,14 +256,14 @@ pub fn resolve_type(c: &Client, desk: &str, r: Option<&str>) -> Result<String> {
 
 // --- service desks, types, queues --------------------------------------------
 
-/// Service desks (portals); `term` filters on key and name client-side.
-pub fn desks(c: &Client, term: Option<&str>, start: usize, limit: usize) -> Result<Value> {
+/// Service desks; `term` filters on key and name client-side.
+pub fn desks(c: &Client, term: Option<&str>, limit: usize, cursor: Option<&str>) -> Result<Listed> {
     let path = format!("{API}/servicedesk");
     let Some(term) = term else {
-        return Ok(page(c, &path, &[], &[], start, limit)?.to_value());
+        return list(c, &path, &[], &[], limit, cursor);
     };
     let term = term.to_lowercase();
-    let mut found: Vec<Value> = all(c, &path, &[])?
+    let found: Vec<Value> = all(c, &path, &[])?
         .into_iter()
         .filter(|d| {
             ["projectKey", "projectName"].iter().any(|k| {
@@ -260,16 +272,8 @@ pub fn desks(c: &Client, term: Option<&str>, start: usize, limit: usize) -> Resu
                     .is_some_and(|v| v.to_lowercase().contains(&term))
             })
         })
-        .skip(start)
         .collect();
-    let last = found.len() <= limit;
-    found.truncate(limit);
-    Ok(Page {
-        values: found,
-        start,
-        last,
-    }
-    .to_value())
+    local_list(found, limit, cursor)
 }
 
 pub fn request_types(
@@ -277,13 +281,28 @@ pub fn request_types(
     desk: Option<&str>,
     term: Option<&str>,
     limit: usize,
-) -> Result<Value> {
+    cursor: Option<&str>,
+) -> Result<Listed> {
     let path = match desk {
         Some(d) => format!("{API}/servicedesk/{}/requesttype", enc(d)),
         None => format!("{API}/requesttype"),
     };
     let q: Vec<(&str, &str)> = term.iter().map(|t| ("searchQuery", *t)).collect();
-    Ok(page(c, &path, &q, &[], 0, limit)?.to_value())
+    list(c, &path, &q, &[], limit, cursor)
+}
+
+/// One request type, with its fields under `fields`.
+pub fn request_type(c: &Client, desk: &str, id: &str) -> Result<Value> {
+    let mut v = c.get(
+        &format!("{API}/servicedesk/{}/requesttype/{}", enc(desk), enc(id)),
+        &[],
+    )?;
+    let f = fields(c, desk, id)?;
+    if v.is_object() {
+        v["fields"] = f["requestTypeFields"].clone();
+        v["example"] = example_answers(&f)?;
+    }
+    Ok(clean(v))
 }
 
 pub fn fields(c: &Client, desk: &str, request_type: &str) -> Result<Value> {
@@ -327,18 +346,18 @@ pub fn example_answers(fields: &Value) -> Result<Value> {
     Ok(out.into())
 }
 
-pub fn queues(c: &Client, desk: &str, start: usize, limit: usize) -> Result<Value> {
+pub fn queues(c: &Client, desk: &str, limit: usize, cursor: Option<&str>) -> Result<Listed> {
     let path = format!("{API}/servicedesk/{}/queue", enc(desk));
-    Ok(page(c, &path, &[("includeCount", "true")], &[], start, limit)?.to_value())
+    list(c, &path, &[("includeCount", "true")], &[], limit, cursor)
 }
 
 pub fn queue_issues(
     c: &Client,
     desk: &str,
     queue: &str,
-    start: usize,
     limit: usize,
-) -> Result<Value> {
+    cursor: Option<&str>,
+) -> Result<Listed> {
     if !digits(queue.trim()) {
         return Err(usage("--queue takes a queue ID"));
     }
@@ -347,17 +366,27 @@ pub fn queue_issues(
         enc(desk),
         enc(queue.trim())
     );
-    Ok(page(c, &path, &[], &[], start, limit)?.to_value())
+    list(c, &path, &[], &[], limit, cursor)
 }
 
-pub fn articles(c: &Client, desk: &str, query: &str, limit: usize) -> Result<Value> {
+/// Knowledge base articles matching `query`, in one desk or all.
+pub fn articles(
+    c: &Client,
+    desk: Option<&str>,
+    query: &str,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
     if query.trim().is_empty() {
         return Err(usage(
-            "pass --query: the REST API can only search articles, not list them",
+            "pass some text: the REST API can only search articles",
         ));
     }
-    let path = format!("{API}/servicedesk/{}/knowledgebase/article", enc(desk));
-    Ok(page(c, &path, &[("query", query)], EXPERIMENTAL, 0, limit)?.to_value())
+    let path = match desk {
+        Some(d) => format!("{API}/servicedesk/{}/knowledgebase/article", enc(d)),
+        None => format!("{API}/knowledgebase/article"),
+    };
+    list(c, &path, &[("query", query)], EXPERIMENTAL, limit, cursor)
 }
 
 // --- request values ----------------------------------------------------------
@@ -564,11 +593,14 @@ pub struct RequestQuery<'a> {
     pub desk: Option<&'a str>,
     pub request_type: Option<&'a str>,
     pub search: Option<&'a str>,
-    pub start: usize,
-    pub limit: usize,
 }
 
-pub fn query(c: &Client, o: &RequestQuery) -> Result<Value> {
+pub fn requests(
+    c: &Client,
+    o: &RequestQuery,
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<Listed> {
     if o.request_type.is_some() && o.desk.is_none() {
         return Err(usage("--request-type needs --service-desk"));
     }
@@ -592,12 +624,12 @@ pub fn query(c: &Client, o: &RequestQuery) -> Result<Value> {
     .into_iter()
     .filter_map(|(k, v)| v.map(|v| (k, v)))
     .collect();
-    Ok(page(c, &format!("{API}/request"), &q, &[], o.start, o.limit)?.to_value())
+    list(c, &format!("{API}/request"), &q, &[], limit, cursor)
 }
 
-pub fn comments(c: &Client, request: &str, start: usize, limit: usize) -> Result<Value> {
+pub fn comments(c: &Client, request: &str, limit: usize, cursor: Option<&str>) -> Result<Listed> {
     let path = format!("{}/comment", request_path(request)?);
-    Ok(page(c, &path, &[], &[], start, limit)?.to_value())
+    list(c, &path, &[], &[], limit, cursor)
 }
 
 /// `internal` is always sent, so a note can't turn public through a default.
@@ -612,9 +644,9 @@ pub fn comment_create(c: &Client, request: &str, body: &str, internal: bool) -> 
     )?))
 }
 
-pub fn participants(c: &Client, request: &str) -> Result<Value> {
+pub fn participants(c: &Client, request: &str) -> Result<Vec<Value>> {
     let path = format!("{}/participant", request_path(request)?);
-    Ok(page(c, &path, &[], &[], 0, SCAN)?.to_value())
+    all(c, &path, &[])
 }
 
 pub fn participants_change(c: &Client, request: &str, who: &[String], add: bool) -> Result<Value> {
@@ -627,17 +659,19 @@ pub fn participants_change(c: &Client, request: &str, who: &[String], add: bool)
         .map(|w| account(c, w))
         .collect::<Result<Vec<_>>>()?;
     let method = if add { "POST" } else { "DELETE" };
-    Ok(clean(c.request(
-        method,
-        &path,
-        &[],
-        Some(&json!({"accountIds": ids})),
-    )?))
+    let v = c.request(method, &path, &[], Some(&json!({"accountIds": ids})))?;
+    if add {
+        return Ok(clean(v)["values"].clone());
+    }
+    Ok(ids
+        .iter()
+        .map(|id| json!({"id": id, "deleted": true}))
+        .collect())
 }
 
-pub fn transitions(c: &Client, request: &str) -> Result<Value> {
+pub fn transitions(c: &Client, request: &str) -> Result<Vec<Value>> {
     let path = format!("{}/transition", request_path(request)?);
-    Ok(page(c, &path, &[], &[], 0, SCAN)?.to_value())
+    all(c, &path, &[])
 }
 
 /// `transition` is an ID or exact name of one the caller may make.
@@ -681,9 +715,9 @@ pub fn transition(
     Ok(json!({"request": key, "transitionId": t["id"], "transition": t["name"]}))
 }
 
-pub fn approvals(c: &Client, request: &str) -> Result<Value> {
+pub fn approvals(c: &Client, request: &str) -> Result<Vec<Value>> {
     let path = format!("{}/approval", request_path(request)?);
-    Ok(page(c, &path, &[], &[], 0, SCAN)?.to_value())
+    Ok(all(c, &path, &[])?.into_iter().map(clean).collect())
 }
 
 fn approval_path(request: &str, approval: &str) -> Result<String> {
@@ -738,15 +772,16 @@ pub fn approval_decide(
     )?))
 }
 
-/// A work item's SLAs, or the one with this ID or name.
-pub fn sla(c: &Client, request: &str, which: Option<&str>) -> Result<Value> {
+/// A request's SLAs.
+pub fn slas(c: &Client, request: &str) -> Result<Vec<Value>> {
     let path = format!("{}/sla", request_path(request)?);
-    let found = page(c, &path, &[], &[], 0, SCAN)?;
-    let Some(which) = which.map(str::trim) else {
-        return Ok(found.to_value());
-    };
-    found
-        .values
+    all(c, &path, &[])
+}
+
+/// One SLA of a request, by ID or name.
+pub fn sla(c: &Client, request: &str, which: &str) -> Result<Value> {
+    let which = which.trim();
+    slas(c, request)?
         .into_iter()
         .find(|s| {
             id_text(&s["id"]).as_deref() == Some(which)
@@ -754,7 +789,6 @@ pub fn sla(c: &Client, request: &str, which: Option<&str>) -> Result<Value> {
                     .as_str()
                     .is_some_and(|n| n.eq_ignore_ascii_case(which))
         })
-        .map(clean)
         .ok_or_else(|| {
             ApiError::new(
                 ErrorKind::NotFound,
