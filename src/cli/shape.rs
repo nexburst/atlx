@@ -1,267 +1,361 @@
-//! Global output controls: `--select`, `--agent-fields`, `--output-file`,
-//! `--output-summary` and `--api-version`, and the code that applies them
-//! to a command's result before it reaches stdout.
+//! Global output controls (`--fields`, `--full`, `--raw`, `--max-chars`,
+//! `--output-file`) and the code that turns a command's result into the
+//! printed envelope: projection onto the command's record, truncation
+//! markers, warnings, partial errors, and `ok` matching the exit code.
 
-use super::Out;
-use crate::output::select::{self, Fields, Selected};
-use crate::output::summary::{self, Level};
-use crate::output::{self, Format};
+use super::{Out, util};
+use crate::client::{ApiError, DryRun};
+use crate::output::envelope::{self, is_envelope};
+use crate::output::{self, Format, notes, select};
+use crate::schema::{self, Record, Selection, Unit};
 use clap::Args;
-use serde_json::{Map, Value};
+use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub(crate) struct OutputArgs {
-    /// Keep only these comma-separated paths of the JSON output, e.g.
-    /// `issues.key,issues.status`. `@compact`, `@evidence` and `@rows` expand
-    /// to per-command presets. JSON and JSONL only
-    #[arg(long, global = true, value_name = "PATHS")]
-    pub select: Option<String>,
-    /// Comma-separated paths (or presets) to show in the `--output-summary`
-    /// envelope, which also writes them to a `.compact.json` file next to the
-    /// full output. Has no effect without `--output-summary`
-    #[arg(long, global = true, value_name = "PATHS")]
-    pub agent_fields: Option<String>,
-    /// Write stdout to this file instead and print `stdout=<path>`. With
-    /// `--body-only -o json`, the body goes to the file and the metadata
-    /// (with `body.outputFile`) is printed
+    /// Print only these comma-separated fields of each record (`key,status`,
+    /// `assignee.name`); an unknown name is a usage error listing the valid
+    /// ones
+    #[arg(long, global = true, value_name = "FIELDS", conflicts_with_all = ["full", "raw"])]
+    pub fields: Option<String>,
+    /// Print every field of the record, not just the default view
+    #[arg(long, global = true, conflicts_with = "raw")]
+    pub full: bool,
+    /// Print the REST payload unprojected
+    #[arg(long, global = true)]
+    pub raw: bool,
+    /// Character budget for large text fields (bodies, diffs); 0 turns
+    /// truncation off. Cuts are listed in the envelope's `truncated`
+    #[arg(long, global = true, value_name = "N")]
+    pub max_chars: Option<usize>,
+    /// Write `data` (or the body, with `--body-only`) to this file and print
+    /// `{"file","bytes","lines"}` instead
     #[arg(long, global = true, value_name = "PATH")]
     pub output_file: Option<PathBuf>,
-    /// Write the full JSON output to a file (`--output-file`, or a temporary
-    /// one) and print a YAML envelope describing it [default level: auto]
-    #[arg(
-        long,
-        global = true,
-        value_enum,
-        value_name = "LEVEL",
-        num_args = 0..=1,
-        default_missing_value = "auto"
-    )]
-    pub output_summary: Option<Level>,
-    /// Output contract version; only `v2` exists
-    #[arg(long, global = true, value_name = "VERSION", value_parser = ["v2"])]
-    pub api_version: Option<String>,
 }
 
 /// The resolved output controls for one run.
 pub(crate) struct Shaping {
     fmt: Format,
-    command: String,
-    select: Fields,
-    agent_fields: Fields,
+    path: String,
+    record: Option<&'static Record>,
+    selection: Selection,
+    max_chars: Option<usize>,
+    /// Values of the command's own offset flags (`body-offset`, ...).
+    offsets: HashMap<String, usize>,
     output_file: Option<PathBuf>,
-    summary: Option<Level>,
 }
 
 impl Shaping {
-    /// Resolve presets for `command` (a dotted command path) and warn about
-    /// flags that do nothing in text mode.
-    pub(crate) fn new(a: OutputArgs, fmt: Format, command: &str) -> anyhow::Result<Self> {
-        let structured = fmt != Format::Text;
-        let resolve = |flag: &str, spec: &Option<String>| match spec {
-            Some(s) => select::resolve(flag, s, command),
-            None => Ok(Fields::default()),
+    /// Resolve the flags for the command at `path`. `--fields` is checked
+    /// against the command's record here, before any request is sent.
+    pub(crate) fn new(
+        a: OutputArgs,
+        fmt: Format,
+        path: &str,
+        leaf: Option<&clap::ArgMatches>,
+    ) -> anyhow::Result<Self> {
+        let record = schema::registry::record(path);
+        let selection = if a.raw {
+            Selection::Raw
+        } else if a.full {
+            Selection::Full
+        } else if let Some(f) = &a.fields {
+            let names: Vec<String> = f
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
+            if names.is_empty() {
+                return Err(ApiError::usage("--fields needs at least one field name").into());
+            }
+            Selection::Fields(names)
+        } else {
+            Selection::Default
         };
-        let select = resolve("--select", &a.select)?;
-        let agent_fields = resolve("--agent-fields", &a.agent_fields)?;
-        if !structured && a.select.is_some() {
-            eprintln!("warning: --select only applies to -o json and -o jsonl; ignoring it");
+        if let Some(r) = record {
+            selection.validate(r)?;
         }
-        if !structured && a.output_summary.is_some() {
-            eprintln!(
-                "warning: --output-summary only applies to -o json and -o jsonl; ignoring it"
-            );
+        let mut offsets = HashMap::new();
+        if let (Some(r), Some(m)) = (record, leaf) {
+            for f in r.fields.iter().filter_map(|f| f.truncate) {
+                if let Some(n) = arg_number(m, f.offset_flag) {
+                    offsets.insert(f.offset_flag.to_string(), n);
+                }
+            }
         }
         Ok(Shaping {
             fmt,
-            command: command.to_string(),
-            select: if structured {
-                select
-            } else {
-                Fields::default()
-            },
-            agent_fields,
+            path: path.to_string(),
+            record,
+            selection,
+            max_chars: a.max_chars,
+            offsets,
             output_file: a.output_file,
-            summary: a.output_summary.filter(|l| structured && *l != Level::None),
         })
     }
 
     /// No output controls: print results as they are.
-    pub(crate) fn plain(fmt: Format, command: &str) -> Self {
+    pub(crate) fn plain(fmt: Format, path: &str) -> Self {
         Shaping {
             fmt,
-            command: command.to_string(),
-            select: Fields::default(),
-            agent_fields: Fields::default(),
+            path: path.to_string(),
+            record: None,
+            selection: Selection::Default,
+            max_chars: None,
+            offsets: HashMap::new(),
             output_file: None,
-            summary: None,
         }
     }
 
-    /// Apply `--select` to a structured result, warning when it matched
-    /// nothing or named presets the command lacks.
-    fn select(&self, v: Value) -> Value {
-        let f = &self.select;
-        if f.paths.is_empty() && f.unresolved.is_empty() {
-            return v;
-        }
-        let all = || {
-            let mut names = f.unresolved.clone();
-            names.extend(f.dotted());
-            names.join(", ")
-        };
-        if f.paths.is_empty() {
-            eprintln!(
-                "warning: --select matched nothing ({}); printing the full output",
-                all()
-            );
-            return v;
-        }
-        if !f.unresolved.is_empty() {
-            eprintln!(
-                "warning: --select ignored {} (no presets for this command); kept {}",
-                f.unresolved.join(", "),
-                f.dotted().join(", ")
-            );
-        }
-        let paths = f.paths.clone();
-        match select::select(v, &paths) {
-            Selected::Matched(v) | Selected::Unchanged(v) => v,
-            Selected::Unmatched(v) => {
-                eprintln!(
-                    "warning: --select matched nothing ({}); printing the full output",
-                    all()
-                );
-                v
-            }
-        }
-    }
-
-    /// Print a successful result. Returns `code` unchanged.
+    /// Print a command's result and return the exit code.
     pub(crate) fn emit(&self, out: Out, code: i32) -> i32 {
         match out {
-            Out::Data(v) | Out::Exit(v, _) => {
-                let v = self.select(v);
-                self.deliver(&output::render(&v, self.fmt), Some(&v));
-            }
-            Out::Raw(s) => self.deliver(&format!("{s}\n"), None),
+            Out::Data(v) | Out::Exit(v, _) => self.emit_value(v, code),
             Out::Doc { text, .. } if self.fmt == Format::Text => {
-                self.deliver(&format!("{text}\n"), None)
+                println!("{text}");
+                code
             }
-            Out::Doc { full, .. } => {
-                let v = self.select(full);
-                self.deliver(&output::render(&v, self.fmt), Some(&v));
+            Out::Doc { full, .. } => self.emit_value(full, code),
+            Out::Raw(s) => {
+                println!("{s}");
+                code
             }
-            Out::Body { body, full } => self.emit_body(body, full),
-            Out::Streamed(_) => {}
+            Out::Body { body, .. } => match &self.output_file {
+                None => {
+                    println!("{body}");
+                    code
+                }
+                Some(p) => self.emit_file(p, &body, code),
+            },
+            Out::Streamed(c) => c,
+        }
+    }
+
+    fn emit_value(&self, v: Value, code: i32) -> i32 {
+        let env = match self.finish(v, code) {
+            Ok(env) => env,
+            Err(e) => return self.emit_error(&ApiError::from_anyhow(&e)),
+        };
+        if let Some(p) = &self.output_file {
+            let text = match &env["data"] {
+                Value::String(s) => s.clone(),
+                d => serde_json::to_string_pretty(d).unwrap_or_default(),
+            };
+            return self.emit_file(p, &text, code);
+        }
+        if self.fmt == Format::Text {
+            self.text_notes(&env);
+        }
+        print!(
+            "{}",
+            output::render(&env, self.fmt, self.record.map(|r| r.primary))
+        );
+        code
+    }
+
+    /// The printed envelope for a result `v` that exits with `code`.
+    pub(crate) fn finish(&self, v: Value, code: i32) -> anyhow::Result<Value> {
+        let mut env = if is_envelope(&v) {
+            v
+        } else {
+            envelope::success(v)
+        };
+        let data = env["data"].take();
+        env["data"] = self.shape_data(data)?;
+        let (mut warnings, mut truncated) = notes::take();
+        if let Some(r) = self.record {
+            self.truncate(&mut env["data"], r, &mut truncated);
+        }
+        extend(&mut env, "warnings", warnings.drain(..));
+        extend(&mut env, "truncated", truncated.drain(..));
+        let errors = util::take_errors();
+        if !errors.is_empty() {
+            env["partial"] = true.into();
+            extend(&mut env, "errors", errors.into_iter());
+        }
+        env["ok"] = (code == 0).into();
+        Ok(envelope::ordered(env))
+    }
+
+    /// Apply the record view or `--fields` to `data`.
+    fn shape_data(&self, data: Value) -> anyhow::Result<Value> {
+        if data.is_null() {
+            return Ok(data);
+        }
+        match (self.record, &self.selection) {
+            (_, Selection::Raw) => Ok(data),
+            (Some(r), sel) => schema::project(&data, r, sel),
+            (None, Selection::Fields(names)) => {
+                let paths = select::parse_paths(names.iter().map(String::as_str));
+                select::project(&data, &paths).ok_or_else(|| {
+                    let valid = select::keys(&data);
+                    let unknown: Vec<&str> = names.iter().map(String::as_str).collect();
+                    let valid: Vec<&str> = valid.iter().map(String::as_str).collect();
+                    schema::unknown_fields(&unknown, &valid)
+                })
+            }
+            (None, _) => Ok(data),
+        }
+    }
+
+    /// Cut the record's truncatable fields and note each cut.
+    fn truncate(&self, data: &mut Value, r: &Record, out: &mut Vec<Value>) {
+        let mut cut_one = |obj: &mut Value, prefix: &str| {
+            for f in r.fields {
+                let Some(b) = f.truncate else { continue };
+                let Some(text) = obj.get(f.name).and_then(Value::as_str) else {
+                    continue;
+                };
+                let limit = match b.unit {
+                    Unit::Chars => self.max_chars.unwrap_or(b.limit),
+                    Unit::Lines => b.limit,
+                };
+                let offset = self.offsets.get(b.offset_flag).copied().unwrap_or(0);
+                let field = format!("{prefix}.{}", f.name);
+                let (kept, t) = schema::truncate::cut(text, &b, limit, offset, &field);
+                if let Some(t) = t {
+                    obj[f.name] = kept.into();
+                    out.push(t.to_json());
+                }
+            }
+        };
+        match data {
+            Value::Array(items) => {
+                for (i, item) in items.iter_mut().enumerate() {
+                    cut_one(item, &format!("data.{i}"));
+                }
+            }
+            obj => cut_one(obj, "data"),
+        }
+    }
+
+    /// Text mode: warnings and cuts go to stderr as notes.
+    fn text_notes(&self, env: &Value) {
+        for w in env["warnings"].as_array().into_iter().flatten() {
+            let msg = w["message"]
+                .as_str()
+                .map_or_else(|| w.to_string(), String::from);
+            eprintln!("warning: {msg}");
+        }
+        for t in env["truncated"].as_array().into_iter().flatten() {
+            let more = t["more"]
+                .as_str()
+                .map_or(String::new(), |m| format!("; continue with {m}"));
+            eprintln!(
+                "note: {} shows {} of {} {}{more}",
+                t["field"].as_str().unwrap_or_default(),
+                t["shown"],
+                t["total"],
+                t["unit"].as_str().unwrap_or_default()
+            );
+        }
+    }
+
+    /// `--output-file`: write `text`, print what was written.
+    fn emit_file(&self, path: &Path, text: &str, code: i32) -> i32 {
+        if let Err(e) = write_file(path, text) {
+            let err = ApiError::new(
+                crate::client::ErrorKind::Other,
+                format!("could not write {}: {e}", path.display()),
+            );
+            return self.emit_error(&err);
+        }
+        let info = json!({
+            "file": path.display().to_string(),
+            "bytes": text.len(),
+            "lines": text.lines().count(),
+        });
+        let mut env = envelope::success(info);
+        env["ok"] = (code == 0).into();
+        if self.fmt == Format::Text {
+            println!("{}", path.display());
+        } else {
+            print!("{}", output::render(&env, self.fmt, Some("file")));
         }
         code
     }
 
-    /// Print a failure's JSON envelope (JSON modes only; text mode reports
-    /// on stderr alone).
-    pub(crate) fn emit_error(&self, envelope: &Value) {
+    /// Print a failure and return its exit code. JSON modes print the error
+    /// envelope on stdout and nothing on stderr; text mode prints a readable
+    /// report on stderr; `-o ids` prints the envelope on stderr so stdout
+    /// stays a list of IDs.
+    pub(crate) fn emit_error(&self, api: &ApiError) -> i32 {
+        notes::take();
+        util::take_errors();
+        let env = api.envelope();
+        match self.fmt {
+            Format::Text => {
+                if self.path.is_empty() {
+                    eprintln!("✗ {}", api.message);
+                } else {
+                    eprintln!("✗ Failed {}.", self.path.replace('.', " "));
+                }
+                eprint!("{}", api.report());
+            }
+            Format::Ids => eprint!("{}", output::render(&env, Format::Json, None)),
+            _ => print!("{}", output::render(&env, self.fmt, None)),
+        }
+        api.exit_code()
+    }
+
+    /// Print the request a `--dry-run` stopped. Exit 0.
+    pub(crate) fn emit_dry_run(&self, d: &DryRun) -> i32 {
+        notes::take();
+        util::take_errors();
+        let env = json!({"ok": true, "dryRun": true, "data": {"request": d.to_json()}});
         if self.fmt == Format::Text {
-            if let Some(path) = &self.output_file {
-                // The redirected stdout is empty, but the file still exists.
-                self.write_or_print(path, "");
+            println!("dry run: would send {} {}", d.method, d.url);
+            if let Some(b) = &d.body {
+                println!("{}", serde_json::to_string_pretty(b).unwrap_or_default());
             }
-            return;
-        }
-        self.deliver(&output::render(envelope, self.fmt), Some(envelope));
-    }
-
-    /// `--body-only`: the body alone, or with `--output-file`, the body in
-    /// the file and (in JSON modes) the rest of the result on stdout.
-    fn emit_body(&self, body: String, full: Value) {
-        let Some(path) = &self.output_file else {
-            println!("{body}");
-            return;
-        };
-        if let Err(e) = write_file(path, &body) {
-            eprintln!(
-                "warning: could not write {}: {e}; printing to stdout",
-                path.display()
-            );
-            println!("{body}");
-            return;
-        }
-        if self.fmt == Format::Text {
-            println!("stdout={}", path.display());
-            return;
-        }
-        let v = self.select(externalize_body(full, &path.display().to_string()));
-        print!("{}", output::render(&v, self.fmt));
-    }
-
-    fn deliver(&self, text: &str, payload: Option<&Value>) {
-        // A JSON document written to a file has no final newline.
-        let text = match (self.fmt, payload) {
-            (Format::Json, Some(_)) if self.output_file.is_some() || self.summary.is_some() => {
-                text.strip_suffix('\n').unwrap_or(text)
+            if std::io::stderr().is_terminal() {
+                eprintln!("note: nothing was sent");
             }
-            _ => text,
-        };
-        if let (Some(level), Some(payload)) = (self.summary, payload) {
-            self.summarize(level, text, payload);
-        } else if let Some(path) = &self.output_file {
-            self.write_or_print(path, text);
         } else {
-            print!("{text}");
+            print!("{}", output::render(&env, Format::Json, None));
         }
+        crate::client::exit::OK
     }
+}
 
-    fn write_or_print(&self, path: &Path, text: &str) {
-        match write_file(path, text) {
-            Ok(()) => println!("stdout={}", path.display()),
-            Err(e) => {
-                eprintln!(
-                    "warning: could not write {}: {e}; printing to stdout",
-                    path.display()
-                );
-                print!("{text}");
-            }
-        }
+/// Append `items` to the array at `key`, creating it.
+fn extend(env: &mut Value, key: &str, items: impl Iterator<Item = Value>) {
+    let items: Vec<Value> = items.collect();
+    if items.is_empty() {
+        return;
     }
+    let Some(m) = env.as_object_mut() else { return };
+    let slot = m.entry(key).or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(a) = slot {
+        a.extend(items);
+    }
+}
 
-    fn summarize(&self, level: Level, text: &str, payload: &Value) {
-        let path = self
-            .output_file
-            .clone()
-            .unwrap_or_else(|| temp_output(self.fmt));
-        if let Err(e) = write_file(&path, text) {
-            eprintln!(
-                "warning: could not write {}: {e}; printing to stdout",
-                path.display()
-            );
-            print!("{text}");
-            return;
-        }
-        let fields = &self.agent_fields.paths;
-        let compact_path = compact_path(&path);
-        let compact = if fields.is_empty() {
-            None
-        } else {
-            let c = serde_json::to_string(&summary::compact_payload(payload, fields))
-                .unwrap_or_default();
-            write_file(&compact_path, &c).ok().map(|_| c.len())
-        };
-        let path_s = path.display().to_string();
-        let compact_s = compact_path.display().to_string();
-        print!(
-            "{}",
-            summary::envelope(&summary::Input {
-                payload,
-                text,
-                path: &path_s,
-                level,
-                fields,
-                compact: compact.map(|n| (compact_s.as_str(), n)),
-                command: &self.command,
-            })
-        );
+/// A number-valued argument of the leaf command, whatever integer type the
+/// command declares it with.
+fn arg_number(m: &clap::ArgMatches, id: &str) -> Option<usize> {
+    let id = id.replace('-', "_");
+    if !m.ids().any(|i| i.as_str() == id) {
+        return None;
     }
+    if let Ok(Some(n)) = m.try_get_one::<usize>(&id) {
+        return Some(*n);
+    }
+    if let Ok(Some(n)) = m.try_get_one::<u64>(&id) {
+        return usize::try_from(*n).ok();
+    }
+    if let Ok(Some(n)) = m.try_get_one::<u32>(&id) {
+        return Some(*n as usize);
+    }
+    if let Ok(Some(s)) = m.try_get_one::<String>(&id) {
+        return s.parse().ok();
+    }
+    None
 }
 
 /// Write `text` to `path`, creating missing parent directories.
@@ -272,82 +366,37 @@ fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
-/// `<dir>/<stem>.compact.json` next to the full output.
-fn compact_path(path: &Path) -> PathBuf {
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "stdout".into());
-    path.with_file_name(format!("{stem}.compact.json"))
-}
-
-/// A fresh `$TMPDIR/atlx/<epoch>/run.<id>/stdout.<ext>` path.
-fn temp_output(fmt: Format) -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let id = format!("{:x}{:x}", std::process::id(), now.subsec_nanos());
-    let ext = if fmt == Format::Jsonl {
-        "jsonl"
-    } else {
-        "json"
-    };
-    std::env::temp_dir()
-        .join("atlx")
-        .join(now.as_secs().to_string())
-        .join(format!("run.{id}"))
-        .join(format!("stdout.{ext}"))
-}
-
-/// Replace the body text in a `--body-only` result with `body.outputFile`.
-/// Handles atlx's `body: "<text>"` and twg's `body: {value, ...}`, at the
-/// top level or under `data`.
-pub(crate) fn externalize_body(mut full: Value, path: &str) -> Value {
-    let target = if full.get("data").is_some_and(Value::is_object) {
-        &mut full["data"]
-    } else {
-        &mut full
-    };
-    if let Some(obj) = target.as_object_mut() {
-        let mut body = match obj.remove("body") {
-            Some(Value::Object(b)) => b,
-            _ => Map::new(),
-        };
-        body.remove("value");
-        body.insert("outputFile".into(), path.into());
-        obj.insert("body".into(), Value::Object(body));
-    }
-    full
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
-    fn externalizes_both_body_shapes() {
-        assert_eq!(
-            externalize_body(
-                json!({"id": "1", "snapshot_token": "t", "body": "<p>x</p>"}),
-                "/f"
-            ),
-            json!({"id": "1", "snapshot_token": "t", "body": {"outputFile": "/f"}})
-        );
-        assert_eq!(
-            externalize_body(
-                json!({"data": {"snapshotToken": "t", "body": {"format": "html", "value": "x"}}}),
-                "/f"
-            ),
-            json!({"data": {"snapshotToken": "t", "body": {"format": "html", "outputFile": "/f"}}})
-        );
+    fn ok_follows_the_exit_code_and_lists_are_added() {
+        let s = Shaping::plain(Format::Json, "x");
+        let v = s.finish(json!({"a": 1}), 0).unwrap();
+        assert_eq!(v, json!({"ok": true, "data": {"a": 1}}));
+        let v = s.finish(json!({"a": 1}), 1).unwrap();
+        assert_eq!(v["ok"], false);
+        notes::warn("w", "careful");
+        util::push_error("P-9", &ApiError::usage("bad"));
+        let v = s.finish(json!([{"a": 1}]), 3).unwrap();
+        assert_eq!(v["partial"], true);
+        assert_eq!(v["errors"][0]["input"], "P-9");
+        assert_eq!(v["warnings"][0]["code"], "w");
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["ok", "partial", "data", "warnings", "errors"]);
     }
 
     #[test]
-    fn compact_file_sits_next_to_the_output() {
-        assert_eq!(
-            compact_path(Path::new("/tmp/a/stdout.json")),
-            PathBuf::from("/tmp/a/stdout.compact.json")
-        );
+    fn fields_on_unregistered_commands_select_paths_or_fail() {
+        let mut s = Shaping::plain(Format::Json, "x");
+        s.selection = Selection::Fields(vec!["key".into()]);
+        let v = s.finish(json!([{"key": "A", "x": 1}]), 0).unwrap();
+        assert_eq!(v["data"], json!([{"key": "A"}]));
+        s.selection = Selection::Fields(vec!["nope".into()]);
+        let err = s.finish(json!([{"key": "A", "x": 1}]), 0).unwrap_err();
+        let api = ApiError::find(&err).unwrap();
+        assert_eq!(api.exit_code(), 2);
+        assert!(api.hint.as_deref().unwrap().contains("key, x"));
     }
 }

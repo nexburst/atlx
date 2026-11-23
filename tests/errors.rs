@@ -1,5 +1,5 @@
 //! Error model: typed `ApiError`s from the client, and the built binary's
-//! error envelope, stderr report and exit codes (which follow twg).
+//! error envelope, stderr report and exit codes.
 
 mod common;
 
@@ -24,6 +24,21 @@ fn jira_handler() -> MockServer {
             .with_header("X-ARequestId", "req-123")
         } else if req.path.ends_with("/DENIED-1") {
             MockResponse::json(401, json!({"message": "Client must be authenticated"}))
+        } else if req.path.ends_with("/FORBID-1") {
+            MockResponse::json(403, json!({"errorMessages": ["No permission"]}))
+        } else if req.path.ends_with("/CONFLICT-1") {
+            MockResponse::json(409, json!({"errorMessages": ["Conflict"]}))
+        } else if req.path.ends_with("/BUSY-1") {
+            MockResponse::json(429, json!({"message": "slow down"})).with_header("Retry-After", "0")
+        } else if req.path.ends_with("/DOWN-1") {
+            MockResponse::json(503, json!({"message": "down"})).with_header("Retry-After", "0")
+        } else if req.path.ends_with("/BROKEN-1") {
+            MockResponse::json(500, json!({"message": "boom"}))
+        } else if req.path.ends_with("/BAD-1") {
+            MockResponse::json(
+                400,
+                json!({"errorMessages": [], "errors": {"summary": "is required"}}),
+            )
         } else {
             MockResponse::json(200, json!({"key": "OK-1", "fields": {"summary": "Fine"}}))
         }
@@ -112,79 +127,119 @@ fn bytes_expose_status() {
     assert_eq!(ApiError::find(&err).unwrap().status, Some(416));
 }
 
+/// `(path suffix, expected code, exit code, retryable)` for each HTTP class.
+const HTTP_CASES: &[(&str, &str, i32, bool)] = &[
+    ("NOPE-1", "not_found", 5, false),
+    ("DENIED-1", "auth", 4, false),
+    ("FORBID-1", "forbidden", 4, false),
+    ("CONFLICT-1", "conflict", 6, false),
+    ("BUSY-1", "rate_limited", 7, true),
+    ("DOWN-1", "server", 1, true),
+    ("BROKEN-1", "server", 1, false),
+    ("BAD-1", "validation", 1, false),
+];
+
 #[test]
-fn not_found_prints_envelope_on_stdout_and_exits_1() {
+fn every_http_class_has_its_code_exit_code_hint_and_retry_flag() {
+    let srv = jira_handler();
+    for &(id, code, exit, retryable) in HTTP_CASES {
+        let o = atlx(
+            Some(&srv.base_url()),
+            Some(TOKEN),
+            &["jira", "workitem", "get", id, "-o", "json"],
+        );
+        assert_eq!(o.status.code(), Some(exit), "{id}: {}", stdout(&o));
+        let v: Value = serde_json::from_str(&stdout(&o)).expect("one JSON document");
+        assert_eq!(v["ok"], false, "{id}");
+        let e = &v["error"];
+        assert_eq!(e["code"], code, "{id}");
+        assert_eq!(e["retryable"], retryable, "{id}");
+        assert!(
+            e["hint"].as_str().is_some_and(|h| !h.is_empty()),
+            "{id}: {e}"
+        );
+        assert_eq!(e["request"]["method"], "GET", "{id}");
+        assert!(e.get("kind").is_none() && e.get("category").is_none());
+        // JSON modes print one document and nothing on stderr.
+        assert_eq!(stderr(&o), "", "{id}");
+        assert_no_secret(&o);
+    }
+}
+
+#[test]
+fn not_found_names_status_request_id_and_visibility() {
     let srv = jira_handler();
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
         &["jira", "workitem", "get", "NOPE-1", "-o", "json"],
     );
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    let v: Value = serde_json::from_str(&stdout(&o)).expect("JSON envelope on stdout");
-    assert_eq!(v["ok"], false);
+    assert_eq!(o.status.code(), Some(5));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
     let e = &v["error"];
-    assert_eq!(e["code"], "TWG_TOOL_EXECUTION_FAILED");
-    assert_eq!(e["kind"], "twg_tool_execution_failed");
-    assert_eq!(e["category"], "not_found");
-    assert_eq!(e["statusCode"], 404);
+    assert_eq!(e["status"], 404);
     assert_eq!(e["requestId"], "req-123");
-    assert_eq!(e["downstreamError"]["statusCode"], 404);
-    assert_eq!(e["method"], "GET");
     assert_eq!(
         e["message"],
         "Issue does not exist or you do not have permission to see it."
     );
-    assert_eq!(
-        e["retry"],
-        json!({"recommended": false, "guidance": "do_not_retry_unchanged"})
-    );
-    let err = stderr(&o);
-    assert!(err.starts_with("Error: Issue does not exist"), "{err}");
-    assert!(err.contains("HTTP status: 404"), "{err}");
-    assert_no_secret(&o);
+    assert!(e["hint"].as_str().unwrap().contains("invisible"), "{e}");
+    assert!(stdout(&o).lines().count() == 1, "compact JSON");
 
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
         &["jira", "workitem", "get", "NOPE-1", "-o", "jsonl"],
     );
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(5));
     assert_eq!(stdout(&o).lines().count(), 1);
     let v: Value = serde_json::from_str(stdout(&o).trim()).unwrap();
-    assert_eq!(v["error"]["statusCode"], 404);
+    assert_eq!(v["error"]["status"], 404);
 }
 
 #[test]
-fn unauthorized_is_category_auth() {
+fn validation_errors_carry_field_messages_and_rate_limits_their_wait() {
     let srv = jira_handler();
     let o = atlx(
         Some(&srv.base_url()),
         Some(TOKEN),
-        &["jira", "workitem", "get", "DENIED-1", "-o", "json"],
+        &["jira", "workitem", "get", "BAD-1", "-o", "json"],
     );
-    assert_eq!(o.status.code(), Some(1));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["error"]["category"], "auth");
-    assert_eq!(v["error"]["statusCode"], 401);
-    assert!(v["error"]["hint"].as_str().unwrap().contains("atlx whoami"));
-    assert_no_secret(&o);
+    assert_eq!(v["error"]["fields"], json!({"summary": "is required"}));
+    let o = atlx(
+        Some(&srv.base_url()),
+        Some(TOKEN),
+        &["jira", "workitem", "get", "BUSY-1", "-o", "json"],
+    );
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["error"]["retryAfterMs"], 0);
 }
 
 #[test]
-fn missing_token_is_category_config() {
+fn missing_token_is_config_and_tells_the_agent_to_ask() {
     let o = atlx(
         Some(NO_SITE),
         None,
         &["jira", "workitem", "get", "A-1", "-o", "json"],
     );
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(4));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["error"]["category"], "config");
-    assert_eq!(v["error"]["code"], "TWG_COMMAND_FAILED");
-    assert_eq!(v["error"]["statusCode"], 401);
-    assert!(v["error"].get("downstreamError").is_none());
-    assert!(stderr(&o).contains("no API token configured"));
+    assert_eq!(v["error"]["code"], "config");
+    assert!(v["error"].get("status").is_none());
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no API token configured")
+    );
+    assert!(
+        v["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("atlx auth login")
+    );
+    assert_eq!(stderr(&o), "");
 }
 
 #[test]
@@ -195,24 +250,22 @@ fn text_mode_prints_readable_report_only_on_stderr() {
         Some(TOKEN),
         &["jira", "workitem", "get", "NOPE-1", "-o", "text"],
     );
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(5));
     assert_eq!(stdout(&o), "");
     let err = stderr(&o);
-    assert!(err.starts_with("✗ Failed jira.workitem.get.\n"), "{err}");
+    assert!(err.starts_with("✗ Failed jira workitem get.\n"), "{err}");
     assert!(
         err.contains("Error: Issue does not exist or you do not have permission to see it."),
         "{err}"
     );
-    assert!(
-        err.contains("Code:        TWG_TOOL_EXECUTION_FAILED"),
-        "{err}"
-    );
+    assert!(err.contains("Code:        not_found"), "{err}");
     assert!(err.contains("Request ID:  req-123"), "{err}");
+    assert!(err.contains("Hint:"), "{err}");
     assert_no_secret(&o);
 }
 
 #[test]
-fn batch_partial_failure_exits_3_and_strict_exits_1() {
+fn partial_batches_exit_3_and_strict_fails_whole() {
     let srv = jira_handler();
     let site = srv.base_url();
     let o = atlx(
@@ -220,17 +273,14 @@ fn batch_partial_failure_exits_3_and_strict_exits_1() {
         Some(TOKEN),
         &["jira", "workitem", "get", "OK-1", "NOPE-1", "-o", "json"],
     );
-    assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
+    assert_eq!(o.status.code(), Some(3), "{}", stdout(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["command"], "jira.workitem.get");
-    let d = &v["data"];
-    assert_eq!(d["items"][0]["ok"], true);
-    assert_eq!(d["items"][1]["ok"], false);
-    assert_eq!(d["items"][1]["error"]["status"], 404);
-    assert_eq!(d["items"][1]["error"]["category"], "not_found");
-    assert_eq!(d["summary"]["failed"], 1);
-    assert_eq!(d["summary"]["returned"], 1);
-    assert_eq!(v["meta"]["acquisition"]["failed"], 1);
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["partial"], true);
+    assert_eq!(v["data"].as_array().unwrap().len(), 1);
+    assert_eq!(v["errors"][0]["input"], "NOPE-1");
+    assert_eq!(v["errors"][0]["error"]["code"], "not_found");
+    assert_eq!(v["errors"][0]["error"]["status"], 404);
 
     let o = atlx(
         Some(&site),
@@ -239,41 +289,76 @@ fn batch_partial_failure_exits_3_and_strict_exits_1() {
             "jira", "workitem", "get", "OK-1", "NOPE-1", "--strict", "-o", "json",
         ],
     );
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(5));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(
-        v["error"]["message"],
-        "batch read failed for 1 of 2 input(s)"
+    assert!(v.get("data").is_none());
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("1 of 2 inputs failed; first: NOPE-1")
     );
-    assert_eq!(v["error"]["statusCode"], 404);
 
     let o = atlx(
         Some(&site),
         Some(TOKEN),
         &["jira", "workitem", "get", "NOPE-1", "NOPE-2", "-o", "json"],
     );
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(5));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["error"]["category"], "not_found");
+    assert_eq!(v["error"]["code"], "not_found");
 }
 
 #[test]
-fn old_names_work_without_notes_when_piped() {
-    let srv = jira_handler();
-    for fmt in ["text", "json"] {
-        let o = atlx(
-            Some(&srv.base_url()),
-            Some(TOKEN),
-            &["jira", "workitem", "link", "types", "-o", fmt],
-        );
-        assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
-        // stdout is a pipe here, so no deprecation note may appear.
-        assert!(!stderr(&o).contains("0.3"), "{}", stderr(&o));
-    }
+fn clap_errors_are_structured_usage_errors_with_suggestions() {
+    let o = atlx(
+        None,
+        None,
+        &["jira", "workitem", "gett", "P-1", "-o", "json"],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(stderr(&o), "");
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["code"], "usage");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("gett"),
+        "{v}"
+    );
+    let s = v["error"]["suggestions"].as_array().unwrap();
+    assert!(s.iter().any(|x| x == "get"), "{v}");
+
+    let o = atlx(
+        None,
+        None,
+        &["jira", "workitem", "get", "P-1", "--bogus", "-o", "json"],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert!(v["error"]["message"].as_str().unwrap().contains("--bogus"));
+    assert!(
+        v["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("atlx describe")
+    );
+
+    // Text mode: clap's own message on stderr, nothing on stdout.
+    let o = atlx(
+        None,
+        None,
+        &["jira", "workitem", "get", "--bogus", "-o", "text"],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(stdout(&o), "");
+    assert!(stderr(&o).contains("--bogus"));
+
+    let o = atlx(None, None, &["--version"]);
+    assert_eq!(o.status.code(), Some(0));
 }
 
 #[test]
-fn usage_errors_exit_1() {
+fn usage_errors_after_parsing_exit_2() {
     let o = atlx(
         Some(NO_SITE),
         Some(TOKEN),
@@ -287,53 +372,71 @@ fn usage_errors_exit_1() {
             "json",
         ],
     );
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert_eq!(o.status.code(), Some(2), "{}", stdout(&o));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["error"]["category"], "usage");
-    assert_eq!(v["error"]["statusCode"], 400);
-    assert!(
-        v["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("--pull-request")
-    );
+    assert_eq!(v["error"]["code"], "usage");
+    assert!(v["error"].get("status").is_none());
     assert_no_secret(&o);
-
-    // clap argument errors: stderr only, exit 1.
-    let o = atlx(None, None, &["jira", "workitem", "get", "--bogus"]);
-    assert_eq!(o.status.code(), Some(1));
-    assert_eq!(stdout(&o), "");
-    assert!(stderr(&o).contains("--bogus"));
-
-    let o = atlx(None, None, &["--version"]);
-    assert_eq!(o.status.code(), Some(0));
 }
 
 #[test]
-fn teamwork_graph_commands_fail_with_an_envelope_and_exit_2() {
-    let o = atlx(
-        Some(NO_SITE),
-        Some(TOKEN),
-        &["rovo", "search", "launch", "-o", "json"],
-    );
-    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["ok"], false);
-    assert_eq!(v["error"]["category"], "unsupported");
-    let msg = v["error"]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("not supported by atlx (requires Teamwork Graph"),
-        "{msg}"
-    );
-    assert!(stderr(&o).contains("not supported by atlx"));
+fn old_paths_and_removed_flags_are_plain_usage_errors() {
+    for args in [
+        &["whoami", "-o", "json"][..],
+        &["jira", "workitem", "query", "--select", "key", "-o", "json"][..],
+    ] {
+        let o = atlx(Some(NO_SITE), Some(TOKEN), args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+        assert_eq!(v["error"]["code"], "usage", "{args:?}");
+    }
+}
 
-    // A planned command says so and exits 1, like other usage errors.
-    let o = atlx(
-        Some(NO_SITE),
-        Some(TOKEN),
-        &["confluence", "content", "analytics", "1", "-o", "json"],
-    );
-    assert_eq!(o.status.code(), Some(1));
+#[test]
+fn describe_lists_every_code_with_its_exit_code() {
+    let o = atlx(None, None, &["describe", "--errors", "-o", "json"]);
+    assert_eq!(o.status.code(), Some(0));
     let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert!(v["error"]["message"].as_str().unwrap().contains("planned"));
+    let codes: Vec<(&str, i64)> = v["data"]["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["code"].as_str().unwrap(), e["exit"].as_i64().unwrap()))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            ("usage", 2),
+            ("config", 4),
+            ("auth", 4),
+            ("forbidden", 4),
+            ("not_found", 5),
+            ("conflict", 6),
+            ("validation", 1),
+            ("rate_limited", 7),
+            ("server", 1),
+            ("network", 7),
+            ("timeout", 7),
+            ("refused", 8),
+            ("other", 1),
+        ]
+    );
+}
+
+#[test]
+fn transport_failures_are_network_errors_and_unknown_writes_say_so() {
+    // Nothing listens on port 9; no retries are slept through for POST.
+    let c = atlx::client::Client::new(NO_SITE.into(), "me@example.com", TOKEN, Some(2_000))
+        .with_backoff_base(std::time::Duration::from_millis(1));
+    let err = c.get("/x", &[]).unwrap_err();
+    let api = ApiError::find(&err).unwrap();
+    assert_eq!(api.kind, ErrorKind::Network);
+    assert!(api.retryable());
+    assert_eq!(api.exit_code(), 7);
+    assert!(!api.write_state_unknown);
+    let err = c.post("/x", &json!({})).unwrap_err();
+    let api = ApiError::find(&err).unwrap();
+    assert!(api.write_state_unknown);
+    assert_eq!(api.to_json()["writeState"], "unknown");
+    assert!(api.to_json()["hint"].as_str().unwrap().contains("read"));
 }

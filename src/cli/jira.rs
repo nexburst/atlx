@@ -15,6 +15,8 @@ mod bulk;
 mod collab;
 mod dashboard;
 
+pub(crate) const META: &[crate::schema::CommandMeta] = &[];
+
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum JiraCmd {

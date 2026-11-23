@@ -12,7 +12,7 @@ their public REST APIs. Output is text on a terminal and JSON when piped.
 
 ```sh
 atlx doctor
-atlx whoami -o json
+atlx auth status -o json
 ```
 
 If credentials are missing, ask the person to log in. Don't ask for a token in
@@ -67,12 +67,11 @@ More in the references, which you should open only as needed:
 ## Keep output small
 
 ```sh
-atlx jira workitem query --jql 'project = PROJ' -o json --select data.issues.key,data.issues.summary
+atlx jira workitem query --jql 'project = PROJ' -o json --fields issues.key,issues.summary
 atlx bb pull-requests diff 42 --repo acme/api --output-file pr-42.diff
 ```
 
-Use `--select` to keep fields, `--output-file` for large results and
-`--output-summary` for a short description of a large result.
+Use `--fields` to keep fields and `--output-file` for large results.
 
 ## Recipes
 

@@ -15,6 +15,8 @@ pub(crate) enum InputType {
     AccountId,
 }
 
+pub(crate) const META: &[crate::schema::CommandMeta] = &[];
+
 #[derive(Subcommand)]
 pub(crate) enum UserCmd {
     /// Search Jira users by name or email

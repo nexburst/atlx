@@ -1,23 +1,44 @@
-//! `atlx login`, `logout`, `whoami`, `setup` and `auth profile`, plus
-//! interactive prompts.
+//! `atlx auth`: `login`, `logout`, `status`, `bitbucket` and `profile …`.
+//!
+//! Nothing here prompts unless stdin is a terminal, so an agent never
+//! waits on input: missing credentials are a `config` error telling it to
+//! ask the person to run `atlx auth login`.
 
 use super::Globals;
 use super::util::{require_yes, text_arg};
-use crate::client::ApiError;
+use crate::client::{ApiError, Client};
 use crate::config::{self, Config, ConfigFile, DEFAULT_PROFILE, Profile};
-use crate::output::envelope::envelope;
+use crate::schema::{CommandMeta, Effect, Field, Record};
 use crate::{bitbucket, jira};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use std::io::{IsTerminal, Write};
 
+#[derive(Subcommand)]
+pub(crate) enum AuthCmd {
+    /// Save credentials (site, email, API token) into a profile
+    Login(LoginArgs),
+    /// Remove the selected profile and its saved credentials
+    Logout,
+    /// Who is signed in, on which site, with which token source; which
+    /// products answer; whether read-only mode is on. Run this first
+    Status,
+    /// Save the Bitbucket workspace and token for the profile
+    Bitbucket(BitbucketArgs),
+    /// List, rename and choose login profiles
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCmd,
+    },
+}
+
 #[derive(Args)]
 pub(crate) struct LoginArgs {
     /// API token (https://id.atlassian.com/manage-profile/security/api-tokens); `-` reads stdin
     #[arg(long, conflicts_with = "token_cmd")]
     token: Option<String>,
-    /// Save a shell command that prints the API token, instead of the token itself (atlx extra)
+    /// Save a shell command that prints the API token, instead of the token itself
     #[arg(long, value_name = "CMD")]
     token_cmd: Option<String>,
     /// Skip credential verification
@@ -31,45 +52,34 @@ pub(crate) struct LoginArgs {
     new_profile: Option<String>,
 }
 
-#[derive(Subcommand)]
-pub(crate) enum SetupCmd {
-    /// Set up the Bitbucket workspace and token
-    #[command(visible_alias = "bb")]
-    Bitbucket {
-        #[arg(long)]
-        workspace: Option<String>,
-        /// Bitbucket-scoped API token; `-` reads stdin
-        #[arg(long, conflicts_with = "token_cmd")]
-        token: Option<String>,
-        /// Save a shell command that prints the Bitbucket token (atlx extra)
-        #[arg(long, value_name = "CMD")]
-        token_cmd: Option<String>,
-        /// Bitbucket account email, if different from the Atlassian one
-        #[arg(long)]
-        email: Option<String>,
-        /// Prompt even when a Bitbucket token is already configured
-        #[arg(short, long)]
-        force: bool,
-        #[arg(long)]
-        no_verify: bool,
-    },
-    /// Save the default Atlassian site (no re-login)
-    DefaultSite { site: Option<String> },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum AuthCmd {
-    /// List, rename and choose the default login profile
-    Profile {
-        #[command(subcommand)]
-        cmd: ProfileCmd,
-    },
+#[derive(Args)]
+pub(crate) struct BitbucketArgs {
+    /// Default workspace slug
+    #[arg(long)]
+    workspace: Option<String>,
+    /// Bitbucket-scoped API token; `-` reads stdin
+    #[arg(long, conflicts_with = "token_cmd")]
+    token: Option<String>,
+    /// Save a shell command that prints the Bitbucket token
+    #[arg(long, value_name = "CMD")]
+    token_cmd: Option<String>,
+    /// Bitbucket account email, if different from the Atlassian one
+    #[arg(long)]
+    email: Option<String>,
+    /// Prompt even when a Bitbucket token is already configured
+    #[arg(short, long)]
+    force: bool,
+    /// Skip the check that the token can list the workspace's repositories
+    #[arg(long)]
+    no_verify: bool,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ProfileCmd {
     /// Show each profile's site, email, workspace and token source (never the token)
     List,
+    /// Save `-s/--site` as the selected profile's site, without logging in again
+    Update,
     /// Move the top-level (v1) credentials into a named profile
     Migrate {
         /// Confirm the move
@@ -80,6 +90,127 @@ pub(crate) enum ProfileCmd {
     Rename { name: String, new_name: String },
     /// Make a profile the one used when -p and ATLX_PROFILE are not set
     Default { name: String },
+}
+
+const USER: crate::schema::Source =
+    crate::schema::Source::Object(&[("id", "user.id"), ("name", "user.name")]);
+
+/// `auth status`.
+pub(crate) const STATUS: Record = Record {
+    name: "auth.status",
+    description: "the signed-in account, its site and what it can reach",
+    primary: "profile",
+    fields: &[
+        Field::new("profile", "string", "selected profile", "profile"),
+        Field::new("site", "string", "Atlassian site", "site"),
+        Field::new("email", "string", "account email", "email"),
+        Field::new("user", "user", "the Jira account ({id, name})", "user").source(USER),
+        Field::new(
+            "tokenSource",
+            "string",
+            "where the token comes from: env, config, token_cmd",
+            "tokenSource",
+        ),
+        Field::new(
+            "readOnly",
+            "boolean",
+            "whether mutating requests are refused",
+            "readOnly",
+        ),
+        Field::new(
+            "products",
+            "object",
+            "per product: ok, not_configured, or the error code it answered with",
+            "products",
+        ),
+        Field::new(
+            "bitbucketWorkspace",
+            "string",
+            "default Bitbucket workspace",
+            "bitbucketWorkspace",
+        ),
+        Field::new(
+            "defaults",
+            "object",
+            "repo-local defaults (.atlx.toml and the git remote)",
+            "defaults",
+        )
+        .full(),
+    ],
+};
+
+/// `auth profile list`.
+pub(crate) const PROFILE: Record = Record {
+    name: "auth.profile",
+    description: "a saved login profile (never the token)",
+    primary: "name",
+    fields: &[
+        Field::new("name", "string", "profile name", "name"),
+        Field::new(
+            "default",
+            "boolean",
+            "used when none is selected",
+            "default",
+        ),
+        Field::new("active", "boolean", "selected for this run", "active"),
+        Field::new("site", "string", "Atlassian site", "site"),
+        Field::new("email", "string", "account email", "email"),
+        Field::new(
+            "workspace",
+            "string",
+            "default Bitbucket workspace",
+            "workspace",
+        ),
+        Field::new(
+            "tokenSource",
+            "string",
+            "config, token_cmd or none",
+            "tokenSource",
+        ),
+        Field::new(
+            "bitbucketTokenSource",
+            "string",
+            "where the Bitbucket token comes from",
+            "bitbucketTokenSource",
+        )
+        .full(),
+        Field::new("readOnly", "boolean", "read-only profile", "readOnly"),
+    ],
+};
+
+pub(crate) const META: &[CommandMeta] = &[
+    CommandMeta::new("auth login", Effect::Write).examples(&[
+        "atlx auth login --new-profile work -s acme -u me@acme.com --token-cmd 'pass show atlassian'",
+        "atlx auth login -p work --force",
+    ]),
+    CommandMeta::new("auth logout", Effect::Write).examples(&["atlx auth logout -p work"]),
+    CommandMeta::new("auth status", Effect::Read)
+        .record(&STATUS)
+        .examples(&["atlx auth status", "atlx auth status -p work --fields user,products"]),
+    CommandMeta::new("auth bitbucket", Effect::Write).examples(&[
+        "atlx auth bitbucket --workspace acme --token-cmd 'pass show bitbucket'",
+    ]),
+    CommandMeta::new("auth profile list", Effect::Read)
+        .record(&PROFILE)
+        .examples(&["atlx auth profile list", "atlx auth profile list -o ids"]),
+    CommandMeta::new("auth profile update", Effect::Write)
+        .examples(&["atlx auth profile update -p work -s acme.atlassian.net"]),
+    CommandMeta::new("auth profile migrate", Effect::Destructive)
+        .examples(&["atlx auth profile migrate --dry-run", "atlx auth profile migrate --yes"]),
+    CommandMeta::new("auth profile rename", Effect::Write)
+        .examples(&["atlx auth profile rename default work"]),
+    CommandMeta::new("auth profile default", Effect::Write)
+        .examples(&["atlx auth profile default work"]),
+];
+
+pub(crate) fn run(g: &Globals, cmd: AuthCmd) -> Result<Value> {
+    match cmd {
+        AuthCmd::Login(a) => login(g, a),
+        AuthCmd::Logout => logout(g),
+        AuthCmd::Status => status(g),
+        AuthCmd::Bitbucket(a) => setup_bitbucket(g, a),
+        AuthCmd::Profile { cmd } => profile_cmd(g, cmd),
+    }
 }
 
 /// The profile a write command targets: `-p`/`ATLX_PROFILE`, else the saved
@@ -103,6 +234,29 @@ fn store(file: &mut ConfigFile, name: &str, p: Profile) {
     }
 }
 
+/// Local config writes honour `--dry-run` and read-only mode too.
+fn guard_local(g: &Globals, what: &str) -> Result<()> {
+    if g.read_only_requested() {
+        return Err(ApiError::refused(format!("read-only mode: not {what}")).into());
+    }
+    Ok(())
+}
+
+fn save(g: &Globals, file: &ConfigFile, what: &str) -> Result<Value> {
+    let p = config::path()?;
+    if g.dry_run {
+        return Err(crate::client::DryRun {
+            method: "WRITE".into(),
+            url: p.display().to_string(),
+            body: Some(json!({"action": what})),
+        }
+        .into());
+    }
+    guard_local(g, what)?;
+    file.save_to(&p)?;
+    Ok(p.display().to_string().into())
+}
+
 pub(crate) fn logout(g: &Globals) -> Result<Value> {
     let p = config::path()?;
     let mut file = ConfigFile::load_from(&p)?;
@@ -113,29 +267,69 @@ pub(crate) fn logout(g: &Globals) -> Result<Value> {
     let removed = file.remove(&name);
     let mut out = json!({"profile": name, "removed": removed, "config": p.display().to_string()});
     if file.is_empty() {
+        if g.dry_run {
+            return Err(crate::client::DryRun {
+                method: "DELETE".into(),
+                url: p.display().to_string(),
+                body: None,
+            }
+            .into());
+        }
+        guard_local(g, "removing the config file")?;
         if p.exists() {
             std::fs::remove_file(&p)?;
         }
-        out["file_removed"] = true.into();
+        out["fileRemoved"] = true.into();
     } else {
-        file.save_to(&p)?;
+        save(g, &file, &format!("removing profile {name}"))?;
     }
     Ok(out)
 }
 
-pub(crate) fn whoami(g: &Globals) -> Result<Value> {
+/// `auth status`: one call that says who, where, how, and what answers.
+pub(crate) fn status(g: &Globals) -> Result<Value> {
     let cfg = g.config()?;
-    let me = jira::myself(&cfg.jira()?)?;
-    // twg's `user.get` shape; where atlx's credentials come from goes in
-    // `meta`, since twg has no such fields.
-    Ok(envelope("user.get", "user")
-        .request(json!({"accountId": null}))
-        .meta("resultCount", 1)
-        .meta("site", cfg.site.clone())
-        .meta("profile", cfg.profile.clone())
-        .meta("tokenSource", cfg.token_source())
-        .meta("bitbucketWorkspace", cfg.bitbucket.workspace.clone())
-        .data(jira::profile(&me)))
+    let jira_client = cfg.jira()?;
+    let (me, confluence, bb) = std::thread::scope(|s| {
+        let cf = s.spawn(|| product_check(cfg.confluence(), "/api/v2/spaces", &[("limit", "1")]));
+        let bb = s.spawn(|| {
+            if !cfg.bitbucket_configured() {
+                return Value::from("not_configured");
+            }
+            product_check(cfg.bitbucket().map(|(c, _)| c), "/user", &[])
+        });
+        let me = jira::myself(&jira_client);
+        (
+            me,
+            cf.join().unwrap_or_else(|_| "other".into()),
+            bb.join().unwrap_or_else(|_| "other".into()),
+        )
+    });
+    let me = me?;
+    Ok(json!({
+        "profile": cfg.profile,
+        "site": cfg.site.as_deref().map(config::normalize_site),
+        "email": cfg.email,
+        "user": {"id": me["accountId"], "name": me["displayName"]},
+        "tokenSource": cfg.token_source(),
+        "readOnly": cfg.read_only,
+        "products": {"jira": "ok", "confluence": confluence, "bitbucket": bb},
+        "bitbucketWorkspace": cfg.bitbucket.workspace,
+        "defaults": {
+            "file": cfg.local.path.as_ref().map(|p| p.display().to_string()),
+            "jiraProject": cfg.local.jira.project,
+            "confluenceSpace": cfg.local.confluence.space,
+            "bitbucketRepo": cfg.default_repo,
+        },
+    }))
+}
+
+/// `ok`, or the error code a product answered a cheap read with.
+fn product_check(client: Result<Client>, path: &str, query: &[(&str, &str)]) -> Value {
+    match client.and_then(|c| c.get(path, query)) {
+        Ok(_) => "ok".into(),
+        Err(e) => ApiError::from_anyhow(&e).code().into(),
+    }
 }
 
 #[cfg(unix)]
@@ -180,7 +374,11 @@ impl EchoGuard {
 
 fn read_prompt_line(label: &str, secret: bool) -> Result<String> {
     if !std::io::stdin().is_terminal() {
-        bail!("missing {label}; pass it as a flag");
+        return Err(ApiError::config(format!("missing {label}"))
+            .with_hint(
+                "ask the person to run `atlx auth login` in a terminal; never pass a token on the command line",
+            )
+            .into());
     }
     eprint!("{label}: ");
     std::io::stderr().flush()?;
@@ -243,7 +441,7 @@ pub(crate) fn login(g: &Globals, a: LoginArgs) -> Result<Value> {
             config::validate_name(n)?;
             if file.exists(n) {
                 return Err(ApiError::usage(format!(
-                    "profile `{n}` already exists; update it with `atlx login -p {n}`"
+                    "profile `{n}` already exists; update it with `atlx auth login -p {n}`"
                 ))
                 .into());
             }
@@ -273,87 +471,63 @@ pub(crate) fn login(g: &Globals, a: LoginArgs) -> Result<Value> {
     )?;
     let name = name.unwrap_or_else(|| file.suggest_name(p.site.as_deref()));
     let mut out = json!({
-        "profile": name, "site": p.site, "email": p.email, "token_source": p.token_source(),
+        "profile": name, "site": p.site, "email": p.email, "tokenSource": p.token_source(),
     });
     if !a.no_verify {
         let mut cfg = Config::from_profile(&name, &p);
         cfg.timeout_ms = g.timeout_ms;
         let me = jira::myself(&cfg.jira()?).context("credentials check failed; nothing saved")?;
-        out["name"] = me["displayName"].clone();
-        out["account_id"] = me["accountId"].clone();
+        out["user"] = json!({"id": me["accountId"], "name": me["displayName"]});
     }
     store(&mut file, &name, p);
     out["default"] = (file.default_name() == name).into();
-    out["saved"] = file.save()?.display().to_string().into();
+    out["saved"] = save(g, &file, &format!("saving profile {name}"))?;
     Ok(out)
 }
 
-pub(crate) fn setup(g: &Globals, cmd: SetupCmd) -> Result<Value> {
+fn setup_bitbucket(g: &Globals, a: BitbucketArgs) -> Result<Value> {
     let mut file = ConfigFile::load()?;
     let (name, mut p) = target(g, &file)?;
-    match cmd {
-        SetupCmd::DefaultSite { site } => {
-            let site = match site.or(g.site.clone()) {
-                Some(s) => s,
-                None => prompt("Atlassian site (e.g. acme or acme.atlassian.net)")?,
-            };
-            p.site = Some(config::normalize_site(&site));
-            let site = p.site.clone();
-            store(&mut file, &name, p);
-            Ok(json!({"profile": name, "site": site, "saved": file.save()?.display().to_string()}))
-        }
-        SetupCmd::Bitbucket {
-            workspace,
-            token,
-            token_cmd,
-            email,
-            force,
-            no_verify,
-        } => {
-            let ws = match workspace.or(keep(p.bitbucket.workspace.take(), force)) {
-                Some(w) => w,
-                None => prompt("Bitbucket workspace slug")?,
-            };
-            p.bitbucket.workspace = Some(ws.clone());
-            if email.is_some() {
-                p.bitbucket.email = email;
-            }
-            set_token(
-                &mut p.bitbucket.token,
-                &mut p.bitbucket.token_cmd,
-                token,
-                token_cmd,
-                force,
-                "Bitbucket API token (scopes: account, repository, pullrequest, pipeline)",
-            )?;
-            let mut out = json!({
-                "profile": name, "workspace": ws, "token_source": p.bitbucket_token_source(),
-            });
-            if !no_verify {
-                let mut cfg = Config::from_profile(&name, &p);
-                cfg.timeout_ms = g.timeout_ms;
-                let (c, _) = cfg.bitbucket()?;
-                let q = bitbucket::RepoQuery {
-                    query: None,
-                    project: None,
-                    language: None,
-                    sort: "-updated_on",
-                    role: None,
-                    limit: 1,
-                };
-                bitbucket::repo_query(&c, &ws, &q)
-                    .context("Bitbucket check failed; nothing saved")?;
-                out["verified"] = true.into();
-            }
-            store(&mut file, &name, p);
-            out["saved"] = file.save()?.display().to_string().into();
-            Ok(out)
-        }
+    let ws = match a.workspace.or(keep(p.bitbucket.workspace.take(), a.force)) {
+        Some(w) => w,
+        None => prompt("Bitbucket workspace slug")?,
+    };
+    p.bitbucket.workspace = Some(ws.clone());
+    if a.email.is_some() {
+        p.bitbucket.email = a.email;
     }
+    set_token(
+        &mut p.bitbucket.token,
+        &mut p.bitbucket.token_cmd,
+        a.token,
+        a.token_cmd,
+        a.force,
+        "Bitbucket API token (scopes: account, repository, pullrequest, pipeline)",
+    )?;
+    let mut out = json!({
+        "profile": name, "workspace": ws, "tokenSource": p.bitbucket_token_source(),
+    });
+    if !a.no_verify {
+        let mut cfg = Config::from_profile(&name, &p);
+        cfg.timeout_ms = g.timeout_ms;
+        let (c, _) = cfg.bitbucket()?;
+        let q = bitbucket::RepoQuery {
+            query: None,
+            project: None,
+            language: None,
+            sort: "-updated_on",
+            role: None,
+            limit: 1,
+        };
+        bitbucket::repo_query(&c, &ws, &q).context("Bitbucket check failed; nothing saved")?;
+        out["verified"] = true.into();
+    }
+    store(&mut file, &name, p);
+    out["saved"] = save(g, &file, &format!("saving Bitbucket settings for {name}"))?;
+    Ok(out)
 }
 
-pub(crate) fn auth_cmd(g: &Globals, cmd: AuthCmd) -> Result<Value> {
-    let AuthCmd::Profile { cmd } = cmd;
+fn profile_cmd(g: &Globals, cmd: ProfileCmd) -> Result<Value> {
     let mut file = ConfigFile::load()?;
     match cmd {
         ProfileCmd::List => {
@@ -370,27 +544,43 @@ pub(crate) fn auth_cmd(g: &Globals, cmd: AuthCmd) -> Result<Value> {
                         "active": active == n,
                         "site": p.site,
                         "email": p.email,
-                        "bitbucket_workspace": p.bitbucket.workspace,
-                        "token_source": p.token_source(),
-                        "bitbucket_token_source": p.bitbucket_token_source(),
+                        "workspace": p.bitbucket.workspace,
+                        "tokenSource": p.token_source(),
+                        "bitbucketTokenSource": p.bitbucket_token_source(),
+                        "readOnly": p.read_only.unwrap_or(false),
                     })
                 })
                 .collect();
             Ok(Value::Array(rows))
+        }
+        ProfileCmd::Update => {
+            let Some(site) = g.site.clone() else {
+                return Err(ApiError::usage("pass the new site with -s/--site")
+                    .with_suggestions(["atlx auth profile update -s acme.atlassian.net".into()])
+                    .into());
+            };
+            let (name, mut p) = target(g, &file)?;
+            p.site = Some(config::normalize_site(&site));
+            let site = p.site.clone();
+            store(&mut file, &name, p);
+            let saved = save(g, &file, &format!("updating profile {name}"))?;
+            Ok(json!({"profile": name, "site": site, "saved": saved}))
         }
         ProfileCmd::Default { name } => {
             if !file.exists(&name) {
                 return Err(ApiError::usage(format!("no profile named `{name}`")).into());
             }
             file.default_profile = (name != DEFAULT_PROFILE).then(|| name.clone());
-            Ok(json!({"default_profile": name, "saved": file.save()?.display().to_string()}))
+            let saved = save(g, &file, &format!("making {name} the default"))?;
+            Ok(json!({"defaultProfile": name, "saved": saved}))
         }
         ProfileCmd::Rename { name, new_name } => {
             file.rename(&name, &new_name)?;
+            let saved = save(g, &file, &format!("renaming {name} to {new_name}"))?;
             Ok(json!({
                 "renamed": name, "profile": new_name,
                 "default": file.default_name() == new_name,
-                "saved": file.save()?.display().to_string(),
+                "saved": saved,
             }))
         }
         ProfileCmd::Migrate { yes } => {
@@ -405,10 +595,11 @@ pub(crate) fn auth_cmd(g: &Globals, cmd: AuthCmd) -> Result<Value> {
                 &format!("moving the top-level credentials into profile `{to}`"),
             )?;
             file.rename(DEFAULT_PROFILE, &to)?;
+            let saved = save(g, &file, &format!("moving the top-level profile to {to}"))?;
             Ok(json!({
                 "migrated": true, "profile": to,
                 "default": file.default_name() == to,
-                "saved": file.save()?.display().to_string(),
+                "saved": saved,
             }))
         }
     }

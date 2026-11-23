@@ -102,11 +102,11 @@ fn client_extracts_product_errors_html_pages_and_auth_hints() {
     let bb_err = client.get("/bb", &[]).unwrap_err().to_string();
     assert!(bb_err.contains("HTTP 403"));
     assert!(bb_err.contains("Forbidden repo"), "{bb_err}");
-    assert!(bb_err.contains("permission or scope"), "{bb_err}");
+    assert!(bb_err.contains("permission or token scope"), "{bb_err}");
 
     let unauth_err = client.get("/auth", &[]).unwrap_err().to_string();
     assert!(unauth_err.contains("HTTP 401"));
-    assert!(unauth_err.contains("atlx whoami"), "{unauth_err}");
+    assert!(unauth_err.contains("atlx auth status"), "{unauth_err}");
 
     let html_err = client.get("/html", &[]).unwrap_err().to_string();
     assert!(

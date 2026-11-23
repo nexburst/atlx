@@ -17,6 +17,8 @@ mod lifecycle;
 
 pub(crate) use comments::ConfCommentCmd;
 
+pub(crate) const META: &[crate::schema::CommandMeta] = &[];
+
 #[derive(Subcommand)]
 pub(crate) enum ConfCmd {
     /// CQL and text search

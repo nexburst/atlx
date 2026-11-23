@@ -9,6 +9,8 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
+pub(crate) const META: &[crate::schema::CommandMeta] = &[];
+
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum JsmCmd {

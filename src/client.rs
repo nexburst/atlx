@@ -26,6 +26,22 @@ pub struct Client {
     timeout: Duration,
     max_body: u64,
     backoff_base: Duration,
+    mode: Mode,
+}
+
+/// What the client does with a mutating request: any method other than
+/// GET, HEAD and OPTIONS, unless sent through [`Client::post_read`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Send it.
+    #[default]
+    Live,
+    /// Do not send it: stop the command with a [`DryRun`] carrying the
+    /// request. Reads still go out.
+    DryRun,
+    /// Refuse it with a `refused` error (`--read-only`, `ATLX_READ_ONLY`,
+    /// `read_only = true`).
+    ReadOnly,
 }
 
 /// A raw (possibly binary) response body.
@@ -106,6 +122,9 @@ struct Opts<'a> {
     /// Apply the overall request deadline (JSON calls). Downloads and uploads
     /// only use the per-phase connect/read/write timeouts.
     overall_timeout: bool,
+    /// A POST that only reads ([`Client::post_read`]): exempt from
+    /// dry-run and read-only mode.
+    read: bool,
 }
 
 impl Client {
@@ -126,7 +145,18 @@ impl Client {
             timeout,
             max_body: DEFAULT_MAX_BODY,
             backoff_base: Duration::from_secs(1),
+            mode: Mode::Live,
         }
+    }
+
+    /// How mutating requests are handled (default [`Mode::Live`]).
+    pub fn with_mode(mut self, mode: Mode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
     }
 
     /// Cap in bytes for responses read into memory (default 64 MiB).
@@ -152,6 +182,20 @@ impl Client {
 
     pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
         self.request_with("POST", path, &[], Some(body), &[])
+    }
+
+    /// POST to an endpoint that only reads (a search or bulk fetch sent as
+    /// POST). It still goes out under `--dry-run` and read-only mode, so
+    /// only use it for endpoints Atlassian documents as reads.
+    pub fn post_read(&self, path: &str, body: &Value) -> Result<Value> {
+        let opts = Opts {
+            headers: &[],
+            default_accept: "application/json",
+            overall_timeout: true,
+            read: true,
+        };
+        let (resp, desc) = self.execute("POST", path, &[], Payload::Json(body), &opts)?;
+        Ok(parse_value(self.read_body(resp, &desc)?))
     }
 
     pub fn put(&self, path: &str, body: &Value) -> Result<Value> {
@@ -190,6 +234,7 @@ impl Client {
             headers,
             default_accept: "application/json",
             overall_timeout: true,
+            read: false,
         };
         let payload = body.map_or(Payload::Empty, Payload::Json);
         let (resp, desc) = self.execute(method, path, query, payload, &opts)?;
@@ -209,6 +254,7 @@ impl Client {
             headers: &[],
             default_accept: "application/json",
             overall_timeout: true,
+            read: false,
         };
         let payload = body.map_or(Payload::Empty, Payload::Json);
         let (resp, desc) = self.execute(method, path, query, payload, &opts)?;
@@ -237,6 +283,7 @@ impl Client {
             headers,
             default_accept: "*/*",
             overall_timeout: false,
+            read: false,
         };
         let (resp, desc) = self.execute("GET", path, query, Payload::Empty, &opts)?;
         let status = resp.status();
@@ -269,6 +316,7 @@ impl Client {
             headers: &[],
             default_accept: "*/*",
             overall_timeout: false,
+            read: false,
         };
         let (resp, desc) = self.execute("GET", path, query, Payload::Empty, &opts)?;
         let dir = match dest.parent() {
@@ -322,6 +370,7 @@ impl Client {
             headers,
             default_accept: "application/json",
             overall_timeout: false,
+            read: false,
         };
         let payload = Payload::Multipart { parts, boundary };
         let (resp, desc) = self.execute("POST", path, &[], payload, &opts)?;
@@ -335,6 +384,7 @@ impl Client {
             headers: &[],
             default_accept: "application/json",
             overall_timeout: false,
+            read: false,
         };
         let payload = Payload::Multipart { parts, boundary };
         let (resp, desc) = self.execute("POST", path, &[], payload, &opts)?;
@@ -371,6 +421,9 @@ impl Client {
         check_path(method, path)?;
         let (mut url, mut auth) = self.resolve_request(path)?;
         let mut method = method.to_ascii_uppercase();
+        if !opts.read && !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS") {
+            self.guard_write(&method, &url, query, &payload)?;
+        }
         let mut query = query;
         for _ in 0..=MAX_REDIRECTS {
             let resp = self.send_with_retry(&method, &url, query, &payload, auth, opts)?;
@@ -404,6 +457,44 @@ impl Client {
             query = &[];
         }
         bail!("{method} {url} failed: too many redirects (more than {MAX_REDIRECTS})")
+    }
+
+    /// Apply [`Mode`] to a mutating request before anything is sent.
+    fn guard_write(
+        &self,
+        method: &str,
+        url: &str,
+        query: &[(&str, &str)],
+        payload: &Payload<'_>,
+    ) -> Result<()> {
+        let shown = redact_url(&with_query(url, query));
+        match self.mode {
+            Mode::Live => Ok(()),
+            Mode::ReadOnly => Err(ApiError::refused(format!(
+                "read-only mode: refusing to send {method} {shown}"
+            ))
+            .with_hint(
+                "read-only mode is on (--read-only, ATLX_READ_ONLY or the profile's read_only); ask the person before turning it off",
+            )
+            .into()),
+            Mode::DryRun => Err(DryRun {
+                method: method.to_string(),
+                url: shown,
+                body: match payload {
+                    Payload::Empty => None,
+                    Payload::Json(b) => Some((*b).clone()),
+                    Payload::Multipart { parts, .. } => Some(json!({
+                        "multipart": parts.iter().map(|p| match p {
+                            Part::File { field, filename, path, .. } => json!({
+                                "field": field, "filename": filename, "path": path.display().to_string(),
+                            }),
+                            Part::Text { field, value } => json!({"field": field, "value": value}),
+                        }).collect::<Vec<_>>(),
+                    })),
+                },
+            }
+            .into()),
+        }
     }
 
     fn send_with_retry(
@@ -476,6 +567,9 @@ impl Client {
                     };
                     let request_id = header(&["X-ARequestId", "X-Request-Id"]);
                     let trace_id = header(&["Atl-TraceId"]);
+                    let retry_after = r
+                        .header("Retry-After")
+                        .and_then(|v| parse_retry_after(v, SystemTime::now()));
                     let text = read_capped(r.into_reader(), ERROR_BODY_CAP)
                         .ok()
                         .flatten()
@@ -484,6 +578,10 @@ impl Client {
                     let mut err = ApiError::http(method, url, code, error_message(&text));
                     err.request_id = request_id;
                     err.trace_id = trace_id;
+                    err.fields = error_fields(&text);
+                    if code == 429 || matches!(code, 502..=504) {
+                        err.retry_after_ms = retry_after.map(|d| d.as_millis() as u64);
+                    }
                     return Err(err.into());
                 }
                 Err(ureq::Error::Transport(t)) => {
@@ -507,6 +605,13 @@ impl Client {
                     let mut err = ApiError::new(kind, redact_url(&t.to_string()));
                     err.method = Some(method.to_string());
                     err.url = Some(redact_url(url));
+                    if !idempotent {
+                        err.write_state_unknown = true;
+                        err.hint = Some(
+                            "the write may or may not have happened; read the item back before retrying"
+                                .into(),
+                        );
+                    }
                     return Err(err.into());
                 }
             }
@@ -863,24 +968,48 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn hint(code: u16) -> Option<&'static str> {
+/// The hint for an HTTP status, before any endpoint-specific one.
+fn status_hint(code: u16) -> Option<&'static str> {
     match code {
-        401 => Some("check your email and API token: `atlx whoami`"),
-        403 => Some("the token may lack the permission or scope this needs"),
+        401 => Some(
+            "the API token was rejected; ask the person to check it with `atlx auth status` or run `atlx auth login`",
+        ),
+        403 => Some(
+            "this account lacks the permission or token scope this needs; ask the person, do not retry",
+        ),
+        404 | 410 => Some("check the ID; the item may also exist but be invisible to this account"),
+        409 | 412 => Some("the item changed since it was read; re-read it, then retry"),
+        429 => Some("rate limited after atlx's own retries; wait, then retry"),
+        502..=504 => Some("the service is unavailable after atlx's own retries; retry later"),
+        400 | 422 => Some(
+            "the request was rejected as invalid; check `error.fields` and `atlx describe <command>`",
+        ),
+        500..=599 => Some("the service failed; it may work later, report it if it persists"),
         _ => None,
     }
 }
 
-/// Process exit codes. They follow twg: any failure exits 1, and a batch
-/// read where only some inputs failed exits 3. The JSON error envelope (see
-/// [`ApiError::envelope`]) carries the finer-grained classification.
+/// Process exit codes. Each class of failure gets its own code, so a caller
+/// that only sees the exit status still knows whether to fix the command,
+/// ask the person, retry or stop. `atlx describe --errors` lists them.
 pub mod exit {
     pub const OK: i32 = 0;
+    /// `validation`, `server` after retries, `other`.
     pub const FAILURE: i32 = 1;
-    /// A twg command atlx doesn't support (Teamwork Graph, Rovo, ...).
-    pub const UNSUPPORTED: i32 = 2;
-    /// A batch read (`get A B ...`) where some, but not all, inputs failed.
+    /// `usage`: fix the command.
+    pub const USAGE: i32 = 2;
+    /// Some inputs of a multi-input command failed: use `data`, inspect `errors`.
     pub const PARTIAL: i32 = 3;
+    /// `config`, `auth`, `forbidden`: stop and ask the person.
+    pub const ASK: i32 = 4;
+    /// `not_found`: check the ID.
+    pub const NOT_FOUND: i32 = 5;
+    /// `conflict`: re-read, then retry.
+    pub const CONFLICT: i32 = 6;
+    /// `rate_limited`, `network`, `timeout`: retry later.
+    pub const RETRY: i32 = 7;
+    /// `refused`: a safety guard stopped the write.
+    pub const REFUSED: i32 = 8;
 }
 
 /// What went wrong, independent of the message text.
@@ -906,15 +1035,33 @@ pub enum ErrorKind {
     Timeout,
     /// Missing site, email or token.
     Config,
-    /// Invalid arguments caught after parsing (missing `--yes`, no IDs, ...).
+    /// Invalid arguments, caught by clap or after parsing.
     Usage,
-    /// A twg command that needs Teamwork Graph, Rovo or the GraphQL gateway.
-    Unsupported,
+    /// A safety guard stopped a write: missing `--yes`, read-only mode, a
+    /// lossy conversion, a stale `--if-version`.
+    Refused,
     /// Anything else (local I/O, oversized bodies, redirect limits, ...).
     Other,
 }
 
 impl ErrorKind {
+    /// Every kind, in the order `atlx describe --errors` lists them.
+    pub const ALL: [ErrorKind; 13] = [
+        Self::Usage,
+        Self::Config,
+        Self::Auth,
+        Self::Forbidden,
+        Self::NotFound,
+        Self::Conflict,
+        Self::Validation,
+        Self::RateLimited,
+        Self::Server,
+        Self::Network,
+        Self::Timeout,
+        Self::Refused,
+        Self::Other,
+    ];
+
     pub fn from_status(status: u16) -> Self {
         match status {
             401 => Self::Auth,
@@ -928,7 +1075,7 @@ impl ErrorKind {
         }
     }
 
-    /// Stable `snake_case` name, emitted as `category` in JSON errors.
+    /// Stable `snake_case` name, emitted as `error.code`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Auth => "auth",
@@ -942,9 +1089,74 @@ impl ErrorKind {
             Self::Timeout => "timeout",
             Self::Config => "config",
             Self::Usage => "usage",
-            Self::Unsupported => "unsupported",
+            Self::Refused => "refused",
             Self::Other => "other",
         }
+    }
+
+    /// The process exit code for this class.
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Self::Usage => exit::USAGE,
+            Self::Config | Self::Auth | Self::Forbidden => exit::ASK,
+            Self::NotFound => exit::NOT_FOUND,
+            Self::Conflict => exit::CONFLICT,
+            Self::RateLimited | Self::Network | Self::Timeout => exit::RETRY,
+            Self::Refused => exit::REFUSED,
+            Self::Validation | Self::Server | Self::Other => exit::FAILURE,
+        }
+    }
+
+    /// One line on what the class means, for `atlx describe --errors`.
+    pub fn meaning(self) -> &'static str {
+        match self {
+            Self::Usage => "the command line is wrong",
+            Self::Config => "site, email or token is missing or unusable",
+            Self::Auth => "the credentials were rejected",
+            Self::Forbidden => "the account lacks permission or token scope",
+            Self::NotFound => "no such item, or it is not visible to this account",
+            Self::Conflict => "the item changed since it was read",
+            Self::Validation => "the service rejected the request as invalid",
+            Self::RateLimited => "rate limited after atlx's own retries",
+            Self::Server => "the service failed after atlx's own retries",
+            Self::Network => "no response from the service",
+            Self::Timeout => "the request timed out",
+            Self::Refused => "a safety guard stopped a write",
+            Self::Other => "a local or unexpected failure",
+        }
+    }
+
+    /// The default `hint` for errors of this class that have no better one.
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Usage => "fix the command; see `suggestions` or run `atlx describe <command>`",
+            Self::Config => {
+                "ask the person to run `atlx auth login`; never pass a token on the command line"
+            }
+            Self::Auth => {
+                "the credentials were rejected; ask the person to run `atlx auth status` or `atlx auth login`"
+            }
+            Self::Forbidden => "this account cannot do this; ask the person, do not retry",
+            Self::NotFound => {
+                "check the ID; the item may also exist but be invisible to this account"
+            }
+            Self::Conflict => "re-read the item, re-apply the change, then retry",
+            Self::Validation => {
+                "check `error.fields` and the command's flags in `atlx describe <command>`"
+            }
+            Self::RateLimited => "wait, then retry",
+            Self::Server => "the service failed; it may work later",
+            Self::Network => "check connectivity, then retry",
+            Self::Timeout => "retry later, or raise --timeout-ms",
+            Self::Refused => "do not work around the guard; run with --dry-run to preview, or ask",
+            Self::Other => "read the message",
+        }
+    }
+
+    /// Whether retrying later may succeed. atlx has already retried 429s
+    /// and, for idempotent requests, 502/503/504 and transport errors.
+    pub fn retryable(self) -> bool {
+        matches!(self, Self::RateLimited | Self::Network | Self::Timeout)
     }
 }
 
@@ -959,7 +1171,7 @@ impl std::fmt::Display for ErrorKind {
 ///
 /// `url` never contains userinfo and no request headers are kept, so the
 /// value is safe to print.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ApiError {
     pub kind: ErrorKind,
     /// The HTTP status, when the server answered.
@@ -973,6 +1185,17 @@ pub struct ApiError {
     pub request_id: Option<String>,
     /// `Atl-TraceId` response header.
     pub trace_id: Option<String>,
+    /// How long the server asked to wait (`Retry-After`), when known.
+    pub retry_after_ms: Option<u64>,
+    /// Field-level validation messages (Jira's `errors: {field: msg}`).
+    pub fields: Option<Value>,
+    /// Commands or flags to try instead (usage errors).
+    pub suggestions: Vec<String>,
+    /// Set when a non-idempotent write failed without an answer, so it may
+    /// or may not have happened.
+    pub write_state_unknown: bool,
+    /// What a body conversion could not represent (`[{node, at, detail}]`).
+    pub losses: Option<Value>,
 }
 
 impl ApiError {
@@ -986,6 +1209,11 @@ impl ApiError {
             hint: None,
             request_id: None,
             trace_id: None,
+            retry_after_ms: None,
+            fields: None,
+            suggestions: Vec::new(),
+            write_state_unknown: false,
+            losses: None,
         }
     }
 
@@ -995,7 +1223,7 @@ impl ApiError {
         e.status = Some(status);
         e.method = Some(method.to_string());
         e.url = Some(redact_url(url));
-        e.hint = hint(status).map(String::from);
+        e.hint = status_hint(status).map(String::from);
         e
     }
 
@@ -1009,9 +1237,26 @@ impl ApiError {
         Self::new(ErrorKind::Usage, message)
     }
 
-    /// A twg command outside atlx's public-REST scope.
+    /// A safety guard stopped a write before anything was sent.
+    pub fn refused(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Refused, message)
+    }
+
+    /// Transition shim: something the public REST API cannot do. It is a
+    /// `usage` error now; product code moves to [`ApiError::usage`].
+    #[deprecated(note = "use ApiError::usage")]
     pub fn unsupported(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Unsupported, message)
+        Self::usage(message)
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    pub fn with_suggestions(mut self, s: impl IntoIterator<Item = String>) -> Self {
+        self.suggestions.extend(s);
+        self
     }
 
     /// The `ApiError` inside an `anyhow` chain (through any `context`).
@@ -1023,6 +1268,9 @@ impl ApiError {
     /// outer `context` messages prefixed to `message`; anything else becomes
     /// [`ErrorKind::Other`] with the whole chain as its message.
     pub fn from_anyhow(err: &anyhow::Error) -> ApiError {
+        if let Some(e) = foreign(err) {
+            return e;
+        }
         let Some(api) = Self::find(err) else {
             return Self::new(ErrorKind::Other, format!("{err:#}"));
         };
@@ -1041,90 +1289,64 @@ impl ApiError {
         out
     }
 
-    /// twg-compatible error code (`TWG_*`).
+    /// The error code: the lower-case class name.
     pub fn code(&self) -> &'static str {
-        match self.kind {
-            ErrorKind::RateLimited => "TWG_RATE_LIMITED",
-            ErrorKind::Server if matches!(self.status, Some(502..=504)) => {
-                "TWG_UPSTREAM_UNAVAILABLE"
-            }
-            ErrorKind::Server => "TWG_UPSTREAM_FAILURE",
-            ErrorKind::Network => "TWG_NETWORK_ERROR",
-            ErrorKind::Timeout => "TWG_REQUEST_TIMEOUT",
-            _ if self.status.is_some() => "TWG_TOOL_EXECUTION_FAILED",
-            _ => "TWG_COMMAND_FAILED",
-        }
+        self.kind.as_str()
     }
 
-    /// twg's `statusCode`: the HTTP status, or the status twg reports for
-    /// the equivalent local failure (400 for usage, 401 for missing
-    /// credentials). Only `status` says whether a server actually answered.
-    pub fn status_code(&self) -> Option<u16> {
-        self.status.or(match self.kind {
-            ErrorKind::Usage => Some(400),
-            ErrorKind::Config => Some(401),
-            _ => None,
-        })
+    /// Whether retrying later may succeed (see [`ErrorKind::retryable`]);
+    /// a 502/503/504 counts as well.
+    pub fn retryable(&self) -> bool {
+        self.kind.retryable()
+            || (self.kind == ErrorKind::Server && matches!(self.status, Some(502..=504)))
     }
 
-    /// twg's `retry` hint: `(recommended, guidance)`.
-    pub fn retry(&self) -> (bool, &'static str) {
-        match self.code() {
-            "TWG_RATE_LIMITED" | "TWG_UPSTREAM_UNAVAILABLE" => (true, "retry_with_backoff"),
-            "TWG_NETWORK_ERROR" | "TWG_REQUEST_TIMEOUT" => (true, "retry_later"),
-            _ => (false, "do_not_retry_unchanged"),
-        }
-    }
-
-    /// The process exit code for this error (twg exits 1 for every failure).
+    /// The process exit code for this error.
     pub fn exit_code(&self) -> i32 {
-        match self.kind {
-            ErrorKind::Unsupported => exit::UNSUPPORTED,
-            _ => exit::FAILURE,
-        }
+        self.kind.exit_code()
+    }
+
+    /// The hint that is printed: the specific one, else the class default.
+    pub fn effective_hint(&self) -> String {
+        self.hint
+            .clone()
+            .unwrap_or_else(|| self.kind.hint().to_string())
     }
 
     /// The `error` object of the JSON error envelope.
     pub fn to_json(&self) -> Value {
-        let code = self.code();
         let mut m = Map::new();
-        m.insert("code".into(), code.into());
-        m.insert("kind".into(), code.to_ascii_lowercase().into());
+        m.insert("code".into(), self.code().into());
         m.insert("message".into(), self.message.clone().into());
-        if let Some(s) = self.status_code() {
-            m.insert("statusCode".into(), s.into());
+        if let Some(s) = self.status {
+            m.insert("status".into(), s.into());
         }
-        if let Some(t) = &self.trace_id {
-            m.insert("traceId".into(), t.clone().into());
+        m.insert("hint".into(), self.effective_hint().into());
+        m.insert("retryable".into(), self.retryable().into());
+        if let Some(ms) = self.retry_after_ms {
+            m.insert("retryAfterMs".into(), ms.into());
+        }
+        if self.write_state_unknown {
+            m.insert("writeState".into(), "unknown".into());
+        }
+        if let Some(f) = &self.fields {
+            m.insert("fields".into(), f.clone());
+        }
+        if !self.suggestions.is_empty() {
+            m.insert("suggestions".into(), json!(self.suggestions));
+        }
+        if let Some(l) = &self.losses {
+            m.insert("losses".into(), l.clone());
+        }
+        if let (Some(method), Some(url)) = (&self.method, &self.url) {
+            m.insert("request".into(), json!({"method": method, "url": url}));
         }
         if let Some(r) = &self.request_id {
             m.insert("requestId".into(), r.clone().into());
         }
-        if let Some(s) = self.status {
-            let mut d = Map::new();
-            d.insert("message".into(), self.message.clone().into());
-            d.insert("statusCode".into(), s.into());
-            d.insert("service".into(), "backend".into());
-            if let Some(t) = &self.trace_id {
-                d.insert("traceId".into(), t.clone().into());
-            }
-            m.insert("downstreamError".into(), Value::Object(d));
+        if let Some(t) = &self.trace_id {
+            m.insert("traceId".into(), t.clone().into());
         }
-        m.insert("category".into(), self.kind.as_str().into());
-        for (k, v) in [
-            ("hint", &self.hint),
-            ("method", &self.method),
-            ("url", &self.url),
-        ] {
-            if let Some(v) = v {
-                m.insert(k.into(), v.clone().into());
-            }
-        }
-        let (recommended, guidance) = self.retry();
-        m.insert(
-            "retry".into(),
-            json!({"recommended": recommended, "guidance": guidance}),
-        );
         Value::Object(m)
     }
 
@@ -1133,22 +1355,15 @@ impl ApiError {
         json!({"ok": false, "error": self.to_json()})
     }
 
-    /// The short per-item error used in batch output.
+    /// The per-input error of a multi-input command (same shape as `error`).
     pub fn item_json(&self) -> Value {
-        let mut m = Map::new();
-        m.insert("message".into(), self.message.clone().into());
-        if let Some(s) = self.status {
-            m.insert("status".into(), s.into());
-        }
-        m.insert("code".into(), self.code().into());
-        m.insert("category".into(), self.kind.as_str().into());
-        Value::Object(m)
+        self.to_json()
     }
 
-    /// The multi-line report printed on stderr.
+    /// The multi-line report printed on stderr in text mode.
     pub fn report(&self) -> String {
         let mut out = format!("Error: {}\n  Code:        {}\n", self.message, self.code());
-        if let Some(s) = self.status_code() {
+        if let Some(s) = self.status {
             out.push_str(&format!("  HTTP status: {s}\n"));
         }
         if let Some(r) = &self.request_id {
@@ -1157,12 +1372,72 @@ impl ApiError {
         if let (Some(m), Some(u)) = (&self.method, &self.url) {
             out.push_str(&format!("  Request:     {m} {u}\n"));
         }
-        if let Some(h) = &self.hint {
-            out.push_str(&format!("  Hint:        {h}\n"));
+        if let Some(Value::Object(fields)) = &self.fields {
+            for (k, v) in fields {
+                let v = v.as_str().map_or_else(|| v.to_string(), String::from);
+                out.push_str(&format!("  Field:       {k}: {v}\n"));
+            }
         }
+        for s in &self.suggestions {
+            out.push_str(&format!("  Try:         {s}\n"));
+        }
+        if self.write_state_unknown {
+            out.push_str("  Write state: unknown (the write may have happened)\n");
+        }
+        out.push_str(&format!("  Hint:        {}\n", self.effective_hint()));
         out
     }
 }
+
+/// Classify errors other modules define, before the generic fallback.
+///
+/// When the markup package's `crate::markup::BodyError` lands, it maps here:
+/// `Refused` -> [`ErrorKind::Refused`] (exit 8), `Invalid` ->
+/// [`ErrorKind::Usage`], with its `hint` and `losses`:
+///
+/// ```ignore
+/// if let Some(b) = err.chain().find_map(|c| c.downcast_ref::<crate::markup::BodyError>()) {
+///     let kind = if b.is_refused() { ErrorKind::Refused } else { ErrorKind::Usage };
+///     let mut e = ApiError::new(kind, b.message.clone()).with_hint(b.hint.clone());
+///     e.losses = serde_json::to_value(&b.losses).ok();
+///     return Some(e);
+/// }
+/// ```
+fn foreign(_err: &anyhow::Error) -> Option<ApiError> {
+    None
+}
+
+/// The request a `--dry-run` stopped before sending. It travels up as an
+/// error so the command ends there; `main` prints it as a success.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DryRun {
+    pub method: String,
+    pub url: String,
+    pub body: Option<Value>,
+}
+
+impl DryRun {
+    /// The `DryRun` inside an `anyhow` chain.
+    pub fn find(err: &anyhow::Error) -> Option<&DryRun> {
+        err.chain().find_map(|c| c.downcast_ref::<DryRun>())
+    }
+
+    pub fn to_json(&self) -> Value {
+        let mut req = json!({"method": self.method, "url": self.url});
+        if let Some(b) = &self.body {
+            req["body"] = b.clone();
+        }
+        req
+    }
+}
+
+impl std::fmt::Display for DryRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "dry run: {} {} was not sent", self.method, self.url)
+    }
+}
+
+impl std::error::Error for DryRun {}
 
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1250,6 +1525,28 @@ pub fn error_message(body: &str) -> String {
     }
 }
 
+/// Field-level messages (`errors: {field: message}`, as Jira sends them).
+pub fn error_fields(body: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    v.get("errors")
+        .and_then(Value::as_object)
+        .filter(|m| !m.is_empty())
+        .map(|m| Value::Object(m.clone()))
+}
+
+/// `url` with `query` appended, for showing a request.
+fn with_query(url: &str, query: &[(&str, &str)]) -> String {
+    if query.is_empty() {
+        return url.to_string();
+    }
+    let q: Vec<String> = query
+        .iter()
+        .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+        .collect();
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}{}", q.join("&"))
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -1267,53 +1564,72 @@ mod tests {
 
     #[test]
     fn status_maps_to_kind_code_retry_and_exit() {
-        let cases: &[(u16, ErrorKind, &str, bool)] = &[
+        let cases: &[(u16, ErrorKind, &str, bool, i32)] = &[
             (
                 400,
                 ErrorKind::Validation,
-                "TWG_TOOL_EXECUTION_FAILED",
+                "validation",
                 false,
+                exit::FAILURE,
             ),
-            (401, ErrorKind::Auth, "TWG_TOOL_EXECUTION_FAILED", false),
+            (401, ErrorKind::Auth, "auth", false, exit::ASK),
+            (403, ErrorKind::Forbidden, "forbidden", false, exit::ASK),
             (
-                403,
-                ErrorKind::Forbidden,
-                "TWG_TOOL_EXECUTION_FAILED",
+                404,
+                ErrorKind::NotFound,
+                "not_found",
                 false,
+                exit::NOT_FOUND,
             ),
-            (404, ErrorKind::NotFound, "TWG_TOOL_EXECUTION_FAILED", false),
-            (409, ErrorKind::Conflict, "TWG_TOOL_EXECUTION_FAILED", false),
-            (412, ErrorKind::Conflict, "TWG_TOOL_EXECUTION_FAILED", false),
+            (409, ErrorKind::Conflict, "conflict", false, exit::CONFLICT),
+            (412, ErrorKind::Conflict, "conflict", false, exit::CONFLICT),
             (
                 422,
                 ErrorKind::Validation,
-                "TWG_TOOL_EXECUTION_FAILED",
+                "validation",
                 false,
+                exit::FAILURE,
             ),
-            (429, ErrorKind::RateLimited, "TWG_RATE_LIMITED", true),
-            (500, ErrorKind::Server, "TWG_UPSTREAM_FAILURE", false),
-            (503, ErrorKind::Server, "TWG_UPSTREAM_UNAVAILABLE", true),
+            (
+                429,
+                ErrorKind::RateLimited,
+                "rate_limited",
+                true,
+                exit::RETRY,
+            ),
+            (500, ErrorKind::Server, "server", false, exit::FAILURE),
+            (503, ErrorKind::Server, "server", true, exit::FAILURE),
         ];
-        for &(status, kind, code, retry) in cases {
+        for &(status, kind, code, retry, exit_code) in cases {
             let e = ApiError::http("GET", "https://x.test/a", status, "m");
             assert_eq!(e.kind, kind, "{status}");
             assert_eq!(e.code(), code, "{status}");
-            assert_eq!(e.retry().0, retry, "{status}");
-            assert_eq!(e.exit_code(), exit::FAILURE, "{status}");
+            assert_eq!(e.retryable(), retry, "{status}");
+            assert_eq!(e.exit_code(), exit_code, "{status}");
             let j = e.to_json();
-            assert_eq!(j["statusCode"], status);
-            assert_eq!(j["kind"], code.to_ascii_lowercase());
-            assert_eq!(j["category"], kind.as_str());
-            assert_eq!(j["downstreamError"]["statusCode"], status);
+            assert_eq!(j["status"], status);
+            assert_eq!(j["code"], code);
+            assert_eq!(j["retryable"], retry);
+            assert!(
+                j["hint"].as_str().is_some_and(|h| !h.is_empty()),
+                "{status}"
+            );
+            assert_eq!(j["request"]["method"], "GET");
         }
         let cfg = ApiError::config("no token").to_json();
-        assert_eq!(cfg["code"], "TWG_COMMAND_FAILED");
-        assert_eq!(cfg["category"], "config");
-        assert_eq!(cfg["statusCode"], 401);
-        assert!(cfg.get("downstreamError").is_none());
+        assert_eq!(cfg["code"], "config");
+        assert!(cfg.get("status").is_none());
+        assert!(cfg["hint"].as_str().unwrap().contains("atlx auth login"));
+        for kind in ErrorKind::ALL {
+            let j = ApiError::new(kind, "m").to_json();
+            assert_eq!(j["code"], kind.as_str());
+            assert!(!kind.hint().is_empty() && !kind.meaning().is_empty());
+        }
+        assert_eq!(ErrorKind::Refused.exit_code(), exit::REFUSED);
+        assert_eq!(ErrorKind::Usage.exit_code(), exit::USAGE);
         let net = ApiError::new(ErrorKind::Network, "refused");
-        assert_eq!(net.code(), "TWG_NETWORK_ERROR");
-        assert_eq!(net.retry(), (true, "retry_later"));
+        assert!(net.retryable());
+        assert_eq!(net.exit_code(), exit::RETRY);
     }
 
     #[test]

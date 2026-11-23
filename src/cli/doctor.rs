@@ -1,6 +1,7 @@
 //! `atlx doctor`: config, profile, permission and connectivity checks.
 
 use super::{Globals, Out};
+use crate::client::{ApiError, ErrorKind, exit};
 use crate::config::{self, Config};
 use crate::{bitbucket, confluence, jira};
 use serde_json::{Value, json};
@@ -242,7 +243,7 @@ pub(crate) fn doctor(g: &Globals, strict: bool) -> Out {
         strict,
     );
     let report = json!({
-        "ok": ok,
+        "passed": ok,
         "strict": strict,
         "checks": {
             "config": cfg_inspection,
@@ -256,7 +257,22 @@ pub(crate) fn doctor(g: &Globals, strict: bool) -> Out {
     if ok {
         Out::Data(report)
     } else {
-        Out::Exit(report, 1)
+        let failed: Vec<&str> = report["checks"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(_, c)| c["status"] != "ok")
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let err = ApiError::new(
+            ErrorKind::Other,
+            format!("doctor found problems: {}", failed.join(", ")),
+        )
+        .with_hint("read each check's `detail` in `data.checks`");
+        Out::Exit(
+            json!({"ok": false, "data": report, "error": err.to_json()}),
+            exit::FAILURE,
+        )
     }
 }
 

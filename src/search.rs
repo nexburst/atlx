@@ -1,5 +1,5 @@
-//! Cross-product search (atlx extra; twg's equivalent `rovo search` needs Rovo):
-//! fan out to Jira, Confluence and Bitbucket in parallel.
+//! Cross-product search: fan out to Jira, Confluence and Bitbucket in
+//! parallel. A product that fails reports its error in place of results.
 
 use crate::client::{ApiError, Client};
 use crate::config::Config;

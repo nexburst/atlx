@@ -1,5 +1,5 @@
-//! What `content create|update|delete` refuse before sending anything, in
-//! the order twg refuses it. Each case here once wrote to Confluence.
+//! What `content create|update|delete` refuse before sending anything.
+//! Each case here once wrote to Confluence.
 
 mod common;
 
@@ -97,8 +97,13 @@ fn refused_writes_send_nothing() {
         let srv = server();
         let args: Vec<&str> = line.split(' ').collect();
         let out = content(&srv.base_url(), &args);
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert_eq!(out.status.code(), Some(1), "{line}: {err}");
+        let err = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // Usage errors exit 2, a missing --yes is `refused` (exit 8).
+        assert!(matches!(out.status.code(), Some(2 | 8)), "{line}: {err}");
         assert!(err.contains(needs), "{line}: expected {needs} in {err}");
         assert!(
             srv.requests().is_empty(),

@@ -1,6 +1,6 @@
 //! Helpers shared by the per-product command modules.
 
-use crate::client::ApiError;
+use crate::client::{ApiError, DryRun};
 #[cfg(test)]
 use anyhow::bail;
 use anyhow::{Context, Result};
@@ -21,7 +21,7 @@ pub(crate) fn text_arg(s: String) -> Result<String> {
     Ok(buf)
 }
 
-/// twg-style `--body` / `--body-file` pair.
+/// A `--body` / `--body-file` pair.
 pub(crate) fn body_arg(inline: Option<String>, file: Option<String>) -> Result<Option<String>> {
     match (inline, file) {
         (Some(b), _) => Ok(Some(text_arg(b)?)),
@@ -32,9 +32,33 @@ pub(crate) fn body_arg(inline: Option<String>, file: Option<String>) -> Result<O
     }
 }
 
-/// Set when a batch read returned some failed items, so `main` exits with
-/// [`crate::client::exit::PARTIAL`] after printing the result.
+/// IDs given as a single `-` are read from stdin, one per line (blank lines
+/// skipped), so `atlx … -o ids | atlx … get -` works.
+pub(crate) fn ids_arg(inputs: Vec<String>) -> Result<Vec<String>> {
+    if inputs.len() != 1 || inputs[0] != "-" {
+        return Ok(inputs);
+    }
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("reading IDs from stdin")?;
+    Ok(parse_ids(&buf))
+}
+
+fn parse_ids(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Set when a multi-input command had some failed inputs, so `main` exits
+/// with [`crate::client::exit::PARTIAL`] after printing the result.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
+
+/// The failed inputs of a partial result, as `{input, error}`.
+static PARTIAL_ERRORS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 
 static FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -58,10 +82,23 @@ pub(crate) fn mark_partial() {
     PARTIAL.store(true, Ordering::SeqCst);
 }
 
-/// Default for `--batch-concurrency`.
+/// Record one failed input of a partial result.
+pub(crate) fn push_error(input: &str, error: &ApiError) {
+    PARTIAL_ERRORS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(json!({"input": input, "error": error.to_json()}));
+}
+
+/// The failed inputs recorded so far (and clears them).
+pub(crate) fn take_errors() -> Vec<Value> {
+    std::mem::take(&mut *PARTIAL_ERRORS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Default for `--concurrency`.
 pub(crate) const DEFAULT_CONCURRENCY: usize = 5;
 
-/// clap value parser for `--batch-concurrency` (1 to 20).
+/// clap value parser for `--concurrency` (1 to 20).
 pub(crate) fn concurrency_arg(s: &str) -> std::result::Result<usize, String> {
     match s.parse::<usize>() {
         Ok(n) if (1..=20).contains(&n) => Ok(n),
@@ -70,63 +107,62 @@ pub(crate) fn concurrency_arg(s: &str) -> std::result::Result<usize, String> {
 }
 
 /// Run `f` for each input, up to `concurrency` at a time on scoped threads.
-/// One input returns its result directly; several return `{items: [{input,
-/// ok, data|error}], summary: {requested, returned, succeeded, failed,
-/// omitted, truncated}}`, in input order.
-/// Without `strict`, some failures mark the run partial (exit 3); if every
-/// input fails, or any fails with `strict`, the batch is an error whose class
-/// and status are those of the first failure in input order.
+/// A single `-` reads the inputs from stdin.
+///
+/// One input returns its result directly. Several return the successful
+/// results as an array in input order; failed inputs are recorded for the
+/// envelope's `errors` and make the run partial (exit 3). If every input
+/// fails, or any fails with `strict`, the whole command fails with the
+/// class of the first failure in input order. A `--dry-run` stop ends the
+/// command at once.
 pub(crate) fn batch(
     inputs: Vec<String>,
     strict: bool,
     concurrency: usize,
     f: impl Fn(&str) -> Result<Value> + Sync,
 ) -> Result<Value> {
+    let inputs = ids_arg(inputs)?;
     if inputs.is_empty() {
-        return Err(ApiError::usage("pass at least one ID").into());
+        return Err(
+            ApiError::usage("pass at least one ID (or `-` to read them from stdin)").into(),
+        );
     }
     if inputs.len() == 1 {
         return f(&inputs[0]);
     }
     let results = run_ordered(&inputs, concurrency, &f);
-    let mut first: Option<ApiError> = None;
-    let mut failed = 0;
-    let items: Vec<Value> = inputs
+    if let Some(i) = results
         .iter()
-        .zip(results)
-        .map(|(i, r)| match r {
-            Ok(v) => json!({"input": i, "ok": true, "data": v}),
-            Err(e) => {
-                failed += 1;
-                let api = ApiError::from_anyhow(&e);
-                let item = json!({"input": i, "ok": false, "error": api.item_json()});
-                first.get_or_insert(api);
-                item
-            }
-        })
-        .collect();
-    let total = items.len();
-    if let Some(mut err) = first
-        && (strict || failed == total)
+        .position(|r| r.as_ref().is_err_and(|e| DryRun::find(e).is_some()))
     {
-        err.message = format!("batch read failed for {failed} of {total} input(s)");
-        err.hint = None;
+        let mut results = results;
+        return results.swap_remove(i);
+    }
+    let mut data = Vec::new();
+    let mut failed: Vec<(String, ApiError)> = Vec::new();
+    for (input, r) in inputs.iter().zip(results) {
+        match r {
+            Ok(v) => data.push(v),
+            Err(e) => failed.push((input.clone(), ApiError::from_anyhow(&e))),
+        }
+    }
+    let total = inputs.len();
+    if !failed.is_empty() && (strict || failed.len() == total) {
+        let (input, mut err) = failed.swap_remove(0);
+        let n = failed.len() + 1;
+        err.message = format!(
+            "{n} of {total} inputs failed; first: {input}: {}",
+            err.message
+        );
         return Err(err.into());
     }
-    if failed > 0 {
-        PARTIAL.store(true, Ordering::SeqCst);
+    for (input, err) in &failed {
+        push_error(input, err);
     }
-    Ok(json!({
-        "items": items,
-        "summary": {
-            "requested": total,
-            "returned": total - failed,
-            "succeeded": total - failed,
-            "failed": failed,
-            "omitted": 0,
-            "truncated": 0,
-        },
-    }))
+    if !failed.is_empty() {
+        mark_partial();
+    }
+    Ok(Value::Array(data))
 }
 
 /// Apply `f` to every input with at most `concurrency` worker threads.
@@ -165,9 +201,6 @@ fn run_ordered<T: Send>(
         .collect()
 }
 
-/// Whether deprecation notes may be printed (text output on a terminal).
-static NOTES: AtomicBool = AtomicBool::new(false);
-
 /// Whether output is text, for the commands that stream their own.
 static TEXT: AtomicBool = AtomicBool::new(false);
 
@@ -180,22 +213,45 @@ pub(crate) fn text_output() -> bool {
     TEXT.load(Ordering::SeqCst)
 }
 
-/// Called once by `main` after the output format is known.
-pub(crate) fn enable_notes(on: bool) {
-    NOTES.store(on, Ordering::SeqCst);
+/// Transition shim for the old hidden command spellings, which product
+/// modules still call: it prints nothing. Product packages remove the
+/// hidden commands and these calls.
+pub(crate) fn deprecated(_old: &str, _new: &str) {}
+
+/// The current command line with `extra` appended, for hints.
+pub(crate) fn rerun_with(extra: &str) -> String {
+    let mut words: Vec<String> = vec!["atlx".into()];
+    words.extend(std::env::args().skip(1).map(|a| quote(&a)));
+    words.push(extra.into());
+    words.join(" ")
 }
 
-/// One-line stderr note that an old atlx spelling was used. Only printed for
-/// text output on a terminal, so JSON and piped output stay clean.
-pub(crate) fn deprecated(old: &str, new: &str) {
-    if NOTES.load(Ordering::SeqCst) {
-        eprintln!("note: `{old}` is an old atlx name and goes away in 0.3; use `{new}`");
+fn quote(a: &str) -> String {
+    if !a.is_empty()
+        && a.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=,@+%".contains(c))
+    {
+        a.to_string()
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
     }
 }
 
+/// The `refused` error for a destructive command run without `--yes`.
+pub(crate) fn needs_yes(action: &str) -> anyhow::Error {
+    ApiError::refused(format!("{action} needs --yes"))
+        .with_hint(format!(
+            "preview it first with `{}`; add --yes only when the change is intended",
+            rerun_with("--dry-run")
+        ))
+        .into()
+}
+
+/// Transition shim: product dispatch still calls this by hand. The rule now
+/// comes from the command's registered effect; see `cli::confirm`.
 pub(crate) fn require_yes(yes: bool, action: &str) -> Result<()> {
-    if !yes {
-        return Err(ApiError::usage(format!("pass --yes to confirm {action}")).into());
+    if !yes && !crate::cli::dry_run_requested() {
+        return Err(needs_yes(&format!("confirming {action}")));
     }
     Ok(())
 }
@@ -209,6 +265,12 @@ mod tests {
         match id {
             "gone" => Err(ApiError::http("GET", "https://x.test/gone", 404, "missing").into()),
             "bad" => bail!("boom"),
+            "dry" => Err(DryRun {
+                method: "POST".into(),
+                url: "https://x.test".into(),
+                body: None,
+            }
+            .into()),
             _ => Ok(json!({"id": id})),
         }
     }
@@ -216,38 +278,39 @@ mod tests {
     #[test]
     fn batch_reports_partial_failures_and_strict_errors() {
         take_partial();
+        take_errors();
         let v = batch(vec!["ok".into(), "gone".into()], false, 1, read).unwrap();
         assert!(take_partial());
-        assert_eq!(v["items"][0]["ok"], true);
-        assert_eq!(v["items"][1]["ok"], false);
-        let item = &v["items"][1]["error"];
-        assert_eq!(item["message"], "missing");
-        assert_eq!(item["status"], 404);
-        assert_eq!(item["category"], "not_found");
-        assert_eq!(
-            v["summary"],
-            json!({"requested": 2, "returned": 1, "succeeded": 1, "failed": 1, "omitted": 0, "truncated": 0})
-        );
+        assert_eq!(v, json!([{"id": "ok"}]));
+        let errors = take_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["input"], "gone");
+        assert_eq!(errors[0]["error"]["code"], "not_found");
+        assert_eq!(errors[0]["error"]["status"], 404);
 
         let other = batch(vec!["ok".into(), "bad".into()], false, 2, read).unwrap();
-        assert_eq!(other["items"][1]["error"]["category"], "other");
-        assert_eq!(other["items"][1]["error"]["message"], "boom");
+        assert_eq!(other.as_array().unwrap().len(), 1);
+        assert_eq!(take_errors()[0]["error"]["code"], "other");
         take_partial();
 
         let err = batch(vec!["ok".into(), "gone".into()], true, 5, read).unwrap_err();
         let api = ApiError::find(&err).unwrap();
         assert_eq!(api.kind, ErrorKind::NotFound);
         assert_eq!(api.status, Some(404));
-        assert_eq!(api.message, "batch read failed for 1 of 2 input(s)");
+        assert!(api.message.starts_with("1 of 2 inputs failed; first: gone"));
+        assert!(take_errors().is_empty());
 
         let all = batch(vec!["gone".into(), "gone".into()], false, 3, read).unwrap_err();
         assert_eq!(ApiError::find(&all).unwrap().status, Some(404));
         assert!(!take_partial());
 
+        let dry = batch(vec!["ok".into(), "dry".into()], false, 2, read).unwrap_err();
+        assert!(DryRun::find(&dry).is_some());
+
         let none = batch(vec![], false, 1, read).unwrap_err();
         assert_eq!(ApiError::find(&none).unwrap().kind, ErrorKind::Usage);
         let yes = require_yes(false, "x").unwrap_err();
-        assert_eq!(ApiError::find(&yes).unwrap().kind, ErrorKind::Usage);
+        assert_eq!(ApiError::find(&yes).unwrap().kind, ErrorKind::Refused);
     }
 
     #[test]
@@ -265,19 +328,29 @@ mod tests {
             Ok(json!({"id": id}))
         })
         .unwrap();
-        let got: Vec<&str> = v["items"]
+        let got: Vec<&str> = v
             .as_array()
             .unwrap()
             .iter()
-            .map(|i| i["input"].as_str().unwrap())
+            .map(|i| i["id"].as_str().unwrap())
             .collect();
         assert_eq!(got, inputs.iter().map(String::as_str).collect::<Vec<_>>());
         let p = peak.load(Ordering::SeqCst);
         assert!((2..=4).contains(&p), "peak concurrency {p}");
-        assert_eq!(v["summary"]["succeeded"], 12);
 
         assert!(concurrency_arg("0").is_err());
         assert!(concurrency_arg("21").is_err());
         assert_eq!(concurrency_arg("20"), Ok(20));
+    }
+
+    #[test]
+    fn stdin_ids_skip_blank_lines_and_quotes_are_safe() {
+        assert_eq!(parse_ids("A-1\n\n  B-2 \r\n"), ["A-1", "B-2"]);
+        assert_eq!(
+            ids_arg(vec!["A-1".into(), "-".into()]).unwrap(),
+            ["A-1", "-"]
+        );
+        assert_eq!(quote("plain-1"), "plain-1");
+        assert_eq!(quote("it's x"), "'it'\\''s x'");
     }
 }
