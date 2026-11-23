@@ -197,6 +197,14 @@ pub(crate) fn contract(leaf: &Leaf) -> Value {
         m.insert("description".into(), long.to_string().into());
     }
     m.insert("effect".into(), effect.as_str().into());
+    if effect == Effect::ByMethod {
+        m.insert(
+            "effectByMethod".into(),
+            json!({"GET": "read", "HEAD": "read", "OPTIONS": "read",
+                   "POST": "write", "PUT": "write", "PATCH": "write",
+                   "DELETE": "destructive"}),
+        );
+    }
     m.insert("confirm".into(), meta.is_some_and(|m| m.confirm()).into());
     m.insert("positionals".into(), positionals.into());
     m.insert("flags".into(), flags.into());

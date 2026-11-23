@@ -747,6 +747,11 @@ fn parse_origin(url: &str) -> Option<Origin> {
     Some(Origin { scheme, host, port })
 }
 
+/// Whether `url` is an http(s) URL on a loopback host (a local mock server).
+pub(crate) fn is_loopback_url(url: &str) -> bool {
+    parse_origin(url).is_some_and(|o| is_loopback_host(&o.host))
+}
+
 fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;

@@ -100,8 +100,8 @@ pub(crate) enum Status {
 
 #[derive(Args)]
 pub(crate) struct ListArgs {
-    /// Space key or ID whose pages to list
-    #[arg(long, required_unless_present = "parent", conflicts_with = "parent")]
+    /// Space key or ID whose pages to list [default: confluence.space in .atlx.toml]
+    #[arg(long, conflicts_with = "parent")]
     space: Option<String>,
     /// List the child pages of this page (ID or URL)
     #[arg(long)]
@@ -157,9 +157,9 @@ pub(crate) struct GetArgs {
 
 #[derive(Args)]
 pub(crate) struct CreateArgs {
-    /// Space key or ID
+    /// Space key or ID [default: confluence.space in .atlx.toml]
     #[arg(long)]
-    space: String,
+    space: Option<String>,
     #[arg(long)]
     title: String,
     #[command(flatten)]
@@ -486,18 +486,37 @@ pub(super) fn run(c: &Client, cmd: PageCmd) -> Result<Out> {
 }
 
 fn list(c: &Client, a: ListArgs) -> Result<Value> {
-    match (&a.space, &a.parent) {
-        (_, Some(parent)) => a
+    if let Some(parent) = &a.parent {
+        return a
             .paging
-            .collect(250, |cur, n| confluence::children(c, parent, n, cur)),
-        (Some(space), None) => {
-            let status = format!("{:?}", a.status).to_lowercase();
-            a.paging.collect(250, |cur, n| {
-                confluence::list(c, space, a.kind, &status, n, cur)
-            })
-        }
-        (None, None) => unreachable!("clap requires --space or --parent"),
+            .collect(250, |cur, n| confluence::children(c, parent, n, cur));
     }
+    let space = space_or_default(a.space.clone(), "--space or --parent")?;
+    let status = format!("{:?}", a.status).to_lowercase();
+    a.paging.collect(250, |cur, n| {
+        confluence::list(c, &space, a.kind, &status, n, cur)
+    })
+}
+
+/// `--space`, else `.atlx.toml`'s `confluence.space`, else a usage error
+/// naming `what` to pass.
+fn space_or_default(space: Option<String>, what: &str) -> Result<String> {
+    space.or_else(default_space).ok_or_else(|| {
+        ApiError::usage(format!(
+            "pass {what} (or set confluence.space in .atlx.toml)"
+        ))
+        .into()
+    })
+}
+
+/// `.atlx.toml`'s `confluence.space`, for commands whose space may be left
+/// out.
+fn default_space() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    crate::config::LocalDefaults::discover(&cwd)
+        .ok()?
+        .confluence
+        .space
 }
 
 fn get(c: &Client, a: GetArgs) -> Result<Out> {
@@ -530,17 +549,18 @@ fn get(c: &Client, a: GetArgs) -> Result<Out> {
 
 fn create(c: &Client, a: CreateArgs) -> Result<Value> {
     // Check everything local before the first request.
+    let space = space_or_default(a.space.clone(), "--space")?;
     let body = a.body.required()?;
     let emoji = a.emoji.as_deref().map(lifecycle::emoji_code).transpose()?;
     let parent = a
         .parent
         .as_deref()
-        .map(|p| lifecycle::exact_content(c, p, Some(&a.space)))
+        .map(|p| lifecycle::exact_content(c, p, Some(&space)))
         .transpose()?;
     let data = confluence::create(
         c,
         confluence::NewContent {
-            space: &a.space,
+            space: &space,
             content_type: a.kind,
             title: &a.title,
             body: &body,

@@ -135,7 +135,7 @@ profile = "work"
 [jira]
 project = "PROJ"        # the project for `jira issue create`
 [confluence]
-space = "ENG"
+space = "ENG"           # --space for `confluence page list` and `page create`
 [bitbucket]
 repo = "acme/api"       # --repo for every Bitbucket repository command
 ```
@@ -143,8 +143,7 @@ repo = "acme/api"       # --repo for every Bitbucket repository command
 Only these keys are accepted; tokens, sites and emails are rejected. Without
 `bitbucket.repo`, `--repo` defaults to the `origin` remote in `.git/config`
 when it points at bitbucket.org. `atlx auth status --full` shows the defaults
-in effect. (`confluence.space` is read and reported, but no command uses it
-as a default yet.)
+in effect. An explicit flag always wins over the file.
 
 ## Commands
 
@@ -223,7 +222,8 @@ atlx describe --errors             # error codes and exit codes
 
 A command's contract lists its positionals and flags (type, required,
 default, allowed values, environment variable), its `effect` (`read`,
-`write` or `destructive`), whether it needs `--yes` (`confirm`), the record
+`write`, `destructive`, or `by-method` for the `api` command, with an
+`effectByMethod` map), whether it needs `--yes` (`confirm`), the record
 it returns with each field's type and whether it is in the default view,
 examples, and the exit codes it can return. The top-level `contract` number
 is raised on any breaking change to records, the envelope or exit codes.
@@ -373,7 +373,9 @@ this table as JSON.
   `atlx describe` marks them `destructive`, and a command's contract shows
   `"confirm":true`. Without `--yes`
   the command fails with `refused` (exit 8) and the hint shows the same
-  command with `--dry-run`. Nothing ever prompts.
+  command with `--dry-run`; a `--dry-run` needs no `--yes`. A `DELETE`
+  through `api` needs `--yes` too; its other methods don't. Nothing ever
+  prompts.
 - **`--if-version N`** is required on Confluence `page update` and `page
   edit`: the `version` of the page you read. If the page changed since, the
   write fails with `conflict` (exit 6) and nothing is sent.

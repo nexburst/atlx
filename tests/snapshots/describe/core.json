@@ -503,7 +503,16 @@
     "path": "api",
     "summary": "Call any REST endpoint directly",
     "description": "Call any REST endpoint directly\n\nPaths are relative to https://SITE (jira), https://SITE/wiki (confluence) or https://api.bitbucket.org/2.0 (bitbucket, where `{workspace}` is replaced with your default workspace). The response goes in `data` untouched. Read-only mode and --dry-run apply to it like to every other command.",
-    "effect": "write",
+    "effect": "by-method",
+    "effectByMethod": {
+      "GET": "read",
+      "HEAD": "read",
+      "OPTIONS": "read",
+      "POST": "write",
+      "PUT": "write",
+      "PATCH": "write",
+      "DELETE": "destructive"
+    },
     "confirm": false,
     "positionals": [
       {
@@ -544,13 +553,21 @@
         "required": false,
         "repeatable": true,
         "description": "Query parameter, repeatable"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm a DELETE (other methods don't need it)"
       }
     ],
     "record": null,
     "examples": [
       "atlx api jira /rest/api/3/myself",
       "atlx api confluence /api/v2/pages -q limit=5",
-      "atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run"
+      "atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run",
+      "atlx api jira /rest/api/3/issue/PROJ-1 -X DELETE --yes"
     ],
     "exitCodes": [
       0,

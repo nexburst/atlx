@@ -133,7 +133,7 @@
         "name": "--space",
         "type": "string",
         "required": false,
-        "description": "Space key or ID whose pages to list"
+        "description": "Space key or ID whose pages to list [default: confluence.space in .atlx.toml]"
       },
       {
         "name": "--parent",
@@ -503,8 +503,8 @@
       {
         "name": "--space",
         "type": "string",
-        "required": true,
-        "description": "Space key or ID"
+        "required": false,
+        "description": "Space key or ID [default: confluence.space in .atlx.toml]"
       },
       {
         "name": "--title",

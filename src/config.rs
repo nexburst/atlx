@@ -55,6 +55,30 @@ use std::time::{Duration, Instant};
 
 pub const BITBUCKET_API: &str = "https://api.bitbucket.org/2.0";
 
+/// Environment variable that points Bitbucket at a local mock server, for
+/// tests. Only loopback URLs are accepted, so it can't send the token
+/// anywhere else.
+pub const BITBUCKET_API_ENV: &str = "ATLX_BITBUCKET_API";
+
+/// The Bitbucket API base: [`BITBUCKET_API`], or a loopback override from
+/// [`BITBUCKET_API_ENV`].
+pub fn bitbucket_api() -> Result<String> {
+    match std::env::var(BITBUCKET_API_ENV) {
+        Ok(v) if !v.trim().is_empty() => {
+            let v = v.trim().trim_end_matches('/').to_string();
+            if crate::client::is_loopback_url(&v) {
+                Ok(v)
+            } else {
+                Err(ApiError::config(format!(
+                    "{BITBUCKET_API_ENV} must be a loopback URL (it is for local test servers), got '{v}'"
+                ))
+                .into())
+            }
+        }
+        _ => Ok(BITBUCKET_API.into()),
+    }
+}
+
 /// Name of the implicit profile made of the file's top-level keys. As a
 /// `-p` value it means "whichever profile is the saved default".
 pub const DEFAULT_PROFILE: &str = "default";
@@ -729,8 +753,7 @@ impl Config {
         });
         let token = res.clone().map_err(ApiError::config)?;
         Ok((
-            Client::new(BITBUCKET_API.into(), email, &token, self.timeout_ms)
-                .with_mode(self.mode()),
+            Client::new(bitbucket_api()?, email, &token, self.timeout_ms).with_mode(self.mode()),
             self.bitbucket.workspace.clone(),
         ))
     }

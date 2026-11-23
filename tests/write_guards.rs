@@ -254,3 +254,48 @@ fn destructive_commands_refuse_without_yes_and_preview_with_dry_run() {
             .contains("[profiles.acme]")
     );
 }
+
+#[test]
+fn api_delete_needs_yes_and_other_methods_do_not() {
+    let r = Run::new("apiyes");
+    let api = |srv: &MockServer, extra: &[&str]| {
+        let mut args = vec!["api", "jira", "/rest/api/3/issue/P-1"];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["-o", "json"]);
+        r.run(&srv.base_url(), &args)
+    };
+
+    let srv = ok_server();
+    let o = api(&srv, &["-X", "DELETE"]);
+    assert_eq!(o.status.code(), Some(8));
+    assert_eq!(json_out(&o)["error"]["code"], "refused");
+    assert!(srv.requests().is_empty(), "sent {:?}", srv.requests());
+
+    let srv = ok_server();
+    let o = api(&srv, &["-X", "delete", "--yes"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert_eq!(srv.requests()[0].method, "DELETE");
+
+    for method in ["GET", "PUT"] {
+        let srv = ok_server();
+        let o = api(&srv, &["-X", method, "-d", "{}"]);
+        assert_eq!(o.status.code(), Some(0), "{method}");
+        assert_eq!(srv.requests()[0].method, method);
+    }
+}
+
+#[test]
+fn describe_reports_api_effect_by_method() {
+    let r = Run::new("apidescribe");
+    let o = r.run("http://127.0.0.1:9", &["describe", "api", "-o", "json"]);
+    assert_eq!(o.status.code(), Some(0));
+    let v = json_out(&o);
+    let d = if v["data"].is_array() {
+        &v["data"][0]
+    } else {
+        &v["data"]
+    };
+    assert_eq!(d["effect"], "by-method", "{v}");
+    assert_eq!(d["effectByMethod"]["GET"], "read");
+    assert_eq!(d["effectByMethod"]["DELETE"], "destructive");
+}

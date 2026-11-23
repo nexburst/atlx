@@ -278,6 +278,9 @@ pub enum Effect {
     Write,
     /// Needs `--yes`: deletes, purges, merges, permission changes, ...
     Destructive,
+    /// Set by the HTTP method (`atlx api`): GET, HEAD and OPTIONS read,
+    /// POST, PUT and PATCH write, DELETE is destructive.
+    ByMethod,
 }
 
 impl Effect {
@@ -286,6 +289,16 @@ impl Effect {
             Effect::Read => "read",
             Effect::Write => "write",
             Effect::Destructive => "destructive",
+            Effect::ByMethod => "by-method",
+        }
+    }
+
+    /// The effect of an HTTP method, for [`Effect::ByMethod`] commands.
+    pub fn of_method(method: &str) -> Effect {
+        match method.to_ascii_uppercase().as_str() {
+            "GET" | "HEAD" | "OPTIONS" => Effect::Read,
+            "DELETE" => Effect::Destructive,
+            _ => Effect::Write,
         }
     }
 }

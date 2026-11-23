@@ -148,10 +148,11 @@ const CORE_META: &[CommandMeta] = &[
         "atlx search 'login timeout' --limit 5",
         "atlx search deploy --only jira,confluence",
     ]),
-    CommandMeta::new("api", Effect::Write).examples(&[
+    CommandMeta::new("api", Effect::ByMethod).examples(&[
         "atlx api jira /rest/api/3/myself",
         "atlx api confluence /api/v2/pages -q limit=5",
         "atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run",
+        "atlx api jira /rest/api/3/issue/PROJ-1 -X DELETE --yes",
     ]),
     CommandMeta::new("describe", Effect::Read).examples(&[
         "atlx describe",
@@ -288,7 +289,15 @@ fn confirm(path: &str, leaf: &clap::ArgMatches, dry_run: bool) -> Result<()> {
     let Some(meta) = registry::lookup(path) else {
         return Ok(());
     };
-    if !meta.confirm() || dry_run {
+    let destructive = match meta.effect {
+        Effect::ByMethod => leaf
+            .try_get_one::<String>("method")
+            .ok()
+            .flatten()
+            .is_some_and(|m| Effect::of_method(m) == Effect::Destructive),
+        _ => meta.confirm(),
+    };
+    if !destructive || dry_run {
         return Ok(());
     }
     let yes = leaf.try_get_one::<bool>("yes").ok().flatten() == Some(&true);

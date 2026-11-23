@@ -54,11 +54,12 @@ Covers: `auth`, `doctor`, `search`, `api`, `describe`, `cache`, `completion`, `s
 
 ## api
 
-- **`api`** (write). Call any REST endpoint directly.
-  Takes args `jira|confluence|bitbucket` `PATH`; flags `-X/--method`, `-d/--data`, `-q/--query...`.
+- **`api`** (by-method). Call any REST endpoint directly.
+  Takes args `jira|confluence|bitbucket` `PATH`; flags `-X/--method`, `-d/--data`, `-q/--query...`, `-y/--yes`.
   - `atlx api jira /rest/api/3/myself`
   - `atlx api confluence /api/v2/pages -q limit=5`
   - `atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run`
+  - `atlx api jira /rest/api/3/issue/PROJ-1 -X DELETE --yes`
 
 ## describe
 

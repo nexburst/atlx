@@ -29,7 +29,7 @@ Covers: `confluence`: search, pages, comments, attachments, labels, versions, sp
   - `atlx confluence page get 12345 --outline`
   - `atlx confluence page get Runbook --space ENG --body-format adf`
 - **`confluence page create`** (write). Create a page or blog post.
-  Takes flags `--space (required)`, `--title (required)`, `--body`, `--body-file`, `--body-format markdown|adf|storage|plain`, `--parent`, `--type page|blogpost`, `--draft`, `--private`, `--width narrow|wide|max`, `--emoji`.
+  Takes flags `--space`, `--title (required)`, `--body`, `--body-file`, `--body-format markdown|adf|storage|plain`, `--parent`, `--type page|blogpost`, `--draft`, `--private`, `--width narrow|wide|max`, `--emoji`.
   Returns `confluence.page-item`: id, type, title, status, spaceId, parentId, version, updated, url.
   - `atlx confluence page create --space ENG --title 'Release 1.2' --body-file notes.md`
   - `atlx confluence page create --space ENG --parent 12345 --title Child --body '# Hello' --dry-run`

@@ -23,6 +23,7 @@ fn command(site: &str, args: &[String]) -> Command {
         .env("ATLX_EMAIL", "me@example.com")
         .env("ATLX_TOKEN", "fake")
         .env("ATLX_BB_WORKSPACE", "acme")
+        .env("ATLX_BITBUCKET_API", site)
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -97,10 +98,44 @@ fn project_statuses_are_listed_once() {
 
 #[test]
 fn bitbucket_output_is_enveloped_too() {
+    let repo = json!({"full_name": "team/api", "name": "api", "slug": "api", "is_private": true,
+        "mainbranch": {"name": "main"}, "links": {"html": {"href": "https://bitbucket.org/team/api"}}});
+    let (code, out, reqs) = run_with(repo, "bitbucket repo get team/api -o json");
+    let v: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"));
+    assert_eq!(code, Some(0), "{v}");
+    assert_eq!(v["ok"], true);
+    assert!(v["data"].is_object(), "{v}");
+    assert_eq!(reqs.len(), 1, "{reqs:?}");
+    assert!(
+        reqs[0].path.contains("/repositories/team/api"),
+        "{}",
+        reqs[0].path
+    );
+
     let (code, v) = json_run(json!({}), "bitbucket pr merge 1 --repo team/api");
     assert_eq!(code, Some(8));
     assert_eq!(v["ok"], false);
     assert_eq!(v["error"]["code"], "refused");
+}
+
+#[test]
+fn bitbucket_api_override_must_be_loopback() {
+    let mut cmd = command(
+        "http://127.0.0.1:9",
+        &[
+            "bitbucket".into(),
+            "repo".into(),
+            "get".into(),
+            "team/api".into(),
+            "-o".into(),
+            "json".into(),
+        ],
+    );
+    cmd.env("ATLX_BITBUCKET_API", "https://evil.example/2.0");
+    let out = cmd.output().unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(4), "{v}");
+    assert_eq!(v["error"]["code"], "config", "{v}");
 }
 
 #[test]

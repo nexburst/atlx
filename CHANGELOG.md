@@ -9,6 +9,9 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ## [Unreleased]
 
+No version has been released yet; the first release will be 0.1.0. The
+tables below map the command paths that earlier builds of `main` used.
+
 ### Breaking: a command line designed for coding agents
 
 atlx is redesigned around one contract for agents and scripts: one grammar,
@@ -191,7 +194,7 @@ suggestions. `atlx describe` documents the new tree.
 
 ### Added
 
-Since 0.1.0, besides the redesign: Jira collaboration (attachments,
+Besides the redesign: Jira collaboration (attachments,
 worklogs, watchers, votes, properties), Agile (boards, sprints, backlog),
 administration (projects, versions, components, filters, dashboards) and
 bulk create; Jira Service Management requests, approvals, SLAs, queues and
@@ -201,7 +204,15 @@ lifecycle, section reads and targeted `page edit`; Bitbucket pull request
 review (inline comments, tasks, reviewers, checks), repositories, branches,
 commits without a checkout, Code Insights reports, pipelines, logs and
 deployments; named profiles and credential helpers; shell completions, man
-pages and the release workflow.
+pages and the release workflow; cross-product `atlx search`, `atlx doctor`,
+and the raw `atlx api` escape hatch.
+
+- `.atlx.toml`'s `confluence.space` is the default `--space` for
+  `confluence page list` and `page create`.
+- `atlx api` takes `--yes`, which a `DELETE` requires; `describe` reports its
+  effect as `by-method` with an `effectByMethod` map.
+- `ATLX_BITBUCKET_API` points Bitbucket at a local test server. Only loopback
+  URLs are accepted, so the token can't be sent elsewhere.
 
 ### Security
 
@@ -217,34 +228,4 @@ pages and the release workflow.
   Atlassian's OpenAPI specs (#65). Bitbucket code search uses `codesearch`
   and needs `repository:read` and `workspace:read`.
 
-## [0.1.0] - 2026-11-13
-
-First release.
-
-### Added
-
-- Commands for Jira (`jira workitem get/search/query/create/
-  update/comment create/transition/transitions query`), Confluence (`confluence
-  search query/text`, `content get/create/update/list`, `space get`) and
-  Bitbucket (`bb repo`, `bb pull-requests`, `bb pipeline`), on the public REST
-  APIs with API-token auth.
-- `login`, `logout`, `whoami` and `setup bitbucket/default-site`.
-- Cross-product `atlx search` and a raw `atlx api` escape hatch.
-- Output as text on a terminal and JSON when piped, plus `-o jsonl`.
-- Jira metadata and Agile commands: `workitem create-meta`, issue links and
-  remote links, `field list`, `project list/get`, `board list`, `sprint
-  list/issues`, and `user search` (#3).
-- Confluence comments (including inline), page tree, personal space, lookup by
-  title, labels and delete (#4).
-- Bitbucket PR diff, activity and tasks; approve, request changes, merge and
-  decline; repository files and branches; code search (#5).
-- `atlx doctor` for config, permission and connectivity checks; GitHub Actions
-  CI on Linux, macOS and Windows; `cargo binstall` metadata (#6).
-- Offline mock-HTTP integration tests and opt-in live smoke tests (#2).
-
-### Fixed
-
-- Argument validation, pagination and auth-origin edge cases (#1).
-
-[Unreleased]: https://github.com/nexburst/atlx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/nexburst/atlx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nexburst/atlx/commits/main

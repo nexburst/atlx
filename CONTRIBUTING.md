@@ -16,7 +16,9 @@ cargo test
 ```
 
 CI runs the last three on Linux, macOS and Windows. The suite is offline: it
-talks only to a mock HTTP server on localhost. To prove a change keeps it
+talks only to a mock HTTP server on localhost (CLI tests point Jira and
+Confluence at it with `ATLX_SITE`, and Bitbucket with `ATLX_BITBUCKET_API`,
+which accepts only loopback URLs). To prove a change keeps it
 that way, run it without a network:
 
 ```sh
