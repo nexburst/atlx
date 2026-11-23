@@ -34,24 +34,47 @@ atlx describe jira issue transition
 
 ## Install
 
-No release has been published yet. Install from source with a Rust
-toolchain:
+Download the archive for your platform from the
+[latest release](https://github.com/nexburst/atlx/releases/latest), unpack it
+and put `atlx` on your `PATH`. No Rust toolchain is needed.
+
+| Platform | Archive |
+| --- | --- |
+| Linux x86_64 | `atlx-vX.Y.Z-x86_64-unknown-linux-gnu.tgz`, or `x86_64-unknown-linux-musl` for a static binary |
+| Linux arm64 | `atlx-vX.Y.Z-aarch64-unknown-linux-gnu.tgz` |
+| macOS Apple Silicon | `atlx-vX.Y.Z-aarch64-apple-darwin.tgz` |
+| macOS Intel | `atlx-vX.Y.Z-x86_64-apple-darwin.tgz` |
+| Windows x64 | `atlx-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+| Windows arm64 | `atlx-vX.Y.Z-aarch64-pc-windows-msvc.zip` |
+
+For example, on Linux x86_64:
 
 ```sh
-git clone https://github.com/nexburst/atlx && cd atlx
-cargo install --path . --locked
+curl -fsSLO https://github.com/nexburst/atlx/releases/download/v0.1.0/atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
+curl -fsSLO https://github.com/nexburst/atlx/releases/download/v0.1.0/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+tar xzf atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
+install -m 755 atlx ~/.local/bin/atlx
 ```
 
-Shell completions: `atlx completion script bash` prints a bash completion
-script (also `zsh`, `fish`, `powershell` and `elvish`). For example:
+On macOS, use `shasum -a 256 --check --ignore-missing SHA256SUMS`. If
+Gatekeeper blocks the binary, run `xattr -d com.apple.quarantine atlx`.
+
+Each archive also holds shell completions in `completions/` and man pages in
+`man/`. To generate a completion script instead, run the `completion script`
+command with `bash`, `zsh`, `fish`, `powershell` or `elvish`:
 
 ```sh
 mkdir -p ~/.local/share/bash-completion/completions
 atlx completion script bash > ~/.local/share/bash-completion/completions/atlx
 ```
 
-Release archives will ship prebuilt binaries for Linux, macOS and Windows
-together with completions and man pages.
+To build from source, with a Rust toolchain:
+
+```sh
+git clone https://github.com/nexburst/atlx && cd atlx
+cargo install --path . --locked
+```
 
 ## Authenticate
 
