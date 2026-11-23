@@ -1,8 +1,9 @@
 # Contributing to atlx
 
-Thanks for helping. atlx is an open CLI for Jira, Confluence and Bitbucket
-Cloud, built only on Atlassian's public REST APIs. This guide covers how the code is laid out, how to add a command, and
-the conventions every change follows. Coding agents should also read
+Thanks for helping. atlx is a command line for Jira, Jira Service Management,
+Confluence and Bitbucket Cloud, built only on their public REST APIs and
+designed first for coding agents. This guide covers the layout, how to add a
+command, and the rules every change follows. Coding agents should also read
 [AGENTS.md](AGENTS.md).
 
 ## Build and test
@@ -14,143 +15,159 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI runs the last three on Linux, macOS and Windows. Live smoke tests against a
-real site are `#[ignore]`d; see the README's Testing section.
+CI runs the last three on Linux, macOS and Windows. The suite is offline: it
+talks only to a mock HTTP server on localhost. To prove a change keeps it
+that way, run it without a network:
 
-## Module layout
+```sh
+unshare -rn sh -c 'ip link set lo up && cargo test --locked --offline --no-fail-fast'
+```
+
+Live smoke tests against a real site are `#[ignore]`d; see the README's
+Contributing section.
+
+## Layout
 
 | Path | Holds |
 | --- | --- |
-| `src/main.rs` | A few lines that call `atlx::cli::main()` |
-| `src/lib.rs` | Module list and the shared `Product` enum |
-| `src/client.rs`, `src/config.rs`, `src/output.rs`, `src/markup.rs`, `src/time.rs` | HTTP client, config and credentials, output formats, body-format conversion, date helpers |
-| `src/<product>.rs` (`jira`, `confluence`, `bitbucket`, `search`) | API functions. They call REST endpoints and return the `data` part of the output as a `serde_json::Value` |
-| `src/cli/mod.rs` | `Cli` with the global flags, the top-level `Cmd`, `Globals`, `Out`, dispatch and `main()` |
-| `src/cli/<product>.rs` (`jira`, `confluence`, `bitbucket`) | That product's clap enums and its dispatch function, plus parse tests |
-| `src/cli/auth.rs`, `doctor.rs`, `api.rs`, `search.rs`, `user.rs`, `completion.rs` | The non-product commands (`completion.rs` also holds the hidden `man` generator) |
-| `src/cli/util.rs` | Helpers shared by commands: `batch` (parallel, `--batch-concurrency`), `text_arg`, `body_arg`, `require_yes`, `deprecated` |
-| `tests/common/mod.rs` | Offline mock HTTP server (`MockServer`, `MockResponse`, `RecordedRequest`) |
-| `tests/<product>.rs`, `tests/client.rs`, `tests/search.rs` | Mock-HTTP tests for each product's API functions |
-| `tests/cli_tree.rs` + `tests/snapshots/cli-tree.txt` | Snapshot of the full command tree |
-| `tests/twg_shapes.rs` + `tests/fixtures/twg/` | Frozen output shapes, checked against mock REST responses |
-| `tests/output_contract.rs` | Output shapes and exit codes for edge cases (empty pages, partial batches) |
+| `src/main.rs`, `src/lib.rs` | Entry point and module list |
+| `src/client.rs` | HTTP client: retries, `ApiError` with its codes, hints and exit codes, the dry-run and read-only modes, `post_read` |
+| `src/config.rs` | Config file, profiles, credentials, `.atlx.toml`, the git-remote repository default |
+| `src/output.rs`, `src/output/` | The envelope, JSON/JSONL/ids/text rendering, path selection |
+| `src/schema/` | `Record`, `Field`, views, projection, truncation budgets, `CommandMeta` and the registry lookup |
+| `src/paging.rs` | `--limit`/`--cursor` handling and cursor encoding |
+| `src/cache.rs` | The metadata cache (lookup tables only, never content) |
+| `src/markup/` | Markdown, ADF and storage conversion with loss reporting |
+| `src/<product>.rs`, `src/<product>/` (`jira`, `jsm`, `confluence`, `bitbucket`) | API functions, which call REST endpoints and return REST payloads; `records.rs` defines the product's records |
+| `src/cli/mod.rs` | `Cli` with the global flags, top-level dispatch, the core `CommandMeta` table and `META_TABLES` |
+| `src/cli/<product>.rs`, `src/cli/<product>/` | Clap enums, dispatch, the product's `META` table and parse tests |
+| `src/cli/describe.rs` | `atlx describe`, built from the clap tree and the registry |
+| `src/cli/shape.rs` | Applies `--fields`, `--full`, `--raw`, `--max-chars` and the envelope to a command's result |
+| `src/cli/util.rs` | Shared helpers: multi-ID `batch`, stdin IDs, body arguments |
+| `src/cli/skill.rs`, `skills/atlx/` | The agent skill and `atlx skill` |
+| `tests/common/mod.rs` | The offline mock HTTP server |
+| `tests/<product>*.rs` | Mock-HTTP tests per product, including grammar and write-guard tests |
+| `tests/describe.rs`, `tests/snapshots/describe/` | Snapshot of `atlx describe` per product |
+| `tests/write_guards.rs`, `tests/confluence_write_guards.rs` | Dry-run, read-only, `--yes` and version guards |
+| `tests/output.rs`, `tests/output_contract.rs`, `tests/errors.rs` | Envelope, output modes, error codes and exit codes |
+| `tests/markup.rs`, `tests/fixtures/markup/` | Conversion goldens, round-trip and lossy fixtures |
+| `tests/skill.rs` | Generates the skill's command references from `describe`; checks doc links |
 | `tests/live_smoke.rs` | Opt-in live checks (`#[ignore]`) |
-| `tests/twg_compat.rs` | Checks `compat/corpus.txt`, `COMPAT.md` and `compat/coverage.txt` against the parser |
-| `compat/twg-<version>.txt` | Command paths, positionals and flag names from twg 1.4.4, kept by hand |
 
-The split is deliberate: clap code never calls `ureq` directly, and API
-functions never parse arguments. That keeps API functions testable against
-the mock server and keeps product PRs out of each other's files.
+The split is deliberate: clap code never calls `ureq` directly, API functions
+never parse arguments, and records turn REST payloads into output. That keeps
+API functions testable against the mock server, keeps `--raw` honest, and
+keeps product changes out of each other's files.
+
+## The contract
+
+`atlx describe` is the contract. Everything below exists so that it stays
+small, predictable and true.
+
+- **Grammar.** `atlx <product> <resource> [<sub-resource>] <verb>`, at most
+  one sub-resource level. Nouns are singular and are the REST API's own
+  (`issue`, `project`, `page`, `pr`). The verb is last: `list`, `search`,
+  `get`, `create`, `update`, `delete`, or a REST action (`transition`,
+  `merge`, `approve`, ...). The target is positional; parents are named
+  flags with the parent's noun (`--issue`, `--page`, `--pr`, `--repo`,
+  `--project`, `--space`). One flag name per concept everywhere: `--limit`,
+  `--cursor`, `--body`, `--body-file`, `--body-format`, `--yes`,
+  `--if-version`, `-q/--query`. No `--id`, no `--max-results`, no per-command
+  paging flags. Each product has a test that checks this for every path.
+- **Records.** Every command returns a registered record with a short
+  default view (6 to 12 fields), a full view, flat fields with the shared
+  names (`id`, `key`, `title`, `url`, `created`, `updated`, `author`,
+  `body`), people as `{id, name}`, no avatar URLs or `self` links. Lists
+  carry no bodies. Large text fields declare a truncation budget and the
+  flag that continues them.
+- **Envelope and errors.** Commands return data; `main` wraps it. Failures
+  are `client::ApiError` values with the right `ErrorKind` (`usage`,
+  `config`, `not_found`, `conflict`, `refused`, ...), so the code, hint and
+  exit code follow. Commands never print errors themselves.
+- **Writes.** Every non-GET request is a write unless it goes through
+  `Client::post_read`, so dry-run and read-only mode cover new commands
+  automatically and a forgotten annotation fails closed. A command is
+  `destructive` when it deletes, purges, archives, merges, declines, restores
+  an old version, changes permissions or sharing, or does something JSM
+  customers see; the registry then requires `--yes`. Do not call a
+  confirmation helper by hand, and never prompt.
+- **Bodies** go through `src/markup`: Markdown by default, ADF as the model,
+  storage only as checked pass-through, no HTML input. A write that would
+  lose content is refused; a read that cannot show content says so with a
+  `lossy_body` warning.
 
 ## Adding a command
 
-1. **Clap variant**: add it to the product's enum in `src/cli/<product>.rs`,
-   using the command path and flag names from `compat/twg-1.4.4.txt` or the
-   public commands catalog when the command is listed there.
-2. **API function**: add it to `src/<product>.rs`. It takes a `&Client` and
-   typed arguments, and returns the command's `data` as a `Value`.
-3. **Dispatch**: wire the variant to the function in the product's dispatch
-   function in `src/cli/<product>.rs`, wrapping Jira, Confluence and user
-   results in `envelope("<operation>", "<resourceType>")` with a `request`
-   echo of the inputs.
-4. **Mock-HTTP test** in `tests/<product>.rs`: assert the method, path, query
-   and body sent, and the output keys.
-5. **Parse test**: add the invocation to the `tests` module in
-   `src/cli/<product>.rs` (or to `parses_twg_style_invocations` in
-   `src/cli/mod.rs`).
-6. **Regenerate the CLI snapshot** and review the diff:
-   `UPDATE_SNAPSHOTS=1 cargo test --test cli_tree`.
-7. **README**: update the command table.
-8. **`COMPAT.md` and the corpus**: set the command's row in `COMPAT.md`, flip
-   the matching `gap #N` lines in `compat/corpus.txt` to `ok`, add a corpus
-   line for any new invocation, and record the new coverage with
-   `UPDATE_COVERAGE=1 cargo test --test twg_compat`. See "Command coverage"
-   below.
+1. **Clap variant** in `src/cli/<product>.rs` (or its submodule), following
+   the grammar above.
+2. **API function** in `src/<product>.rs` or `src/<product>/`. It takes a
+   `&Client` and typed arguments and returns the REST payload as a `Value`.
+   A POST that only reads uses `post_read`. List functions page through
+   `paging`.
+3. **Record** in `src/<product>/records.rs`: reuse one when the command
+   returns the same thing as another command; otherwise add one with a
+   description per field and the default view marked.
+4. **`CommandMeta`** in the product's `META` table: path, `effect` (`read`,
+   `write` or `destructive`), `record`, and one to three `examples`, each a
+   full `atlx ...` line. A test parses every example.
+5. **Dispatch** from the variant to the API function.
+6. **Tests**, all offline:
+   - a mock-HTTP test in `tests/<product>*.rs` that asserts the method, path,
+     query and body sent and the record printed;
+   - a parse test in the product's CLI tests;
+   - write guards: the table-driven tests in `tests/jira.rs`,
+     `src/cli/bitbucket/tests.rs` and `tests/confluence_write_guards.rs` walk
+     the registry, so a destructive command is checked to refuse without
+     `--yes` and send nothing, and a write is checked to stop under
+     `--dry-run`. Extend them when your command needs extra arguments or
+     mock responses to reach its first write.
+7. **Snapshots**: regenerate and review the diffs.
+   - `UPDATE_SNAPSHOTS=1 cargo test --test describe`
+   - `UPDATE_SKILL=1 cargo test --test skill` (the skill's command references)
+8. **Changelog**: a line under `## [Unreleased]`.
+
+The README has no command table to update: its overview lists resources, and
+the full list lives in `describe` and the generated skill references.
 
 ## Conventions
 
-- **Naming.** If the inventory or catalog has the command or flag, use its
-  exact path and spelling. atlx-only commands are labelled "(atlx extra)" in their help.
-- **Output.** Jira, Confluence, user and account commands return
-  `output::envelope::envelope(<operation>, <resourceType>)` around data that
-  keeps the REST payload's own key names, and Bitbucket commands return the
-  REST objects unwrapped. Existing shapes are a contract: change them only on
-  purpose, with a changelog entry. Text on a
-  terminal, JSON when piped, and always overridable with `-o text|json|jsonl`.
-- **Errors.** Return them as `anyhow::Error`. For a classified failure, return
-  a `client::ApiError` (`ApiError::usage(..)` for bad arguments,
-  `ApiError::config(..)` for missing setup; the client produces HTTP and network
-  errors itself). `main` prints them as described in the README's "Errors and
-  exit codes" section. Commands never print errors themselves.
-- **Confirmation.** Follow the command family's existing policy, which the
-  README documents: some families require `--yes`, others (Jira deletes,
-  merge, decline) don't, and scripts rely on both. Where `--yes` isn't
-  required it is accepted as a hidden no-op. Nothing prompts. Add `--dry-run` where it
-  is feasible to show the request without sending it.
-- **Renames.** When a command is renamed, the new name becomes the visible one and the old spelling stays as a hidden command or flag that calls
-  `util::deprecated(old, new)`. The note prints only in text mode on a
-  terminal, never in JSON or piped output.
 - **Dependencies.** Don't add a crate without a justification in the PR. HTTP
   is sync `ureq` 2; there is no async runtime.
 - **Tests stay offline.** Anything that needs a real site is `#[ignore]`.
-- **Public REST only**: Jira REST v3 and Agile 1.0, Confluence v2 (v1 where v2
-  lacks an endpoint), Bitbucket 2.0. Features that need Teamwork Graph, the
-  GraphQL gateway or Rovo are out of scope.
+- **Public REST only**: Jira REST v3 and Agile 1.0, the Service Desk API,
+  Confluence v2 (v1 where v2 lacks an endpoint), Bitbucket 2.0. Features that
+  need Teamwork Graph, the GraphQL gateway or Rovo are out of scope.
+- **Help text** is for people and shows in `describe` as `summary`: one plain
+  sentence, no internal module names.
+- **Docs.** Every `atlx ...` line in the README and the skill is parsed by a
+  test, so keep examples real (single-quote arguments with spaces) and keep
+  placeholders out of code spans that start with `atlx`.
 
 ## Independence from twg
 
-atlx is built from Atlassian's public REST documentation and API specs, not
-from twg. Keep it that way:
+atlx is built from Atlassian's public REST documentation and API specs.
+Keep it independent of Atlassian's twg CLI:
 
 - Don't run twg to develop or test atlx, and don't record, commit or publish
-  twg's output.
-- Don't publish comparisons, benchmarks or other assessments of twg (in
-  issues, PRs, docs or commit messages).
-- Command paths and flag names may match twg's. Take them from
-  `compat/twg-1.4.4.txt` or Atlassian's public
-  [commands catalog](https://developer.atlassian.com/cloud/twg-cli/commands/commands-catalog/)
-  and changelog. Behavior and output follow the REST APIs and atlx's own
-  docs.
-- Never copy twg's help text, descriptions, docs or skill files; they are
-  "All rights reserved". Write every help string and doc in your own words.
-
-## Command coverage
-
-Three files track which command paths atlx has, and `tests/twg_compat.rs`
-checks all three offline:
-
-- **`COMPAT.md`** has one row per command path in the inventory. Statuses:
-  ✅ supported, 🟡 partial, 🔁 accepted through an alias, ➕ atlx-only, 📋
-  planned, ⛔ out of scope. The test checks each status against the CLI tree
-  snapshot: ✅/🟡 paths must exist, 🔁 paths must exist only through an alias,
-  📋/⛔ paths must not parse. 🟡 and 📋 rows must link an issue.
-- **`compat/corpus.txt`** has invocations, each tagged `ok` (must
-  parse) or `gap #<issue>` (must fail to parse). When your change makes a gap
-  line parse, the test fails until you flip it to `ok`. Every flag on a
-  line must exist for that command in the inventory. Write lines yourself
-  with placeholders (`PROJ-1`, `12345`, `ENG`, `acme`, `api`); never copy
-  examples from twg's help, docs or skills. Tag a gap with the issue that will
-  close it; use `#13` for public-REST work that has no issue yet.
-- **`compat/coverage.txt`** is the share of inventory commands atlx accepts. The
-  test fails if it drops; `UPDATE_COVERAGE=1 cargo test --test twg_compat`
-  records a rise.
-
-To add command paths that appear later, edit `compat/twg-1.4.4.txt` by hand
-from the public commands catalog or changelog. Don't regenerate it by running
-twg.
+  its output.
+- Don't publish comparisons, benchmarks or other assessments of twg, in
+  issues, PRs, docs or commit messages.
+- Never copy twg's help text, descriptions, docs or skill files. Write every
+  help string and doc in your own words.
 
 ## Parallel work
 
 - Run at most one PR at a time per `area:*` label. Issues in the same area
-  edit the same `src/cli/<product>.rs` and `src/<product>.rs`.
+  edit the same product files.
 - If you run several worktrees (or agents) at once, give each its own
   `CARGO_TARGET_DIR`. A shared target directory makes the builds clobber each
   other.
 
 ## Cutting a release
 
-Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is
-pushed. Only maintainers do this.
+No release has been published yet. Releases are built by
+`.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed. Only
+maintainers do this.
 
 1. On a branch, bump `version` in `Cargo.toml` and run `cargo check` so
    `Cargo.lock` picks it up.
@@ -167,10 +184,10 @@ pushed. Only maintainers do this.
    ```
 
 4. The workflow checks that the tag matches `Cargo.toml`, runs
-   `cargo publish --dry-run`, builds all seven targets, uploads the archives
-   and `SHA256SUMS` to a new GitHub release, then runs `cargo publish`. The
-   publish step is skipped with a warning when the `CARGO_REGISTRY_TOKEN`
-   repository secret is not set.
+   `cargo publish --dry-run`, builds all seven targets with completions and
+   man pages, uploads the archives and `SHA256SUMS` to a new GitHub release,
+   then runs `cargo publish`. The publish step is skipped with a warning when
+   the `CARGO_REGISTRY_TOKEN` repository secret is not set.
 5. Check the install paths: `cargo binstall atlx` and `cargo install atlx`.
 
 To rehearse without releasing, run the workflow by hand (Actions, Release, Run
@@ -180,4 +197,3 @@ publish jobs. Pull requests that edit the workflow run it the same way.
 
 Archive names must keep matching `pkg-url` in `[package.metadata.binstall]`:
 `atlx-vX.Y.Z-<target>.tgz`, or `.zip` on Windows, with the binary at the root.
-

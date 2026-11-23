@@ -1,137 +1,102 @@
 # atlx
 
-An open, agent-friendly CLI for **Jira**, **Confluence** and **Bitbucket** Cloud,
-built only on Atlassian's public REST APIs. All it needs is an API token.
+A command line for **Jira**, **Jira Service Management**, **Confluence** and
+**Bitbucket** Cloud, built for coding agents and usable by people.
+
+An agent driving a shell pays for every token it reads, cannot see a screen
+and cannot ask a follow-up question. So every atlx command returns a small,
+typed, predictable record by default; every command can describe its own
+inputs, outputs and risks as JSON; every failure says what class it is and
+what to do next, in the exit code as well as the body; and no write loses
+data silently: bodies go through one checked Markdown/ADF pipeline that
+refuses what it cannot represent, every write can be previewed, and the whole
+tool can be switched to read-only. People get the same commands with text
+tables.
 
 ```sh
-atlx jira workitem get PROJ-1 --comments -o json
-atlx confluence content get 12345 --detail full --format md
-atlx bb pull-requests query --repo acme/web --state OPEN
+atlx jira issue list --assignee me --status 'In Progress'
+atlx confluence page get 12345 --section Rollback
+atlx bb pr checks 42 --repo acme/api
+atlx describe jira issue transition
 ```
 
-**Familiar command names.** Commands are grouped by product and resource, and
-use the same command paths and flag names as Atlassian's `twg` CLI where both
-cover a feature, so people who know one find their way in the other.
-[COMPAT.md](COMPAT.md) lists, for each command path in twg 1.4.4's command
-tree, whether atlx has it. atlx is independent: it is not a twg replacement,
-and it makes no claim about how twg behaves.
+## Scope
 
-Global flags: `-o/--output text|json|jsonl`, `-s/--site` (prefix like `acme`
-or a hostname), `-u/--user`, `-p/--profile`, `--timeout-ms`, and the output
-controls `--select`, `--agent-fields`, `--output-file`, `--output-summary` and
-`--api-version` (see [Output controls](#output-controls)). When stdout is
-piped, atlx defaults to JSON, in a stable envelope (see
-[JSON output](#json-output)).
+- **Independent.** atlx is an independent open-source project. It is not
+  affiliated with or endorsed by Atlassian, and it designs its own command
+  grammar, output and error contract.
+- **Public REST APIs only**: Jira REST v3 and Agile 1.0, Jira Service
+  Management, Confluence v2 (v1 where v2 has no endpoint) and Bitbucket 2.0.
+  Features that need Teamwork Graph, the GraphQL gateway or Rovo are out of
+  scope; `search` covers cross-product search over REST, and `api`
+  reaches any other REST endpoint.
+- **API tokens** with HTTP Basic auth. There is no OAuth flow.
 
 ## Install
 
-**No release has been published yet**, so for now install from source (see
-the end of this section). The first release will publish prebuilt binaries on
-the [releases page](https://github.com/nexburst/atlx/releases) for Linux
-(x86_64 and aarch64 glibc, plus a static x86_64 musl build), macOS (Intel and
-Apple silicon) and Windows (x86_64 and ARM64), and the crate on crates.io.
-The commands below apply from then on.
-
-**cargo-binstall** downloads the matching archive without compiling anything:
-
-```sh
-cargo binstall atlx
-```
-
-**Manual download.** Archives are named `atlx-vX.Y.Z-<target>.tgz` (`.zip` on
-Windows). Each one holds the `atlx` binary at the top level, the licenses, this
-README, the changelog, shell completions in `completions/` and man pages in
-`man/`. Check the download against `SHA256SUMS` from the same release:
-
-```sh
-curl -LO https://github.com/nexburst/atlx/releases/download/v0.1.0/atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz
-curl -LO https://github.com/nexburst/atlx/releases/download/v0.1.0/SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf atlx-v0.1.0-x86_64-unknown-linux-gnu.tgz atlx
-install -m 755 atlx ~/.local/bin/
-```
-
-**From crates.io** (needs a Rust toolchain):
-
-```sh
-cargo install atlx --locked
-```
-
-**From source:**
+No release has been published yet. Install from source with a Rust
+toolchain:
 
 ```sh
 git clone https://github.com/nexburst/atlx && cd atlx
 cargo install --path . --locked
 ```
 
-### Shell completions
-
-`atlx completion script <bash|zsh|fish|powershell|elvish>` prints a completion
-script. Install it once for the shell you use:
+Shell completions: `atlx completion script bash` prints a bash completion
+script (also `zsh`, `fish`, `powershell` and `elvish`). For example:
 
 ```sh
-# bash
 mkdir -p ~/.local/share/bash-completion/completions
 atlx completion script bash > ~/.local/share/bash-completion/completions/atlx
-
-# zsh: any directory on $fpath, loaded before compinit runs
-mkdir -p ~/.zfunc
-atlx completion script zsh > ~/.zfunc/_atlx
-# in ~/.zshrc: fpath=(~/.zfunc $fpath); autoload -Uz compinit; compinit
-
-# fish
-atlx completion script fish > ~/.config/fish/completions/atlx.fish
 ```
 
-For PowerShell, add `atlx completion script powershell | Out-String |
-Invoke-Expression` to your `$PROFILE`. Release archives also ship these files
-pre-generated in `completions/`.
-
-Man pages are in the archive's `man/` directory (`atlx.1` plus one page per
-subcommand, such as `atlx-jira-workitem-get.1`). Copy them to
-`~/.local/share/man/man1/` and run `man atlx`.
+Release archives will ship prebuilt binaries for Linux, macOS and Windows
+together with completions and man pages.
 
 ## Authenticate
 
-Create an API token at <https://id.atlassian.com/manage-profile/security/api-tokens>, then:
+Create an API token at
+<https://id.atlassian.com/manage-profile/security/api-tokens>, then:
 
 ```sh
-atlx login -s acme -u you@acme.com --token -     # paste the token on stdin
-atlx whoami
+atlx auth login -s acme -u you@acme.com --token -    # paste the token on stdin
+atlx auth status
 ```
 
-For Bitbucket, create an API token with Bitbucket scopes (account, repository,
-pull request, pipeline read; write scopes to create PRs/comments):
+For Bitbucket, create an API token with Bitbucket scopes (read scopes for
+account, repositories, pull requests and pipelines; write scopes for what you
+want to change):
 
 ```sh
-atlx setup bitbucket --workspace acme --token -
+atlx auth bitbucket --workspace acme --token -
 ```
 
-Config lives in `~/.config/atlx/config.toml` (mode 0600). Environment overrides:
-`ATLX_SITE`, `ATLX_EMAIL`, `ATLX_TOKEN`, `ATLX_TOKEN_CMD`, `ATLX_BB_WORKSPACE`,
-`ATLX_BB_EMAIL`, `ATLX_BB_TOKEN`, `ATLX_BB_TOKEN_CMD`, `ATLX_PROFILE`,
-`ATLX_CONFIG`, `ATLX_OUTPUT`.
+`atlx auth status` is the first command an agent should run: it reports the
+profile, site, account, where the token comes from, which products answer and
+whether read-only mode is on. atlx never prompts an agent: without
+credentials a command fails with `config` (exit 4) and a hint to ask the
+person to run `atlx auth login`. `atlx doctor` runs deeper checks.
+
+The config lives in `~/.config/atlx/config.toml` (mode 0600). Environment
+variables override it: `ATLX_SITE`, `ATLX_EMAIL`, `ATLX_TOKEN`,
+`ATLX_TOKEN_CMD`, `ATLX_BB_WORKSPACE`, `ATLX_BB_EMAIL`, `ATLX_BB_TOKEN`,
+`ATLX_BB_TOKEN_CMD`, `ATLX_PROFILE`, `ATLX_CONFIG`, `ATLX_OUTPUT`,
+`ATLX_READ_ONLY`, `ATLX_NO_CACHE`.
 
 ### Profiles
 
-Several sites or workspaces can live side by side as named profiles, chosen
-with `-p/--profile <name>` or `ATLX_PROFILE` (`-p default` means
-the saved default):
+Several sites or workspaces live side by side as named profiles, chosen with
+`-p/--profile <name>` or `ATLX_PROFILE`:
 
 ```sh
-atlx login --new-profile sandbox -s acme-sandbox -u you@acme.com --token -
-atlx setup bitbucket -p sandbox --workspace acme-sandbox --token -
-atlx -p sandbox jira workitem get SBX-1
+atlx auth login --new-profile sandbox -s acme-sandbox -u you@acme.com --token -
+atlx auth bitbucket -p sandbox --workspace acme-sandbox --token -
+atlx -p sandbox jira issue get SBX-1
 atlx auth profile list                  # name, site, email, workspace, token source
-atlx auth profile default sandbox       # use it when -p is not given
+atlx auth profile default sandbox       # used when -p is not given
 atlx auth profile rename sandbox sbx
-atlx logout -p sbx                      # remove one profile
+atlx auth logout -p sbx                 # remove one profile
 ```
-
-Precedence, highest first: `-s`/`-u` flags, `ATLX_*` env vars, the selected
-profile. A v1 config (top-level `site`, `email`, `token`, `[bitbucket]`) keeps
-working as the profile named `default`; `atlx auth profile migrate --yes` moves
-it into a named profile.
 
 ```toml
 default_profile = "work"
@@ -140,325 +105,386 @@ default_profile = "work"
 site = "work.atlassian.net"
 email = "you@work.com"
 token_cmd = "op read op://Private/atlassian/credential"
+read_only = true                     # refuse every write with this profile
 
 [profiles.work.bitbucket]
 workspace = "work"
 token_cmd = "pass show bitbucket/work"
 ```
 
-### Credential helpers
+Precedence, highest first: `-s`/`-u` flags, `ATLX_*` variables, the selected
+profile (`-p`, `ATLX_PROFILE`, the `profile` in `.atlx.toml`, then the saved
+default). A v1 config with top-level `site`, `email` and `token` keeps
+working as the profile `default`; `atlx auth profile migrate --yes` moves it
+into a named profile.
 
-Instead of storing a token, save a command that prints it: `token_cmd` (and
-`bitbucket.token_cmd`) in the config, `atlx login --token-cmd '<cmd>'`,
-`atlx setup bitbucket --token-cmd '<cmd>'`, or the `ATLX_TOKEN_CMD` /
-`ATLX_BB_TOKEN_CMD` env vars. The command runs through `sh -c` (`cmd /C` on
+**Credential helpers.** Instead of a token, save a command that prints one:
+`token_cmd` in the config, `atlx auth login --token-cmd '<cmd>'`, or
+`ATLX_TOKEN_CMD`/`ATLX_BB_TOKEN_CMD`. It runs through `sh -c` (`cmd /C` on
 Windows) only when a request is about to be made, at most once per run, with
-a 10 second timeout; its stdout is trimmed and never shown in errors.
-`atlx whoami`, `atlx doctor` and `atlx auth profile list` report where the token
-comes from (`config`, `env` or `token_cmd`), never its value.
+a 10 second timeout. Its output is never shown; `auth status` and
+`auth profile list` report only where the token comes from.
+
+### Repository defaults: `.atlx.toml`
+
+An optional `.atlx.toml`, found by walking up from the working directory,
+holds non-secret defaults for the repository you are in:
+
+```toml
+profile = "work"
+[jira]
+project = "PROJ"        # the project for `jira issue create`
+[confluence]
+space = "ENG"
+[bitbucket]
+repo = "acme/api"       # --repo for every Bitbucket repository command
+```
+
+Only these keys are accepted; tokens, sites and emails are rejected. Without
+`bitbucket.repo`, `--repo` defaults to the `origin` remote in `.git/config`
+when it points at bitbucket.org. `atlx auth status --full` shows the defaults
+in effect. (`confluence.space` is read and reported, but no command uses it
+as a default yet.)
 
 ## Commands
 
-| Command | Notes |
+The grammar is `atlx <product> <resource> [<sub-resource>] <verb>`, with the
+verb last:
+
+- **Nouns** are the REST API's own, singular: `jira issue`, `jira project`,
+  `confluence page`, `bb pr`.
+- **Standard verbs** have one meaning each: `list` (enumerate or filter, with
+  `--jql`, `--cql`, `-q` and structured filters), `search` (free text), `get`
+  (one or more IDs; `-` reads IDs from stdin), `create`, `update`, `delete`.
+  Other verbs are REST actions: `transition`, `assign`, `merge`, `decline`,
+  `approve`, `start`, `complete`, `run`, `log`, `edit`, `download`,
+  `upload`, and a few more.
+- **The target is positional**; its parents are named flags: `--issue`,
+  `--page`, `--pr`, `--project`, `--space`, `--board`, `--sprint`, `--desk`,
+  `--request`, `--repo workspace/slug`.
+
+| Product | Resources (sub-resources) |
 | --- | --- |
-| `login`, `logout`, `whoami`, `setup bitbucket`, `setup default-site` | API-token auth instead of OAuth; `-p/--profile`, `login --new-profile`, `--token-cmd` (atlx extra) |
-| `auth profile list`, `auth profile default`, `auth profile rename`, `auth profile migrate` | Profiles in `config.toml`; `list` never shows tokens |
-| `user search [name...]` | `--name`/`--query`, `--email`, `--account-id`, `-n/--limit`; returns `accountId`, `userAri`, `name` and `email` when visible |
-| `user get [account-id]`, `user bulk-lookup [id\|email...]` | profile of one user (you by default); many users by account ID or exact email, `--strict` |
-| `jira workitem get <KEY...>` | `--comments`, `--remote-links`, `--full`, `--fields`, `--field`, `--strict`; batches fetched `--batch-concurrency` at a time (default 5, max 20), in input order |
-| `jira workitem search <text...>` | `text ~ "…" ORDER BY updated DESC`; `--limit`, `--after` |
-| `jira workitem query --jql` | `-n/--limit`, `--first`, `--after` (cursor), `--fields`; `--last`/`--before` are rejected (REST pages forward only) |
-| `jira workitem create` | `--space --type --summary --description[-format] --assignee --reporter --priority --labels --parent --field --fields-json` |
-| `jira workitem field create-metadata --space` | `--type` to inspect required/allowed fields for an issue type; also `custom-fields create-metadata` |
-| `jira workitem update --id` | fields, `--add-/--remove-labels`, components, fix versions, `--status`, `--comment` |
-| `jira workitem comment create\|query\|update\|delete` | `create`: `--issue-id --body --body-format`, visibility, `--internal`, `--parent-id` for a reply; `query`: `--issue-id`, `--first`, `--after` (cursor), `--order-by created\|-created`; `update`: `--issue-id --id --body`; `delete`: `--issue-id --id` |
-| `jira workitem changelog query --issue-id` | `--first`, `--after` (cursor); REST changelog entries with `items[].fromString/toString` |
-| `jira workitem delete <KEY>` | or `--id`; `--delete-subtasks true` |
-| `jira workitem field update-metadata --id` | editable custom fields with allowed values; `--include-system-fields` adds built-in ones |
-| `jira workitem types query\|get`, `statuses query`, `priorities query` | `types query --project\|--project-key\|--project-id\|--issue`, `--level`, `-n/--limit`; the others take repeated `--id` or list everything |
-| `jira workitem transition --id` | omit `--transition-id` to list; `--field`, `--transition-comment` |
-| `jira workitem transitions query --id` | includes required screen fields |
-| `jira workitem link-types query`, `jira workitem link workitem\|weblink\|query`, `jira workitem unlink workitem\|weblink` | `workitem`: `--id --target-id... --link-type-id` (`--id` reads with the outward phrase: A blocks B); `weblink`: `--id --url --title`, `--relationship`, `--global-id`, `--application-name/-type`, `--summary`, `--icon-url`, `--resolved`; `link query --issue-id`; `unlink workitem --link-id`; `unlink weblink --id` with one of `--link-id`, `--global-id`, `--url` |
-| `jira workitem attachment query\|get\|download\|thumbnail\|upload\|delete` | `download --output-path` (or `--out`) `--force`; `upload --file` (repeatable); `delete` needs `--yes` |
-| `jira workitem worklog add\|update\|query\|get\|delete\|changed\|deleted` | `--time-spent "1h 30m"`, `--started`, `--adjust-estimate`; times take epoch ms, dates, timestamps or ages like `7d`; `delete` needs `--yes` |
-| `jira workitem watcher query\|add\|remove`, `jira workitem vote query\|add\|remove` | `--watcher-id` takes an ID, email, name or `me` (the default) |
-| `jira workitem bulk-get\|create-bulk\|bulk-transition` | `bulk-get` takes keys, `--fields`, `--full`, `--strict`; `create-bulk --input-json` takes the REST `issueUpdates`; `bulk-transition --ids --transition-id` has `--dry-run`, needs `--yes`, and returns a task |
-| `jira workitem archive\|unarchive`, `jira workitem property get\|query\|set\|delete` | `--id` (repeatable; archiving needs an admin on Premium or Enterprise); `--issue-id --property-key --value-json` |
-| `jira dashboard query\|get\|create\|update\|copy\|delete\|bulk-edit`, `jira dashboard gadget`, `jira dashboard item-property` | new dashboards and copies are private; `update` keeps what isn't given; deletes and `bulk-edit` need `--yes` |
-| `jira field list` | `--query`, `--custom-only` |
-| `jira space query\|list\|get` | `--query`, `--key`, `--id`, `--type-key`, `--status`, `--sort-by`, `--limit`/`--first`, `--start-at`; or `<id-or-key>` |
-| `jira board query`, `jira board sprints query`, `jira sprint workitems query` | boards by `--project`, `--issue`, `--type`, `--name`, `--filter-id`; sprints by `--id`/`--board-id` (ID, URL or name) or a space's only board, `--state`, `--current`; sprint work items by `--id`/`--sprint-id`, `--jql`, `--fields`; all take `--max-results`, `--start-at` |
-| `jira sprint get\|create\|update\|start\|complete\|delete` | `start` needs `--end-date` or `--duration 2w` unless the sprint has an end; `complete --incomplete-issues-destination-id <sprint>\|backlog` moves unfinished work first; names need `--board-id` |
-| `jira board get\|create\|delete`, `jira board backlog\|projects\|quick-filter query` | `get` prints a list (`--id` repeats) and adds columns and estimation; backlog takes `--active-quick-filters`, `--jql`, `--limit`; `delete` needs `--yes` |
-| `jira workitem create\|update` planning flags | `--sprint <id\|name\|none>`, `--story-points`, `--original-estimate`, `--remaining-estimate` (durations, or seconds), `--team <id\|none>` |
-| `jira space create\|update\|delete\|archive\|restore` | `delete` (to the trash), `archive` and `restore` need `--yes` and an exact key, ID, ARI or `/projects/` URL |
-| `jira space versions query`, `jira space version create\|get\|update\|delete\|merge\|move\|counts`, `jira space component query\|get\|create\|update\|delete\|counts` | deletes and merges ask for no confirmation |
-| `jira space issue-types`, `status query`, `types query`, `notification-scheme get` | lookups by space |
-| `jira filter query\|get\|create\|update\|delete`, favourites, `columns`, `share`, `subscription query` | filters by ID, URL or exact name; `delete`, `reset-columns` and `share remove` need `--yes`; `jira workitem query --filter <id\|name>` runs one |
-| `jsm request create\|validate\|get\|query`, `comment list\|create`, `participant list\|add\|remove`, `transition query\|create` | `--answer "Question=value"` takes option labels; `validate` creates nothing; comments are **public to customers** unless `--internal`; participant `remove` needs `--yes` |
-| `jsm approval list\|get\|approve\|reject`, `jsm sla get`, `jsm queue query`, `jsm queue workitems query` | approve and reject act as you, without a confirmation |
-| `jsm portal query` / `servicedesk query`, `jsm request-type query\|field get\|form get`, `jsm knowledge-article query` | service desks by ID, project key or exact name |
-| `confluence search query --cql` / `search text` | `--excerpt`, `--cursor`, `--updated-since 7d` |
-| `confluence content get <ref...>` | `--detail summary\|outline\|full`, `--format html\|md` (or `adf`, atlx extra), `--section <heading>` (repeatable), `--body-only`, `--reference-space` |
-| `confluence content create` / `update` / `delete` | `--body`/`--body-file`, `--format html\|markdown\|plain`, `--snapshot-token`, `--dry-run`; `update --edits`/`--edits-file` applies targeted node edits (dry run shows a diff); `delete` moves to the trash, or `--purge`. Writes need `--yes`; `update` also needs `--snapshot-token`; a body needs `--format` and `--ack-body-formats` |
-| `confluence content comments list\|get\|create\|reply\|update\|delete\|resolve\|reopen` | `--comment-type footer\|inline`, `--body-format`, `--include-replies`, `--sort`, `--resolution-status` (inline); `create --text-selection` anchors an inline comment; `resolve` and `reopen` are inline only; `delete` needs `--yes` |
-| `confluence content list\|children`, `confluence content labels list --id`, `confluence tree [ref]\|--target` | `--space`, `--limit`, `--cursor`; `tree` takes a page (with its ancestors) or a space, `--depth` up to 10, `--type`, at most 500 nodes |
-| `confluence content versions list\|get\|diff\|restore --id` | also `content history list\|get\|diff`; `get --at-version N --format md\|html`, `diff --from N --to M`; `restore` needs `--yes` |
-| `confluence content labels add\|remove --id --label a,b`, `labels watch\|unwatch --name` | `--prefix`; `remove`, `watch` and `unwatch` need `--yes` |
-| `confluence content attachments list\|get\|download\|upload\|delete` | `download --out --at-version --force`; `upload --file` (repeatable) `--comment --minor-edit`; `delete --purge`; `upload` and `delete` need `--yes` |
-| `confluence content body-formats [format]` | offline guide to what each body format reads, writes and loses; `content get --format url` prints just the web address |
-| `confluence content move\|copy\|trash\|untrash\|purge\|archive\|publish\|delete-draft` | all need `--yes`; `purge` only deletes what is in the trash; `create` also takes `--private`, `--content-width`, `--title-emoji` |
-| `confluence content tasks list\|get\|complete\|reopen`, `confluence content status get\|set`, `confluence content list-available-statuses` | `tasks list --id --status open`; `--task-id`; `status set <id>` takes `--state-id` or `--name --color`, and `--yes` |
-| `confluence content watch\|unwatch`, `confluence space watch\|unwatch`, `confluence space permission list\|available`, `confluence templates list\|get` | watches need `--yes`; `--key` or `--space-id`; `templates list --space-id --scope --query` |
-| `confluence space create\|update\|archive\|unarchive\|delete` | all need `--yes`; `delete` is permanent and takes only an exact key, ID, ARI or space URL; `create --dry-run` |
-| `confluence space list\|get\|me` | `--labels` adds each space's labels; `me` resolves current user's personal space |
-| `bitbucket\|bb repo query\|get\|file`, `bb branch query` | `-w/--workspace`, `-r/--repo` (slug, `ws/slug` or URL), `--ref`, `-q/--query`; branches also `--author`, `--sort` |
-| `bb pull-requests query\|get\|create\|diff\|activity`, `task query`, `comment create` | state/author/branch/date filters; `--comments --diff --statuses`, `--type`; `get` and `activity` batch several ids with `--strict` and `--batch-concurrency` |
-| `bb pull-requests comment create\|query\|get\|update\|delete\|resolve\|reopen`, `task create\|get\|update\|delete\|resolve\|reopen`, `diffstat\|commits\|patch\|diff-line` | `--reply-to`, `--pending`, inline `--path` with `--line`/`--from-line` or `--start-line --end-line`/`--start-from-line --end-from-line`; `diff-line --text [--path]` finds the line numbers to comment on; comment and task `delete` need `--yes` |
-| `bb pull-requests approve\|unapprove\|request-changes\|merge\|decline` | `merge --pull-request`, `--merge-strategy merge_commit\|squash\|fast_forward`, `--merge-message`, `--close-source-branch`/`--keep-source-branch`; no confirmation prompt |
-| `bb pull-requests update`, `create --reviewer` | reviewers by name, nickname, account ID, `{uuid}` or `me`; `--add-reviewer`, `--remove-reviewer`, `--clear-reviewers`, `--draft`/`--ready`; `create --default-reviewers` |
-| `bb pull-requests mergeability\|merge-status\|conflicts\|for-commit\|remove-request-changes` | `merge --wait [--wait-timeout 90]`; mergeability lists `blockers`, and what it could not check as `unchecked` |
-| `bb pull-requests default-reviewer query\|get\|add\|remove`, `effective-default-reviewer query` | `add` and `remove` need `--yes` |
-| `bb inbox`, `bb pull-requests query --scope me` | scan your 25 most recently updated repositories (`inbox --repo-limit`), one request or more each; `query` also takes `--reviewer`, `--page` and `--merged-since`/`--merged-before`, which read up to 200 pull requests' activity |
-| `bb pipeline query\|get`, `bb search code` | `--logs --failed-steps --lines`; workspace code search with `--repo` |
-| `bb pipeline run\|trigger` | `--branch`, `--tag`, `--commit`, `--custom`, `--variable KEY=VALUE`; `--secured-variable KEY` reads the value from the environment |
-| `bb pipeline latest-failure\|tail\|grep\|rerun-failed`, `config get\|update` | `tail` streams text or JSON lines and exits 1 on failure; `get --test-reports --test-cases`; `rerun-failed` needs `--whole-pipeline`, because REST can only repeat every step |
-| `bb deployment query\|get`, `environments query`, `environment variable query`, `history query\|get`, `commits query` | environments by UUID, name or slug; secured values are never shown |
-| `bb branch create\|delete`, `bb commit query\|create`, `bb commit report create\|query` | `commit create` commits without a checkout: `--file`, `--files-from`, `--delete`, with `--branch` or `--default-branch`, `--parent` to guard the head; it and `branch delete` need `--yes` |
-| `bb repo create\|list-files\|url\|contributors`, `bb workspace get`, `bb workspace member query\|get`, `bb search prs` | `repo create` is private unless `--public`; `repo url` needs no credentials |
-| `completion script <shell>` | bash, zsh, fish, powershell or elvish completion script on stdout |
+| `jira` | `issue` (`comment`, `worklog`, `attachment`, `link`, `weblink`, `watcher`, `vote`, `property`, `changelog`), `project` (`version`, `component`), `board` (`quick-filter`), `sprint`, `filter` (`share`, `column`, `subscription`), `dashboard` (`gadget`, `property`), `field`, `issue-type`, `status`, `priority`, `link-type`, `transition`, `user` |
+| `jsm` | `request` (`comment`, `participant`, `approval`, `sla`), `transition`, `desk`, `request-type`, `queue` (`issue`), `article` |
+| `confluence` | `search`, `page` (`comment`, `attachment`, `label`, `version`, `task`, `state`), `space` (`permission`), `template`, `label` |
+| `bitbucket` (alias `bb`) | `repo` (`file`, `branch`, `commit`, `contributor`, `report`, `default-reviewer`), `pr` (`comment`, `task`, `reviewer`), `pipeline` (`step`, `config`), `deployment`, `environment` (`variable`), `workspace` (`member`) |
+| top level | `auth`, `doctor`, `search`, `api`, `describe`, `cache`, `completion`, `skill` |
 
-Older atlx names from 0.1 (`jira project list|get`, `jira board list`,
-`jira sprint list|issues`, `jira workitem create-meta`, `jira workitem link
-types|create|remote`, `bb repo branches`, `bb pull-requests tasks`, the
-positional forms of `confluence content labels`, `comments list|create` and
-`pull-requests merge`, and the `--inline`, `--format`, `--strategy` and
-`--message` flags they used) still work but are hidden from help. In text mode
-on a terminal they print a one-line note naming the new form; JSON and piped
-output stay clean. They will be removed in 0.3. Merge and decline ask for
-no confirmation, and `confluence content create`, `update` and `delete`
-refuse to write without `--yes`.
-
-atlx extras: `atlx doctor [--strict]` (verify config permissions and Jira,
-Confluence and Bitbucket connectivity), `atlx search "<text>"` (Jira +
-Confluence + Bitbucket in parallel) and `atlx api <jira|confluence|bitbucket>
-<path>` for any REST endpoint not wrapped yet.
-
-### Agent skill
-
-[`skills/atlx`](skills/atlx/SKILL.md) teaches coding agents which command to
-use, how to write safely and how to read errors. It is built into the binary:
+A few examples per product:
 
 ```sh
-atlx skill install                  # ~/.claude/skills/atlx
-atlx skill install --target agents  # .agents/skills/atlx in this directory
-atlx skill print                    # SKILL.md on stdout
+# Jira
+atlx jira issue list --jql 'project = PROJ AND updated >= -7d' --limit 50
+atlx jira issue get PROJ-1 PROJ-2 --fields key,title,status
+atlx jira issue create --project PROJ --type Bug --summary 'Login fails' --description-file bug.md
+atlx jira issue transition PROJ-1 --to Done
+atlx jira issue comment create --issue PROJ-1 --body 'Fixed in **main**'
+atlx jira field list --project PROJ --type Bug       # what a create needs
+atlx jira sprint list --project PROJ --current
+
+# Jira Service Management
+atlx jsm request list --status open --desk HELP
+atlx jsm request comment create --request HELP-12 --body 'Agent note' --internal --yes
+
+# Confluence
+atlx confluence search --cql 'type = page AND space = ENG AND title ~ "release"'
+atlx confluence page get 12345 --outline
+atlx confluence page update 12345 --if-version 7 --body-file page.md --dry-run
+atlx confluence page comment list --page 12345 --inline --resolution open
+
+# Bitbucket
+atlx bb pr list --mine --waiting
+atlx bb pr diff 42 --grep validate_token
+atlx bb pr merge 42 --strategy squash --if-head 3f2a9c1b7e44 --yes
+atlx bb pipeline log --failed --branch main
+
+# Everything else
+atlx search 'login timeout' --limit 5
+atlx api jira /rest/api/3/myself
 ```
 
-`--dir` picks another directory. Installing again is safe: files that differ
-are only replaced with `--force`. A test parses every command in the skill, so
-it can't drift from the CLI.
+The full list, with every flag, is in `atlx describe` and in the generated
+skill references ([skills/atlx/references](skills/atlx/references)).
 
-### Body formats
+### `atlx describe`
 
-Bodies default to `html` and accept `markdown` and `plain`. Confluence
-stores HTML as-is. Jira descriptions/comments are converted to ADF: headings,
-nested lists, task lists, tables, code blocks, quotes, links, images, line
-breaks and bold/italic/underline/strikethrough/code marks survive. Reads
-(`--format md`, Jira descriptions and comments) come back as GitHub-flavoured
-Markdown.
+The CLI documents itself as JSON, generated from the same tree and record
+registry that run the commands, so it cannot drift:
 
-Errors go to stderr with a non-zero exit code. In `search`, a failing product is
-reported inline (`{"error": ...}`) so the other results still come through.
+```sh
+atlx describe                      # every command: path, summary, effect
+atlx describe jira                 # one product
+atlx describe jira issue list      # one command's full contract
+atlx describe --all                # every command's full contract
+atlx describe --records            # record types and their fields
+atlx describe --errors             # error codes and exit codes
+```
 
-## Output controls
+A command's contract lists its positionals and flags (type, required,
+default, allowed values, environment variable), its `effect` (`read`,
+`write` or `destructive`), whether it needs `--yes` (`confirm`), the record
+it returns with each field's type and whether it is in the default view,
+examples, and the exit codes it can return. The top-level `contract` number
+is raised on any breaking change to records, the envelope or exit codes.
+`--help` is still there for people.
 
-- **`--select <paths>`** keeps only the listed comma-separated dot paths of the
-  JSON or JSONL output, e.g. `--select data.issues.key,data.issues.status.name`. A step that
-  meets an array applies to every element, and the result keeps the original
-  nesting. Paths that don't exist are skipped; if none matches, the full output
-  is printed with a warning on stderr. A leading `data.` is optional, and
-  the envelope's `apiVersion`, `command` and `meta` are kept.
-  `@compact`, `@evidence` and `@rows` expand to a
-  per-command list (Jira work items, Confluence pages and search, Bitbucket
-  repositories, pull requests and pipelines, user search); an unknown preset is
-  an error that lists the valid ones. Error envelopes are never projected. In
-  text mode the flag is ignored with a warning.
-- **`--output-file <path>`** writes what would have gone to stdout into the
-  file (creating missing directories, replacing an existing file) and prints
-  `stdout=<path>` instead. Errors are written there too and keep their exit
-  code. With `confluence content get --body-only --output-file page.html -o
-  json`, the page body goes to the file and stdout gets the rest of the result,
-  including `data.snapshotToken`, with `data.body.outputFile` pointing at the file, ready
-  for `content update --snapshot-token`.
-- **`--output-summary [none|stats|auto|inline]`** (JSON and JSONL only) writes
-  the full output to `--output-file`, or to a fresh file under
-  `$TMPDIR/atlx/`, and prints a YAML envelope instead: `output_files` (path,
-  lines, bytes), the command, and then either the payload itself
-  (`stdout_inline`) or its key counts and a type sketch (`stdout_stats`,
-  `stdout_shape`). `auto` (the default level) inlines payloads under 10 KiB
-  (`ATLX_INLINE_LIMIT` changes this), `inline` always does, `stats` never does,
-  and `none` turns the envelope off. The envelope ends with `---END---`.
-- **`--agent-fields <paths>`** only matters with `--output-summary`: the
-  envelope then inlines just those paths (relative to the whole payload, presets
-  allowed), and the projection is also saved as `<name>.compact.json` next to
-  the full output. Unlike `--select`, it never changes the full output file.
-- **`--api-version v2`** is accepted; any other version is rejected.
+## Output
 
-## JSON output
+When stdout is a terminal atlx prints text tables; when it is piped it prints
+one line of compact JSON. `-o/--output` (or `ATLX_OUTPUT`) picks one:
 
-Jira, Confluence, user and account commands print an envelope:
+| `-o` | Prints |
+| --- | --- |
+| `json` | the envelope, one line |
+| `jsonl` | one record per line, then a trailer `{"_end":{"next":…,"truncated":…,"errors":…}}` |
+| `ids` | one primary ID per line, to pipe into another command |
+| `text` | tables and fields for people |
+
+```sh
+atlx jira issue list --jql 'project = PROJ AND status = Open' -o ids | atlx jira issue get - --fields key,title,description
+```
+
+### The envelope
+
+Every command, in every product, prints the same shape:
 
 ```json
-{
-  "apiVersion": "v2",
-  "command": "jira.workitem.query",
-  "request": {"jql": "project = PROJ", "site": "acme.atlassian.net", "maxResults": 25},
-  "data": {"issues": [{"id": "10001", "key": "PROJ-1", "summary": "...", "status": {"id": "3", "name": "Done", "statusCategory": {"key": "done", "name": "Done"}}}]},
-  "pageInfo": {"hasNextPage": true, "nextCursor": "..."},
-  "meta": {"resourceClass": "entity", "sourceMode": "rest", "resourceType": "jira.workitem"}
-}
+{"ok":true,"data":{…},"next":"o:25","truncated":[…],"warnings":[…]}
+{"ok":false,"error":{"code":"not_found","message":"…","hint":"…","retryable":false}}
+{"ok":false,"partial":true,"data":[…],"errors":[{"input":"PROJ-9","error":{…}}]}
 ```
 
-- `command` is the operation name, which is not always the CLI path
-  (`jira.workitem.transitions` for `transitions query`, `user-search.query`
-  for `user search`, `user.get` for `whoami`). `request` echoes the inputs.
-  `pageInfo` appears only when there is another page (Jira comment and
-  changelog pages always print it); pass its `nextCursor` to
-  `--after`.
-- `data` mostly keeps Jira's and Confluence's own REST key names: `jira workitem get` prints the REST issue with its fields next to
-  `key` (`.data[0].status.name`, `.data[0].description` as ADF), `query` and
-  `search` print compact rows (`.data.issues[]`), `space query` prints
-  `projects`, `board query` prints `boards`. Avatar and icon URLs are left
-  out.
-- Reading several IDs at once (`jira workitem get A B`, `confluence content
-  get 1 2`) gives `data: {items: [{input, ok, data | error}], summary:
-  {requested, returned, succeeded, failed, omitted, truncated}}`, mirrored in
-  `meta.acquisition`.
-- Bitbucket commands print Bitbucket's REST objects without an envelope: `repo query` is a list of repositories, `pull-requests query` is
-  `{values, page, pagelen, returned, hasNextPage, hasMore}`, `pull-requests
-  get --comments --diff --statuses` adds `_comments`, `_diffstat` and
-  `_statuses`, `pipeline query` adds `_repo`, and `pipeline get --logs`
-  adds `log`, `log_total_lines` and `log_truncated` to each step. Batches are
-  `{workspace, repository, items, summary, partial}`. `pull-requests
-  diff-line` lists `{path, type, line, fromLine, text, hunk}` for each match.
-- `-o jsonl` prints one line per element of the main collection
-  (`data.issues`, `data.items`, a list `data`, ...), each with a `_twg`
-  locator `{command, resourceType, collection, index}`.
-- Text output shows the `data` part as fields and tables.
+- `ok` is true exactly when the exit code is 0.
+- `data` is a list for `list`, `search` and multi-ID `get`, and an object
+  otherwise. There is no wrapper key around collections. (The top-level
+  `search` returns an object keyed by product, and `api` puts the REST response
+  in `data` untouched.)
+- `next` appears on every `list` and `search`: a cursor when there is more,
+  `null` when there is no more.
+- `truncated` and `warnings` appear only when they have entries.
+- In JSON modes stdout carries exactly one document and stderr stays empty.
+- `--dry-run` prints `{"ok":true,"dryRun":true,"data":{"request":{…}}}`
+  (see [Writing safely](#writing-safely)).
 
-## Scope
+### Records and fields
 
-- **API token authentication**: atlx uses Atlassian and Bitbucket API tokens
-  with HTTP Basic auth (`atlx login`, `atlx setup bitbucket`, or `ATLX_*`
-  environment variables). There is no OAuth flow.
-- **Public REST APIs only**: features that need Atlassian's Teamwork Graph,
-  GraphQL gateway or Rovo (`rovo`, `work`, `context`, `docs`, `org-tree`, ...)
-  are out of scope; `atlx search` covers cross-product search over REST.
-  COMPAT.md marks these ⛔. Running one fails with "not supported by atlx
-  (requires Teamwork Graph)" and exit code 2; a command that is planned but
-  not built yet fails with a pointer to its issue.
-- **Not affiliated with Atlassian**, and not a replacement for twg. Shared
-  command names are a convenience; atlx's behavior is defined by this README
-  and its tests, not by another tool.
+Each command returns a registered record: flat, the same field names across
+products for the same idea (`id`, `key`, `title`, `url`, `created`,
+`updated`, `author`, `body`), people as `{id, name}`, and no avatar URLs or
+`self` links. Jira custom fields appear under their display names.
+
+- The default view holds the few fields that answer most questions. `list`
+  never includes bodies; `get` includes `body` (or `description`) as
+  Markdown.
+- `--fields key,status,assignee.name` picks fields from the full record. An
+  unknown name is a usage error (exit 2) that lists the valid ones.
+- `--full` prints every field of the record.
+- `--raw` prints the REST payload unprojected.
+- `--output-file PATH` writes `data` (or the body, with `--body-only`) to a
+  file and prints `{"file","bytes","lines"}` instead.
+
+### Paging
+
+Every `list` and `search` takes `--limit N` (default 25, at most 1000 per
+invocation; atlx fetches as many REST pages as it needs), `--cursor` and
+`--all` (up to the 1000 cap). To read more, pass the envelope's `next` back:
+
+```sh
+atlx confluence page list --space ENG --limit 100
+atlx confluence page list --space ENG --limit 100 --cursor "$NEXT"   # the previous result's next
+```
+
+The cursor is opaque: atlx encodes offsets, page numbers or the API's own
+tokens in it. A few Bitbucket scans that cannot resume (`pr list --mine`, for
+example) return `next: null` with an `incomplete` warning when they stopped
+early.
+
+### Truncation
+
+Large text is cut at a budget, on a block boundary, and the cut is announced
+in the envelope, never inside the text:
+
+```json
+"truncated":[{"field":"data.body","shown":20000,"total":181234,"unit":"chars","more":"--body-offset 20000"}]
+```
+
+Budgets: bodies 20 000 characters (`--body-offset`), pull request diffs
+40 000 characters (`--diff-offset`), repository files 20 000 characters
+(`--content-offset`), pipeline logs the last 200 lines of each step
+(`--log-offset`). `--max-chars N` changes a character budget and
+`--max-chars 0` turns it off. For Confluence pages, `page get --outline` and
+`--section <heading>` read part of a page instead. Text-mode table cells keep
+their own `…` cut.
 
 ## Errors and exit codes
 
-In `json` and `jsonl` mode (set with `-o`, or the default
-when stdout is piped), a failed command prints an error envelope on **stdout**
-(on one line for `jsonl`). A readable report always goes to **stderr**.
+A failure prints an error envelope on stdout in JSON modes, and a readable
+report on stderr in text mode:
 
 ```json
-{
-  "ok": false,
-  "error": {
-    "code": "TWG_TOOL_EXECUTION_FAILED",
-    "kind": "twg_tool_execution_failed",
-    "message": "Issue does not exist or you do not have permission to see it.",
-    "statusCode": 404,
-    "requestId": "8c1f6a5a9eae434c",
-    "downstreamError": {"message": "Issue does not exist ...", "statusCode": 404, "service": "backend"},
-    "category": "not_found",
-    "method": "GET",
-    "url": "https://acme.atlassian.net/rest/api/3/issue/NOPE-1?fields=...",
-    "retry": {"recommended": false, "guidance": "do_not_retry_unchanged"}
-  }
-}
+{"ok":false,"error":{"code":"conflict","message":"page 12345 is at version 9, you edited version 7","hint":"re-read it (`atlx confluence page get 12345`), re-apply your change, pass --if-version 9","retryable":false}}
 ```
 
-- `code` is one of a fixed set, all with a `TWG_` prefix that stays stable
-  for scripts that match on it. `TWG_RATE_LIMITED` (429) and
-  `TWG_UPSTREAM_UNAVAILABLE` (502, 503, 504) come with `retry_with_backoff`.
-  `TWG_NETWORK_ERROR` and `TWG_REQUEST_TIMEOUT` come with `retry_later`. The
-  other codes are `TWG_UPSTREAM_FAILURE` (other 5xx),
-  `TWG_TOOL_EXECUTION_FAILED` (other HTTP errors) and `TWG_COMMAND_FAILED`
-  (local failures). `kind` is `code` in lower case.
-- `statusCode` is the HTTP status. Local failures report 400
-  (invalid arguments) or 401 (missing credentials). `downstreamError` appears
-  only when a server actually answered.
-- `category` (atlx extra) is a stable class: `auth` (401), `forbidden` (403),
-  `not_found` (404, 410), `conflict` (409, 412), `validation` (400, 422 and
-  other 4xx), `rate_limited` (429), `server` (5xx), `network`, `timeout`,
-  `config` (missing site, email or token), `usage` (for example a missing
-  required argument) or `other`.
-- `hint`, `method`, `url`, `traceId` and `requestId` appear when they are known.
-  URLs never include credentials, and request headers are never printed.
+- `code` is one of a closed set (below). `hint` says what to do next.
+- When a server answered, `status`, `request` (`method`, `url`) and
+  `requestId` are added.
+- `retryable` is true for classes worth retrying later; `retryAfterMs` is
+  given when the service said. atlx has already retried 429s and, for
+  idempotent requests, 502/503/504 and transport errors.
+- A network error or timeout on a write adds `"writeState":"unknown"`: the
+  write may or may not have happened, so read before retrying.
+- Jira field errors come through as `error.fields`; refused bodies list the
+  nodes in `error.losses`.
+- Usage errors from the argument parser are structured too, with
+  `suggestions`.
+- URLs never include credentials, and request headers are never printed.
 
-In text mode, stdout stays empty and stderr shows `✗ Failed <command>.`
-followed by the same report (`Error:`, `Code:`, `HTTP status:`, ...).
+| Exit | `error.code` | What to do |
+| --- | --- | --- |
+| 0 | | success |
+| 1 | `validation`, `server` (after retries), `other` | read `error` |
+| 2 | `usage` | fix the command; see `suggestions` or `atlx describe` |
+| 3 | partial: some inputs of a multi-input command failed | use `data`, inspect `errors` |
+| 4 | `config`, `auth`, `forbidden` | stop and ask the person |
+| 5 | `not_found` | check the ID; the item may also be invisible to this account |
+| 6 | `conflict` | re-read, re-apply, retry |
+| 7 | `rate_limited`, `network`, `timeout` | retry later |
+| 8 | `refused`: a safety guard stopped a write | do not work around it; ask if unsure |
 
-Multi-ID reads (`jira workitem get A B`, `confluence content get`,
-`bb pull-requests get`) carry on past failures. Each failed item looks like
-`{"input": "B", "ok": false, "error": {"message", "status", "code",
-"category"}}`, and `summary` counts the requested, succeeded and failed inputs.
-With `--strict`, any failure makes the whole command fail.
+Multi-ID reads carry on past failures and keep the input order; failed inputs
+go to `errors` and the command exits 3. With `--strict` any failure fails the
+whole command with that failure's exit code. `atlx describe --errors` prints
+this table as JSON.
 
-`atlx search` reports a failed product as `{"error": {...}}`, using the same
-`error` object.
+## Writing safely
 
-### Exit codes
+- **`--dry-run`** works on every command. It is enforced in the HTTP client:
+  reads run normally, and the first write is printed instead of sent.
+  Confluence `page update` and `page edit` also print a Markdown diff of the
+  change.
+- **Read-only mode** (`--read-only`, `ATLX_READ_ONLY=1`, or `read_only = true`
+  in a profile) refuses every write with `refused`, exit 8, including writes
+  through `api`. Reads sent as POST (Jira bulk fetch, Bitbucket code
+  search) still work.
+- **`--yes`** is required on every destructive command, and only there:
+  deletes and purges, archives, merges and declines, permission and sharing
+  changes, version restores, and everything customers see in JSM.
+  `atlx describe` marks them `destructive`, and a command's contract shows
+  `"confirm":true`. Without `--yes`
+  the command fails with `refused` (exit 8) and the hint shows the same
+  command with `--dry-run`. Nothing ever prompts.
+- **`--if-version N`** is required on Confluence `page update` and `page
+  edit`: the `version` of the page you read. If the page changed since, the
+  write fails with `conflict` (exit 6) and nothing is sent.
+- **`--if-head <sha>`** on `bb pr merge` merges only if the pull request's
+  source head is still that commit (`head` in `pr get` and `pr checks`); a
+  mismatch exits 6 and sends no merge.
+- Jira issues have no version or ETag, so there is no check there: read just
+  before you write.
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Success |
-| `1` | Any failure: API, network, configuration or argument errors (unknown flags included), a `--strict` batch with a failed input, or a batch where every input failed |
-| `2` | A command atlx doesn't support because it needs Teamwork Graph, Rovo or the GraphQL gateway (`category: "unsupported"`) |
-| `3` | Partial batch: some, but not all, inputs of a multi-ID read failed. The output is still printed |
+## Bodies
 
-`atlx doctor --strict` keeps its own non-zero exit when checks fail. To tell
-failures apart, use the envelope's `category`, `statusCode` and `retry`.
+Jira and Confluence store rich text as ADF. atlx reads and writes Markdown by
+default and converts it through one checked pipeline; Bitbucket bodies are
+Markdown already. `--body-format` picks another format:
+
+| Format | Read | Write |
+| --- | --- | --- |
+| `markdown` (default) | ADF rendered as Markdown | parsed to ADF; refused if anything has no ADF form |
+| `adf` | the stored ADF JSON | ADF JSON, sent unchanged |
+| `storage` (Confluence) | storage XHTML, unchanged | checked for well-formedness and known elements, sent unchanged |
+| `plain` | | text; blank lines separate paragraphs |
+
+HTML is not an input format.
+
+**The Markdown dialect** is CommonMark with GFM tables, strikethrough and
+task lists, plus panels as alert blockquotes (`> [!NOTE]`, `> [!TIP]`,
+`> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]`, `> [!SUCCESS]`), expand
+blocks as `<details>`/`<summary>`, mentions `@[Name](accountid:ID)`, status
+lozenges `[TEXT](status:green)`, dates `[2026-01-31](date:2026-01-31)`,
+emoji `:shortname:`, smart links `[url](url "card")`, code blocks with a
+language, and `<u>`, `<sub>`, `<sup>`, `<br>`.
+
+**The guarantee.** For a document built only from those constructs, ADF to
+Markdown to ADF gives the same document (ignoring `localId`s and layout
+attributes), and the test suite checks it for each construct. For anything
+else, atlx says so instead of losing it:
+
+- On read, the envelope carries a `lossy_body` warning naming the nodes, and
+  the Markdown has a marker where each one was
+  (`<!-- atlx: extension:jira (not shown) -->`).
+- A Markdown write containing something with no ADF form (raw HTML, for
+  example) is refused, exit 8, listing each construct. Nothing is sent.
+- A full-body Markdown replace (`confluence page update`, `jira issue update
+  --description`, comment updates) of a body that holds content Markdown
+  cannot express (macros, layouts, non-image media) is refused, exit 8,
+  naming the nodes it would destroy. `--allow-lossy --yes` overrides.
+- `confluence page edit` changes only the nodes its operations target and
+  sends every other node back unchanged, so it is the safe way to edit a
+  rich page:
+
+```sh
+atlx confluence page edit 12345 --if-version 7 --edits '[{"name":"replaceText","find":"v1.1","replace":"v1.2"}]' --dry-run
+```
+
+The dialect, the edit operations and the rules are written up in
+[skills/atlx/references/bodies.md](skills/atlx/references/bodies.md).
+
+## Metadata cache
+
+atlx caches a few slow-changing lookup tables so records stay readable and
+inputs forgiving: Jira field names (so `--field 'Story Points=3'` works),
+issue types and priorities, Confluence space key to ID, and the Bitbucket
+user. They live in `$XDG_CACHE_HOME/atlx/` (mode 0600) for 24 hours, and an
+unknown name triggers one refetch before failing. Issues, pages, comments,
+pull requests, diffs and logs are never written to disk. `--no-cache` or
+`ATLX_NO_CACHE=1` turns it off; `atlx cache path` and `atlx cache clear`
+manage it.
+
+## Agent skill
+
+atlx ships an agent skill (a `SKILL.md` with references) that teaches a
+coding agent the grammar, the output and exit-code contract and the write
+rules in about 1 500 tokens, and points it at `atlx describe` for the rest.
+
+```sh
+atlx skill install                 # ~/.claude/skills/atlx
+atlx skill install --target agents # .agents/skills/atlx in this directory
+atlx skill print
+```
+
+`install` leaves files that differ alone unless `--force` is given. The
+per-product references are generated from `atlx describe`, so they match the
+binary they ship with. Source: [skills/atlx](skills/atlx/SKILL.md).
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-module layout, the "adding a command" checklist and conventions, and
-[AGENTS.md](AGENTS.md) for a condensed version aimed at coding agents. Each
-product's API calls live in `src/<product>.rs`; its commands live in
-`src/cli/<product>.rs`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout, the definition of done
+and the conventions, and [AGENTS.md](AGENTS.md) for the short version for
+coding agents.
 
-### Testing
-
-Run the offline unit and mock-HTTP integration test suite with:
+The test suite runs offline against a mock HTTP server:
 
 ```sh
 cargo test
 ```
 
-Opt-in read-only live smoke tests against real Atlassian Cloud / Bitbucket APIs
-are marked `#[ignore]` in `tests/live_smoke.rs`. Run them with:
+Opt-in read-only live smoke tests are `#[ignore]`d in `tests/live_smoke.rs`:
 
 ```sh
 ATLX_SITE=acme ATLX_EMAIL=you@acme.com ATLX_TOKEN=... cargo test -- --ignored
 ```
 
-Optional environment variables for deeper checks: `ATLX_TEST_ISSUE`,
-`ATLX_TEST_PAGE`, `ATLX_BB_WORKSPACE`, and `ATLX_BB_REPO`.
+Optional variables for deeper checks: `ATLX_TEST_ISSUE`, `ATLX_TEST_PAGE`,
+`ATLX_BB_WORKSPACE`, `ATLX_BB_REPO`.
 
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option. Unless you explicitly state otherwise,
-any contribution you submit for inclusion in atlx is dual licensed as above,
-without any additional terms or conditions.
+[MIT license](LICENSE-MIT) at your option. Unless you explicitly state
+otherwise, any contribution you submit for inclusion in atlx is dual licensed
+as above, without any additional terms or conditions.
 
-atlx is an independent project and is not affiliated with or endorsed by Atlassian.
+atlx is an independent project and is not affiliated with or endorsed by
+Atlassian.
