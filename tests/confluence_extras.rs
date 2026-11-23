@@ -4,6 +4,7 @@
 mod common;
 
 use atlx::confluence::extras::{self, Scope, TaskFilter, TemplateQuery, TemplateType};
+use atlx::markup::BodyFormat;
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
 
@@ -13,21 +14,38 @@ fn ok(body: Value) -> MockResponse {
 
 #[test]
 fn tasks_find_the_type_and_follow_the_cursor() {
+    let doc = json!({"type": "doc", "version": 1, "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "ship it"}]}
+    ]});
     let srv = MockServer::with_responses([
         MockResponse::json(404, json!({"errors": [{"status": 404}]})),
         ok(json!({"id": "7"})),
-        ok(json!({"results": [{"id": "1"}], "_links": {"next": "/wiki/api/v2/tasks?cursor=c2"}})),
-        ok(json!({"results": [{"id": "2"}]})),
+        ok(
+            json!({"results": [{"id": "1", "body": {"atlas_doc_format": {"value": doc.to_string()}}}],
+                  "_links": {"next": "/wiki/api/v2/tasks?cursor=c2"}}),
+        ),
     ]);
-    let out = extras::tasks(&srv.client(), Some("7"), None, TaskFilter::Open, 10).unwrap();
-    assert_eq!(out["results"].as_array().unwrap().len(), 2);
-    assert_eq!(out["nextCursor"], Value::Null);
+    let out = extras::tasks(
+        &srv.client(),
+        Some("7"),
+        None,
+        TaskFilter::Open,
+        10,
+        Some("c1"),
+    )
+    .unwrap();
+    assert_eq!(out["results"][0]["body"], "ship it");
+    assert_eq!(out["nextCursor"], "c2");
     let r = srv.requests();
     assert_eq!(r[2].path, "/api/v2/tasks");
     assert_eq!(r[2].query_param("blogpost-id").as_deref(), Some("7"));
     assert_eq!(r[2].query_param("page-id"), None);
     assert_eq!(r[2].query_param("status").as_deref(), Some("incomplete"));
-    assert_eq!(r[3].query_param("cursor").as_deref(), Some("c2"));
+    assert_eq!(r[2].query_param("cursor").as_deref(), Some("c1"));
+    assert_eq!(
+        r[2].query_param("body-format").as_deref(),
+        Some("atlas_doc_format")
+    );
 }
 
 #[test]
@@ -122,10 +140,10 @@ fn template_and_permissions() {
         ok(json!({"results": []})),
     ]);
     let c = srv.client();
-    extras::template(&c, "9").unwrap();
+    extras::template(&c, "9", BodyFormat::Storage).unwrap();
     extras::permissions(&c, Some("55"), 25, None).unwrap();
     extras::permissions(&c, None, 25, Some("next")).unwrap();
-    assert!(extras::template(&c, "..").is_err());
+    assert!(extras::template(&c, "..", BodyFormat::Markdown).is_err());
     let r = srv.requests();
     assert_eq!(r.len(), 3);
     assert_eq!(r[0].query_param("expand").as_deref(), Some("body.storage"));

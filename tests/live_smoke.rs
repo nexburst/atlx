@@ -13,7 +13,7 @@
 
 use atlx::bitbucket::{self, RepoQuery};
 use atlx::config::{Bitbucket, Config};
-use atlx::confluence::{self, Detail, GetOpts as ConfGetOpts, ReadFormat};
+use atlx::confluence::{self, GetOpts as ConfGetOpts};
 use atlx::jira::{self, GetOpts as JiraGetOpts};
 
 fn env_opt(key: &str) -> Option<String> {
@@ -90,18 +90,8 @@ fn live_confluence_spaces_and_optional_page() {
     );
 
     if let Some(page) = env_opt("ATLX_TEST_PAGE") {
-        let content = confluence::get(
-            &client,
-            &page,
-            &ConfGetOpts {
-                detail: Detail::Summary,
-                format: ReadFormat::Md,
-                draft: false,
-                reference_space: None,
-                sections: &[],
-            },
-        )
-        .expect("confluence::get failed");
+        let content = confluence::get(&client, &page, &ConfGetOpts::default())
+            .expect("confluence::get failed");
         assert!(
             content["id"].as_str().is_some(),
             "expected content id in {content}"

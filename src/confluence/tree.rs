@@ -128,26 +128,26 @@ impl Walk<'_> {
     }
 }
 
-/// A page ID or URL, else a space key, ID or URL.
-pub fn tree(c: &Client, reference: &str, depth: usize, only: Option<NodeType>) -> Result<Value> {
-    let depth = depth.min(MAX_DEPTH);
-    let mut walk = Walk {
+fn walker(c: &Client, only: Option<NodeType>) -> Walk<'_> {
+    Walk {
         c,
         only,
         left: MAX_NODES,
         truncated: false,
-    };
-    let reference = reference.trim();
-    let numeric = !reference.is_empty() && reference.bytes().all(|b| b.is_ascii_digit());
-    if let Ok(id) = content_id(reference) {
-        match c.get(&format!("/api/v2/pages/{}", enc(&id)), &[]) {
-            Ok(page) => return page_tree(&mut walk, &id, &page, depth),
-            // A number can be a space's ID as well.
-            Err(e) if numeric && not_found(&e) => {}
-            Err(e) => return Err(e),
-        }
     }
-    space_tree(&mut walk, reference, depth)
+}
+
+/// `page tree`: a page's ancestors and its descendants to `depth`.
+pub fn page(c: &Client, reference: &str, depth: usize, only: Option<NodeType>) -> Result<Value> {
+    let id = content_id(reference)?;
+    let page = c.get(&format!("/api/v2/pages/{}", enc(&id)), &[])?;
+    page_tree(&mut walker(c, only), &id, &page, depth.min(MAX_DEPTH))
+}
+
+/// `space tree`: a space's top-level pages and their descendants to
+/// `depth`.
+pub fn space(c: &Client, reference: &str, depth: usize, only: Option<NodeType>) -> Result<Value> {
+    space_tree(&mut walker(c, only), reference.trim(), depth.min(MAX_DEPTH))
 }
 
 fn page_tree(walk: &mut Walk, id: &str, page: &Value, depth: usize) -> Result<Value> {

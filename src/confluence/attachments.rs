@@ -1,4 +1,4 @@
-//! `content attachments list|get|download|upload|delete`.
+//! `page attachment list|get|download|upload|delete`.
 //!
 //! Reads and deletes use REST v2. Uploads go through v1, the only public
 //! endpoint that accepts file data: a new file name creates an attachment, an
@@ -71,7 +71,7 @@ pub struct ListOpts<'a> {
     pub filename: Option<&'a str>,
 }
 
-/// `content attachments list --id`
+/// `page attachment list --page`
 pub fn list(
     c: &Client,
     reference: &str,
@@ -101,7 +101,7 @@ pub fn list(
     Ok(listing(&v, |a| with_url(c, a)))
 }
 
-/// `content attachments get --attachment-id [--at-version]`
+/// `page attachment get`
 pub fn get(c: &Client, attachment: &str, version: Option<u64>) -> Result<Value> {
     let id = attachment_id(attachment)?;
     let n = version.map(|v| v.to_string());
@@ -110,7 +110,7 @@ pub fn get(c: &Client, attachment: &str, version: Option<u64>) -> Result<Value> 
     Ok(with_url(c, &v))
 }
 
-/// `content attachments download --attachment-id [--out] [--at-version]
+/// `page attachment download [--out] [--version]
 /// [--force]`. Without `--out` the file is saved under its own name in the
 /// current directory.
 pub fn download(
@@ -148,7 +148,7 @@ pub fn download(
     }))
 }
 
-/// `content attachments upload --id --file [--comment --minor-edit]`. Returns the
+/// `page attachment upload --page --file [--comment --minor-edit]`. Returns the
 /// attachment with `action: "created"` or `"updated"`.
 pub fn upload(
     c: &Client,
@@ -221,7 +221,7 @@ pub fn upload(
     }))
 }
 
-/// `content attachments delete --attachment-id`: moves it to the trash, or
+/// `page attachment delete`: moves it to the trash, or
 /// removes an already trashed one for good with `purge`.
 pub fn delete(c: &Client, attachment: &str, purge: bool) -> Result<Value> {
     let id = attachment_id(attachment)?;

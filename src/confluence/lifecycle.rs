@@ -1,5 +1,5 @@
 //! Moving, copying, trashing and archiving content, draft actions, space
-//! lifecycle, and the appearance extras of `content create`.
+//! lifecycle, and the appearance extras of `page create`.
 
 use super::{ContentType, enc, space_id, try_content, with_links};
 use crate::client::{ApiError, Client, ErrorKind};
@@ -82,7 +82,7 @@ pub fn exact_content(c: &Client, reference: &str, space: Option<&str>) -> Result
     let looks_like_link = r.starts_with("ari:") || r.contains("://");
     let Some(space) = space.filter(|_| !looks_like_link && !r.is_empty()) else {
         return Err(usage(format!(
-            "'{r}' is not a content ID, ARI or URL (pass --reference-space to look up an exact title)"
+            "'{r}' is not a content ID, ARI or URL (pass --space to look up an exact title)"
         )));
     };
     let sid = space_id(c, space)?;
@@ -149,7 +149,7 @@ fn space_by(c: &Client, s: &str) -> Result<Value> {
 
 // --- content -----------------------------------------------------------------
 
-/// Where `content move` puts the content.
+/// Where `page move` puts the content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Position {
     Append,
@@ -181,7 +181,7 @@ pub fn move_content(c: &Client, id: &str, position: Position, target: &str) -> R
     Ok(json!({"id": id, "position": position.name(), "targetId": target, "moved": true}))
 }
 
-/// Where `content copy` puts the copy.
+/// Where `page copy` puts the copy.
 #[derive(Clone, Copy, Debug)]
 pub enum CopyTo<'a> {
     Parent(&'a str),
@@ -244,7 +244,7 @@ pub fn purge(c: &Client, id: &str) -> Result<Value> {
     let (kind, now) = try_content(|k| c.get(&kind_path(k, id), &[("status", "trashed")]))?;
     if now["status"] != "trashed" {
         return Err(usage(format!(
-            "content {id} isn't in the trash; run `content trash` first"
+            "content {id} isn't in the trash; move it there first with `atlx confluence page delete {id} --yes`"
         )));
     }
     c.delete(&kind_path(kind, id), &[("purge", "true")])?;
@@ -390,7 +390,7 @@ pub fn publish(
             "version": {"number": published.map_or(1, |n| n + 1)},
         }),
     )?;
-    Ok(with_links(c, v))
+    Ok(with_links(c, v, kind))
 }
 
 /// Only a draft that was never published: REST documents `draft=true` for
@@ -471,7 +471,6 @@ pub struct NewSpace<'a> {
     pub name: &'a str,
     pub description: Option<&'a str>,
     pub private: bool,
-    pub dry_run: bool,
 }
 
 fn plain(text: &str) -> Value {
@@ -491,10 +490,7 @@ pub fn space_create(c: &Client, n: &NewSpace) -> Result<Value> {
     } else {
         "/rest/api/space"
     };
-    if n.dry_run {
-        return Ok(json!({"dryRun": true, "method": "POST", "path": path, "body": req}));
-    }
-    c.post(path, &req)
+    Ok(super::space_summary(c, &c.post(path, &req)?))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -539,10 +535,11 @@ pub fn space_update(c: &Client, space: &str, s: &SpaceChange) -> Result<Value> {
         let id = id_in(h).ok_or_else(|| usage("--homepage takes a page ID, ARI or URL"))?;
         req.insert("homepage".into(), json!({"id": id}));
     }
-    c.put(
+    let v = c.put(
         &format!("/rest/api/space/{}", enc(key)),
         &Value::Object(req),
-    )
+    )?;
+    Ok(super::space_summary(c, &v))
 }
 
 /// Permanent. Confluence does it as a long-running task.

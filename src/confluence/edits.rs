@@ -1,14 +1,19 @@
-//! `content update --edits`: targeted changes to a page's ADF body.
+//! `page edit`: targeted changes to a page's ADF body.
 //!
-//! The operations follow twg's format: an object with a `name`, a node's ADF
-//! `localId` and an HTML `value`. atlx also accepts a few heading- and
-//! text-based operations (atlx extras) for pages whose nodes have no
-//! `localId`. Every operation is applied to a copy of the document, so
-//! one failure leaves nothing changed.
+//! An operation is a JSON object with a `name` and its arguments: a node's
+//! ADF `localId` (from `page get --outline` or `--body-format adf`), a
+//! heading, or text to find, and a `value`. Values are Markdown by default,
+//! or `"format": "adf"` (an ADF node, a list of nodes or a document) or
+//! `"plain"`. A value that cannot be converted without losing something is
+//! refused; HTML and storage values are not accepted.
+//!
+//! Every operation is applied to a copy of the document, so one failure
+//! leaves nothing changed, and nodes no operation targets keep their JSON
+//! exactly.
 
 use super::sections::{Heading, adf_plain, match_headings, no_match};
 use crate::client::ApiError;
-use crate::markup::{TextFormat, adf_to_storage, to_adf};
+use crate::markup::{BodyError, BodyFormat, markdown_to_adf, parse_adf, text_to_adf};
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
@@ -113,11 +118,38 @@ pub fn parse(json_text: &str) -> Result<Vec<Op>> {
     }
     list.iter()
         .enumerate()
-        .map(|(i, e)| parse_one(e).map_err(|err| usage(format!("edit {}: {err}", i + 1))))
+        .map(|(i, e)| {
+            parse_one(e).map_err(|err| match err {
+                Bad::Usage(m) => usage(format!("edit {}: {m}", i + 1)),
+                Bad::Body(mut b) => {
+                    b.message = format!("edit {}: {}", i + 1, b.message);
+                    b.into()
+                }
+            })
+        })
         .collect()
 }
 
-fn parse_one(e: &Value) -> Result<Op, String> {
+/// Why an operation was not accepted.
+enum Bad {
+    Usage(String),
+    /// Its value is not valid in its format, or would lose content.
+    Body(BodyError),
+}
+
+impl From<String> for Bad {
+    fn from(s: String) -> Self {
+        Bad::Usage(s)
+    }
+}
+
+impl From<&str> for Bad {
+    fn from(s: &str) -> Self {
+        Bad::Usage(s.to_string())
+    }
+}
+
+fn parse_one(e: &Value) -> Result<Op, Bad> {
     let Some(o) = e.as_object() else {
         return Err("each edit must be a JSON object".into());
     };
@@ -131,15 +163,20 @@ fn parse_one(e: &Value) -> Result<Op, String> {
         .ok_or("missing \"name\"")?;
     let req = |k: &str| str_field(o, args, k).ok_or(format!("{name} needs \"{k}\""));
     let format = match str_field(o, args, "format").as_deref() {
-        None | Some("html") => TextFormat::Html,
-        Some("md" | "markdown") => TextFormat::Markdown,
-        Some("plain") => TextFormat::Plain,
-        Some(f) => return Err(format!("unknown format '{f}' (html, md or plain)")),
+        None | Some("md" | "markdown") => BodyFormat::Markdown,
+        Some("adf") => BodyFormat::Adf,
+        Some("plain") => BodyFormat::Plain,
+        Some(f @ ("html" | "storage")) => {
+            return Err(Bad::Usage(format!(
+                "values can't be {f}: write them in Markdown (the default), or pass \"format\": \"adf\" with ADF nodes"
+            )));
+        }
+        Some(f) => return Err(format!("unknown format '{f}' (markdown, adf or plain)").into()),
     };
-    let value = |required: bool| -> Result<Vec<Value>, String> {
-        match str_field(o, args, "value") {
-            Some(v) => Ok(blocks(&v, format)),
-            None if required => Err(format!("{name} needs \"value\"")),
+    let value = |required: bool| -> Result<Vec<Value>, Bad> {
+        match o.get("value").or_else(|| args.get("value")) {
+            Some(v) => blocks(v, format),
+            None if required => Err(format!("{name} needs \"value\"").into()),
             None => Ok(Vec::new()),
         }
     };
@@ -184,7 +221,7 @@ fn parse_one(e: &Value) -> Result<Op, String> {
             position: match str_field(o, args, "position").as_deref() {
                 None | Some("after") => Position::After,
                 Some("before") => Position::Before,
-                Some(p) => return Err(format!("unknown position '{p}' (before or after)")),
+                Some(p) => return Err(format!("unknown position '{p}' (before or after)").into()),
             },
         },
         "appendNodeToEnd" => Op::AppendNodeToEnd {
@@ -245,16 +282,30 @@ fn parse_one(e: &Value) -> Result<Op, String> {
             },
             value: value(false)?,
         },
-        other => return Err(format!("unknown edit operation '{other}'")),
+        other => return Err(format!("unknown edit operation '{other}'").into()),
     })
 }
 
-/// HTML (or Markdown/plain) -> ADF block nodes.
-fn blocks(s: &str, f: TextFormat) -> Vec<Value> {
-    to_adf(s, f)["content"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+/// An operation's value as ADF block nodes. Markdown that would lose
+/// anything is refused.
+fn blocks(v: &Value, f: BodyFormat) -> Result<Vec<Value>, Bad> {
+    let doc = match (f, v) {
+        (BodyFormat::Adf, Value::String(s)) => parse_adf(s).map_err(Bad::Body)?,
+        (BodyFormat::Adf, Value::Array(nodes)) => {
+            json!({"type": "doc", "version": 1, "content": nodes})
+        }
+        (BodyFormat::Adf, Value::Object(_)) => parse_adf(&v.to_string()).map_err(Bad::Body)?,
+        (BodyFormat::Plain, Value::String(s)) => text_to_adf(s),
+        (_, Value::String(s)) => markdown_to_adf(s).into_lossless().map_err(Bad::Body)?,
+        _ => {
+            return Err("\"value\" must be a string (or ADF JSON with \"format\": \"adf\")".into());
+        }
+    };
+    let nodes = doc["content"].as_array().cloned().unwrap_or_default();
+    if let Some(bad) = nodes.iter().find(|n| !n["type"].is_string()) {
+        return Err(format!("an ADF value node has no \"type\": {bad}").into());
+    }
+    Ok(nodes)
 }
 
 const INLINE: &[&str] = &[
@@ -275,10 +326,21 @@ fn kind(v: &Value) -> &str {
 }
 
 /// Shape new nodes to fit where `like` sits: inline content for an inline
-/// node, list items for a list item, rows for a table row, and so on.
-fn fit(nodes: Vec<Value>, like: &str) -> Vec<Value> {
+/// node, list items for a list item, rows for a table row, and so on. A
+/// value that would only fit by dropping structure (two paragraphs, a list
+/// or a table where inline content goes) is refused.
+fn fit(nodes: Vec<Value>, like: &str) -> Result<Vec<Value>, String> {
     if INLINE.contains(&like) {
-        return nodes
+        let blocks: Vec<&Value> = nodes
+            .iter()
+            .filter(|n| !INLINE.contains(&kind(n)))
+            .collect();
+        if blocks.len() > 1 || blocks.iter().any(|n| kind(n) != "paragraph") {
+            return Err(format!(
+                "the target is inline ({like}); its value must be one paragraph of text"
+            ));
+        }
+        return Ok(nodes
             .into_iter()
             .flat_map(|n| {
                 if INLINE.contains(&kind(&n)) {
@@ -287,7 +349,7 @@ fn fit(nodes: Vec<Value>, like: &str) -> Vec<Value> {
                     n["content"].as_array().cloned().unwrap_or_default()
                 }
             })
-            .collect();
+            .collect());
     }
     if let [one] = nodes.as_slice()
         && kind(one) != like
@@ -295,9 +357,9 @@ fn fit(nodes: Vec<Value>, like: &str) -> Vec<Value> {
         && !children.is_empty()
         && children.iter().all(|c| kind(c) == like)
     {
-        return children.clone();
+        return Ok(children.clone());
     }
-    nodes
+    Ok(nodes)
 }
 
 type Path = Vec<usize>;
@@ -416,13 +478,13 @@ fn apply_one(doc: &mut Value, op: &Op) -> Result<(), String> {
         Op::ReplaceNode { local_id, value } => {
             let p = locate(doc, local_id)?;
             let like = kind(node_at(doc, &p)).to_string();
-            splice(doc, &p, 1, fit(value.clone(), &like), 0);
+            splice(doc, &p, 1, fit(value.clone(), &like)?, 0);
         }
         Op::InsertNodeAfter { local_id, value } | Op::InsertNodeBefore { local_id, value } => {
             let p = locate(doc, local_id)?;
             let like = kind(node_at(doc, &p)).to_string();
             let offset = usize::from(matches!(op, Op::InsertNodeAfter { .. }));
-            splice(doc, &p, 0, fit(value.clone(), &like), offset);
+            splice(doc, &p, 0, fit(value.clone(), &like)?, offset);
         }
         Op::DeleteNode { local_id } => {
             let p = locate(doc, local_id)?;
@@ -566,16 +628,6 @@ pub fn apply(doc: &Value, ops: &[Op]) -> Result<Value> {
     Ok(out)
 }
 
-/// Storage-format rendering with one top-level block per line, for diffs.
-pub fn render_lines(doc: &Value) -> Vec<String> {
-    doc["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(adf_to_storage)
-        .collect()
-}
-
 /// A unified diff of two line lists, with three lines of context.
 pub fn unified_diff(a: &[String], b: &[String], from: &str, to: &str) -> String {
     // Trim the common prefix and suffix, then run an LCS on the middle.
@@ -696,16 +748,55 @@ mod tests {
             ("[]", "no operations"),
             ("[{\"name\":\"zap\"}]", "unknown edit operation"),
             (
-                "[{\"name\":\"replaceNode\",\"value\":\"<p>x</p>\"}]",
+                "[{\"name\":\"replaceNode\",\"value\":\"x\"}]",
                 "needs \"localId\"",
+            ),
+            (
+                "[{\"name\":\"appendNodeToEnd\",\"value\":\"<p>x</p>\",\"format\":\"html\"}]",
+                "can't be html",
             ),
             (
                 "[{\"op\":\"replaceText\",\"find\":\"a\",\"count\":0}]",
                 "count",
             ),
         ] {
-            let e = parse(bad).unwrap_err().to_string();
+            let e = parse(bad).unwrap_err();
+            assert_eq!(
+                ApiError::find(&e).map(|a| a.kind),
+                Some(crate::client::ErrorKind::Usage),
+                "{bad}"
+            );
+            let e = e.to_string();
             assert!(e.contains(want), "{bad}: {e}");
         }
+    }
+
+    #[test]
+    fn lossy_values_are_refused_and_adf_values_are_kept() {
+        let e = parse(r#"[{"name":"appendNodeToEnd","value":"<div>x</div>"}]"#).unwrap_err();
+        let b = e.downcast_ref::<BodyError>().expect("a body error");
+        assert!(b.is_refused());
+        assert!(b.message.starts_with("edit 1:"), "{}", b.message);
+        let node = json!({"type":"extension","attrs":{"extensionKey":"x"}});
+        let ops =
+            parse(&json!([{"name":"appendNodeToEnd","format":"adf","value":node}]).to_string())
+                .unwrap();
+        assert_eq!(ops, [Op::AppendNodeToEnd { value: vec![node] }]);
+    }
+
+    #[test]
+    fn inline_targets_take_one_paragraph() {
+        let doc = json!({"type":"doc","content":[{"type":"paragraph","content":[
+            {"type":"text","text":"a"},{"type":"status","attrs":{"text":"X","localId":"s1"}}]}]});
+        let two = parse(r#"[{"name":"replaceNode","localId":"s1","value":"one\n\ntwo"}]"#).unwrap();
+        assert!(
+            apply(&doc, &two)
+                .unwrap_err()
+                .to_string()
+                .contains("one paragraph")
+        );
+        let one = parse(r#"[{"name":"replaceNode","localId":"s1","value":"**b**"}]"#).unwrap();
+        let out = apply(&doc, &one).unwrap();
+        assert_eq!(out["content"][0]["content"][1]["text"], "b");
     }
 }

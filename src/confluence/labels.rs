@@ -1,4 +1,4 @@
-//! `content labels list|add|remove|watch|unwatch`.
+//! `page label list|create|delete` and `label watch|unwatch`.
 //!
 //! Listing uses REST v2 where it has a labels endpoint for the content type
 //! and v1 otherwise. Adding, removing and watching labels only exist in v1.
@@ -9,14 +9,12 @@ use anyhow::Result;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
-/// `--content-type` on `labels list`.
+/// `--type` on `page label list`. (The public REST API lists no labels
+/// of whiteboards, databases or folders.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum LabelTarget {
     Page,
     Blogpost,
-    Whiteboard,
-    Database,
-    Folder,
     CustomContent,
 }
 
@@ -24,7 +22,7 @@ fn label(l: &Value) -> Value {
     json!({"id": l["id"], "name": l["name"], "prefix": l["prefix"]})
 }
 
-/// `content labels list`. Without `--content-type` the page endpoint is
+/// `page label list`. Without `--type` the page endpoint is
 /// tried first, then the blog post one.
 pub fn list(
     c: &Client,
@@ -32,27 +30,20 @@ pub fn list(
     reference_space: Option<&str>,
     content_type: Option<LabelTarget>,
     limit: usize,
+    cursor: Option<&str>,
 ) -> Result<Value> {
-    if let Some(LabelTarget::Whiteboard | LabelTarget::Database | LabelTarget::Folder) =
-        content_type
-    {
-        return Err(ApiError::unsupported(
-            "Confluence's public REST API has no endpoint that lists whiteboard, database or folder labels",
-        )
-        .into());
-    }
     let id = resolve_id(c, reference, reference_space)?;
     let limit = limit.clamp(1, 250).to_string();
-    let q = [("limit", limit.as_str())];
+    let mut q = vec![("limit", limit.as_str())];
+    if let Some(cur) = cursor {
+        q.push(("cursor", cur));
+    }
     let v2 = |collection: &str| c.get(&format!("/api/v2/{collection}/{}/labels", enc(&id)), &q);
     let v = match content_type {
         None => try_content(|k| v2(k.collection()))?.1,
         Some(LabelTarget::Page) => v2(ContentType::Page.collection())?,
         Some(LabelTarget::Blogpost) => v2(ContentType::Blogpost.collection())?,
         Some(LabelTarget::CustomContent) => v2("custom-content")?,
-        Some(LabelTarget::Whiteboard | LabelTarget::Database | LabelTarget::Folder) => {
-            unreachable!("refused above")
-        }
     };
     Ok(listing(&v, label))
 }
@@ -71,7 +62,7 @@ fn names(labels: &[String]) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// `content labels add`: v1 `POST /rest/api/content/{id}/label`. Returns the
+/// `page label create`: v1 `POST /rest/api/content/{id}/label`. Returns the
 /// content's labels after the change.
 pub fn add(
     c: &Client,
@@ -96,10 +87,10 @@ pub fn add(
         .flatten()
         .map(label)
         .collect();
-    Ok(json!({"id": id, "added": names, "results": results}))
+    Ok(Value::Array(results))
 }
 
-/// `content labels remove`: one v1 `DELETE` per label. A label with a
+/// `page label delete`: one v1 `DELETE` per label. A label with a
 /// prefix other than `global` is addressed as `prefix:name`.
 pub fn remove(
     c: &Client,
@@ -124,7 +115,7 @@ pub fn remove(
     Ok(json!({"id": id, "removed": names}))
 }
 
-/// `content labels watch|unwatch --name`: v1 label watches for the current
+/// `label watch|unwatch`: v1 label watches for the current
 /// user.
 pub fn watch(c: &Client, name: &str, on: bool) -> Result<Value> {
     let name = name.trim();
