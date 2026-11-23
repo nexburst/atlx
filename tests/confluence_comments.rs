@@ -1,10 +1,10 @@
-//! Offline tests for Confluence comment threads (#29).
+//! Offline tests for Confluence comment threads.
 
 mod common;
 
 use atlx::client::{ApiError, ErrorKind};
-use atlx::confluence::{ContentType, ReadFormat, comments};
-use atlx::markup::TextFormat;
+use atlx::confluence::{ContentType, comments};
+use atlx::markup::{Body, BodyFormat, text_to_adf};
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
 
@@ -19,8 +19,22 @@ fn not_found() -> MockResponse {
     )
 }
 
+fn adf(text: &str) -> String {
+    json!({"type": "doc", "version": 1, "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+    ]})
+    .to_string()
+}
+
 fn comment(id: &str) -> Value {
-    json!({"id": id, "version": {"number": 3}, "body": {"storage": {"value": "<p>hi</p>"}}})
+    json!({"id": id, "version": {"number": 3}, "body": {
+        "storage": {"value": "<p>hi</p>"},
+        "atlas_doc_format": {"value": adf("hi")},
+    }})
+}
+
+fn plain(s: &str) -> Body {
+    Body::Adf(text_to_adf(s))
 }
 
 fn kind(e: &anyhow::Error) -> Option<ErrorKind> {
@@ -30,7 +44,7 @@ fn kind(e: &anyhow::Error) -> Option<ErrorKind> {
 fn opts(surface: comments::Surface) -> comments::ListOpts<'static> {
     comments::ListOpts {
         surface,
-        format: ReadFormat::Md,
+        format: BodyFormat::Markdown,
         limit: 25,
         cursor: None,
         sort: None,
@@ -132,7 +146,7 @@ fn replies_stop_at_the_cap_and_say_so() {
         .map(|i| comment(&format!("{i}")))
         .collect();
     let srv = MockServer::with_responses([ok(comment("9999")), ok(json!({"results": many}))]);
-    let out = comments::get(&srv.client(), "9999", None, ReadFormat::Md, true).unwrap();
+    let out = comments::get(&srv.client(), "9999", None, BodyFormat::Markdown, true).unwrap();
     assert_eq!(
         out["replies"].as_array().unwrap().len(),
         comments::MAX_REPLIES
@@ -145,9 +159,9 @@ fn replies_stop_at_the_cap_and_say_so() {
 #[test]
 fn get_detects_inline_comments() {
     let srv = MockServer::with_responses([not_found(), ok(comment("777"))]);
-    let out = comments::get(&srv.client(), "777", None, ReadFormat::Md, false).unwrap();
+    let out = comments::get(&srv.client(), "777", None, BodyFormat::Markdown, false).unwrap();
     assert_eq!(out["commentType"], "inline");
-    assert_eq!(out["body"]["value"], "hi");
+    assert_eq!(out["body"], "hi");
     assert_eq!(srv.requests()[1].path, "/api/v2/inline-comments/777");
 }
 
@@ -168,15 +182,7 @@ fn inline_create_counts_matches_in_the_visible_text() {
         count: None,
         index: Some(1),
     };
-    let out = comments::create(
-        &srv.client(),
-        "12345",
-        None,
-        "why?",
-        TextFormat::Plain,
-        Some(sel),
-    )
-    .unwrap();
+    let out = comments::create(&srv.client(), "12345", None, &plain("why?"), Some(sel)).unwrap();
     assert_eq!(out["commentType"], "inline");
     let r = srv.requests();
     assert_eq!(
@@ -206,15 +212,8 @@ fn inline_create_never_posts_a_bad_anchor() {
             count: None,
             index,
         };
-        let err = comments::create(
-            &srv.client(),
-            "12345",
-            None,
-            "x",
-            TextFormat::Plain,
-            Some(sel),
-        )
-        .unwrap_err();
+        let err =
+            comments::create(&srv.client(), "12345", None, &plain("x"), Some(sel)).unwrap_err();
         assert_eq!(kind(&err), Some(ErrorKind::Usage), "{text}");
         assert_eq!(srv.requests().len(), 1);
     }
@@ -224,24 +223,14 @@ fn inline_create_never_posts_a_bad_anchor() {
         count: Some(2),
         index: Some(2),
     };
-    assert!(
-        comments::create(
-            &srv.client(),
-            "12345",
-            None,
-            "x",
-            TextFormat::Plain,
-            Some(sel)
-        )
-        .is_err()
-    );
+    assert!(comments::create(&srv.client(), "12345", None, &plain("x"), Some(sel)).is_err());
     assert!(srv.requests().is_empty());
 }
 
 #[test]
 fn reply_goes_to_the_parents_surface() {
     let srv = MockServer::with_responses([not_found(), ok(comment("777")), ok(json!({"id": "8"}))]);
-    comments::reply(&srv.client(), "777", "Thanks", TextFormat::Plain).unwrap();
+    comments::reply(&srv.client(), "777", &plain("Thanks")).unwrap();
     let r = &srv.requests()[2];
     assert_eq!(r.path, "/api/v2/inline-comments");
     assert_eq!(r.json_body()["parentCommentId"], "777");
@@ -254,9 +243,11 @@ fn update_bumps_the_version_and_honours_the_expected_one() {
         &srv.client(),
         "777",
         None,
-        "new",
-        TextFormat::Plain,
-        Some(2),
+        &plain("new"),
+        comments::Replace {
+            if_version: Some(2),
+            ..Default::default()
+        },
     )
     .unwrap_err();
     assert_eq!(kind(&err), Some(ErrorKind::Conflict));
@@ -267,9 +258,11 @@ fn update_bumps_the_version_and_honours_the_expected_one() {
         &srv.client(),
         "777",
         None,
-        "new",
-        TextFormat::Plain,
-        Some(3),
+        &plain("new"),
+        comments::Replace {
+            if_version: Some(3),
+            ..Default::default()
+        },
     )
     .unwrap();
     let r = &srv.requests()[1];
@@ -312,4 +305,56 @@ fn resolve_refuses_footer_comments_and_missing_bodies() {
     let inline = Some(comments::Surface::Inline);
     assert!(comments::set_resolved(&srv.client(), "777", inline, true).is_err());
     assert_eq!(srv.requests().len(), 1, "a body must never be blanked");
+}
+
+#[test]
+fn bodies_are_read_as_adf_and_written_as_adf() {
+    let srv = MockServer::with_responses([ok(json!({"results": [comment("1")]}))]);
+    let out = comments::list(
+        &srv.client(),
+        "12345",
+        None,
+        &opts(comments::Surface::Footer),
+    )
+    .unwrap();
+    assert_eq!(out["results"][0]["body"], "hi");
+    assert_eq!(
+        srv.requests()[0].query_param("body-format").as_deref(),
+        Some("atlas_doc_format")
+    );
+
+    let srv = MockServer::with_responses([
+        ok(json!({"id": "12345"})),
+        MockResponse::json(201, json!({"id": "9"})),
+    ]);
+    comments::create(&srv.client(), "12345", None, &plain("x"), None).unwrap();
+    let body = srv.requests()[1].json_body();
+    assert_eq!(body["body"]["representation"], "atlas_doc_format");
+}
+
+#[test]
+fn replacing_a_body_markdown_cannot_hold_is_refused() {
+    let rich = json!({"type": "doc", "version": 1, "content": [
+        {"type": "extension", "attrs": {"extensionType": "com.atlassian.confluence.macro.core", "extensionKey": "jira"}}
+    ]});
+    let current = json!({"id": "777", "version": {"number": 3},
+        "body": {"atlas_doc_format": {"value": rich.to_string()}}});
+    let srv = MockServer::with_responses([ok(current.clone())]);
+    let r = comments::Replace {
+        check_loss: true,
+        ..Default::default()
+    };
+    let err = comments::update(&srv.client(), "777", None, &plain("new"), r).unwrap_err();
+    assert_eq!(kind(&err), Some(ErrorKind::Refused));
+    assert!(ApiError::find(&err).unwrap().losses.is_some());
+    assert!(srv.requests().iter().all(|r| r.method == "GET"));
+
+    let srv = MockServer::with_responses([ok(current), ok(comment("777"))]);
+    let r = comments::Replace {
+        check_loss: true,
+        allow_lossy: true,
+        ..Default::default()
+    };
+    comments::update(&srv.client(), "777", None, &plain("new"), r).unwrap();
+    assert_eq!(srv.requests()[1].method, "PUT");
 }

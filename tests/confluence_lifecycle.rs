@@ -1,10 +1,10 @@
-//! Offline tests for the Confluence lifecycle commands and tree (#30).
+//! Offline tests for the Confluence lifecycle commands and tree.
 
 mod common;
 
 use atlx::client::{ApiError, ErrorKind};
 use atlx::confluence::{self, ContentType, lifecycle as lc, tree};
-use atlx::markup::TextFormat;
+use atlx::markup::{Body, text_to_adf};
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -285,8 +285,7 @@ fn private_create_is_one_request() {
         space: "99",
         content_type: ContentType::Page,
         title: "T",
-        body: "x",
-        format: TextFormat::Plain,
+        body: &Body::Adf(text_to_adf("x")),
         parent: None,
         draft: false,
         private: true,
@@ -326,31 +325,22 @@ fn appearance_sets_both_states() {
 }
 
 #[test]
-fn space_create_and_dry_run() {
+fn space_create_private() {
     let new = lc::NewSpace {
         key: "NEW",
         name: "New",
         description: Some("d"),
         private: true,
-        dry_run: true,
     };
-    let srv = MockServer::with_responses([]);
-    assert_eq!(
-        lc::space_create(&srv.client(), &new).unwrap()["dryRun"],
-        true
-    );
-    assert!(srv.requests().is_empty());
-
     let srv = MockServer::with_responses([ok(json!({"key": "NEW"}))]);
-    lc::space_create(
-        &srv.client(),
-        &lc::NewSpace {
-            dry_run: false,
-            ..new
-        },
-    )
-    .unwrap();
+    lc::space_create(&srv.client(), &new).unwrap();
     assert_eq!(srv.requests()[0].path, "/rest/api/space/_private");
+    let srv = MockServer::with_responses([]);
+    let bad = lc::NewSpace { key: "N-1", ..new };
+    assert!(is_usage(
+        &lc::space_create(&srv.client(), &bad).unwrap_err()
+    ));
+    assert!(srv.requests().is_empty());
 }
 
 #[test]
@@ -389,16 +379,15 @@ fn space_delete_uses_the_key_the_server_gave() {
 #[test]
 fn tree_of_a_space_starts_at_its_root_pages() {
     let srv = MockServer::with_responses([
-        not_found(),
         ok(json!({"id": "99", "key": "ENG", "name": "Eng"})),
         ok(json!({"results": [{"id": "1", "title": "Home", "status": "current"}]})),
         ok(json!({"results": [{"id": "2", "title": "Child", "type": "page"}]})),
     ]);
-    let out = tree::tree(&srv.client(), "99", 2, None).unwrap();
+    let out = tree::space(&srv.client(), "99", 2, None).unwrap();
     assert_eq!(out["type"], "space");
     assert_eq!(out["children"][0]["children"][0]["id"], "2");
     assert_eq!(
-        srv.requests()[2].query_param("depth").as_deref(),
+        srv.requests()[1].query_param("depth").as_deref(),
         Some("root")
     );
 }
@@ -413,7 +402,7 @@ fn tree_stops_at_the_node_cap() {
         ok(json!({"results": []})),
         ok(json!({"results": many})),
     ]);
-    let out = tree::tree(&srv.client(), "10", 3, None).unwrap();
+    let out = tree::page(&srv.client(), "10", 3, None).unwrap();
     assert_eq!(out["children"].as_array().unwrap().len(), tree::MAX_NODES);
     assert_eq!(out["truncated"], true);
     assert_eq!(srv.requests().len(), 3);
@@ -426,7 +415,7 @@ fn tree_lists_only_pages_without_a_type() {
         ok(json!({"results": []})),
         ok(json!({"results": [{"id": "20", "type": "folder"}, {"id": "11", "type": "page"}]})),
     ]);
-    let out = tree::tree(&srv.client(), "10", 1, None).unwrap();
+    let out = tree::page(&srv.client(), "10", 1, None).unwrap();
     assert_eq!(out["children"].as_array().unwrap().len(), 1);
     assert_eq!(out["children"][0]["id"], "11");
     assert!(
@@ -445,7 +434,7 @@ fn tree_type_keeps_the_containers() {
         ok(json!({"results": [{"id": "20", "type": "whiteboard"}]})),
         ok(json!({"results": []})),
     ]);
-    let out = tree::tree(&srv.client(), "10", 2, Some(tree::NodeType::Whiteboard)).unwrap();
+    let out = tree::page(&srv.client(), "10", 2, Some(tree::NodeType::Whiteboard)).unwrap();
     let top = out["children"].as_array().unwrap();
     assert_eq!(top.len(), 1);
     assert_eq!(top[0]["children"][0]["id"], "20");

@@ -1,8 +1,9 @@
 //! Tasks, content states, watches, templates and space permissions.
 
 use super::lifecycle::exact_space;
-use super::{ContentType, enc, listing, space_id, try_content};
+use super::{ContentType, enc, listing, rendered_body, space_id, try_content};
 use crate::client::{ApiError, Client};
+use crate::markup::BodyFormat;
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
@@ -50,22 +51,34 @@ impl TaskFilter {
     }
 }
 
-/// The tasks on one page or blog post, or with no ID every task the caller
-/// can see.
+/// A task with its body as Markdown.
+fn shown_task(v: &Value) -> Value {
+    let mut t = v.clone();
+    if t.is_object() {
+        let id = v["id"].as_str().unwrap_or_default();
+        t["body"] = rendered_body(v, BodyFormat::Markdown, &format!("task {id}"));
+    }
+    t
+}
+
+/// One page of the tasks on one page or blog post, or with no ID of every
+/// task the caller can see: `{results, nextCursor}`.
 pub fn tasks(
     c: &Client,
     id: Option<&str>,
     kind: Option<ContentType>,
     status: TaskFilter,
     limit: usize,
+    cursor: Option<&str>,
 ) -> Result<Value> {
-    if limit == 0 {
-        return Err(usage("--limit must be at least 1"));
-    }
-    let mut query: Vec<(&str, &str)> = vec![("body-format", "storage")];
+    let limit = limit.clamp(1, 250).to_string();
+    let mut q: Vec<(&str, &str)> = vec![
+        ("body-format", "atlas_doc_format"),
+        ("limit", limit.as_str()),
+    ];
     match status {
-        TaskFilter::Open => query.push(("status", "incomplete")),
-        TaskFilter::Complete => query.push(("status", "complete")),
+        TaskFilter::Open => q.push(("status", "incomplete")),
+        TaskFilter::Complete => q.push(("status", "complete")),
         TaskFilter::All => {}
     }
     if let Some(id) = id {
@@ -80,28 +93,12 @@ pub fn tasks(
             ContentType::Page => "page-id",
             ContentType::Blogpost => "blogpost-id",
         };
-        query.push((name, id));
+        q.push((name, id));
     }
-    let mut found: Vec<Value> = Vec::new();
-    let mut cursor: Option<String> = None;
-    loop {
-        let size = (limit - found.len()).min(250).to_string();
-        let mut q = query.clone();
-        q.push(("limit", size.as_str()));
-        if let Some(cur) = &cursor {
-            q.push(("cursor", cur));
-        }
-        let page = listing(&c.get("/api/v2/tasks", &q)?, Value::clone);
-        found.extend(page["results"].as_array().into_iter().flatten().cloned());
-        let next = page["nextCursor"].as_str().map(String::from);
-        let done = next.is_none() || next == cursor || found.len() >= limit;
-        cursor = next;
-        if done {
-            break;
-        }
+    if let Some(cur) = cursor {
+        q.push(("cursor", cur));
     }
-    found.truncate(limit);
-    Ok(json!({"results": found, "nextCursor": cursor}))
+    Ok(listing(&c.get("/api/v2/tasks", &q)?, shown_task))
 }
 
 fn task_path(id: &str) -> Result<String> {
@@ -111,13 +108,20 @@ fn task_path(id: &str) -> Result<String> {
     Ok(format!("/api/v2/tasks/{id}"))
 }
 
+/// `page task get`
 pub fn task(c: &Client, id: &str) -> Result<Value> {
-    c.get(&task_path(id)?, &[("body-format", "storage")])
+    Ok(shown_task(&c.get(
+        &task_path(id)?,
+        &[("body-format", "atlas_doc_format")],
+    )?))
 }
 
+/// `page task update --status`
 pub fn task_set(c: &Client, id: &str, complete: bool) -> Result<Value> {
     let status = if complete { "complete" } else { "incomplete" };
-    c.put(&task_path(id)?, &json!({"status": status}))
+    Ok(shown_task(
+        &c.put(&task_path(id)?, &json!({"status": status}))?,
+    ))
 }
 
 // --- content states ----------------------------------------------------------
@@ -236,7 +240,7 @@ pub fn templates(c: &Client, o: &TemplateQuery) -> Result<Value> {
         None => Scope::Global,
     });
     if scope == Scope::Space && o.space.is_none() {
-        return Err(usage("--scope space needs --space-id"));
+        return Err(usage("--scope space needs --space"));
     }
     let key = match (scope, o.space) {
         (Scope::Global, _) | (_, None) => None,
@@ -300,15 +304,34 @@ pub fn templates(c: &Client, o: &TemplateQuery) -> Result<Value> {
     }))
 }
 
-pub fn template(c: &Client, id: &str) -> Result<Value> {
+pub fn template(c: &Client, id: &str, format: BodyFormat) -> Result<Value> {
     let id = id.trim();
     if id.is_empty() {
         return Err(usage("the template ID is empty"));
     }
-    c.get(
+    let expand = match format {
+        BodyFormat::Storage => "body.storage",
+        _ => "body.atlas_doc_format",
+    };
+    let mut v = c.get(
         &format!("/rest/api/template/{}", enc(id)),
-        &[("expand", "body.storage")],
-    )
+        &[("expand", expand)],
+    )?;
+    let body = match format {
+        BodyFormat::Storage => v["body"]["storage"]["value"].clone(),
+        _ if v["body"]["atlas_doc_format"]["value"].is_null() => {
+            crate::output::notes::warn(
+                "no_adf_body",
+                format!(
+                    "template {id} came back without an ADF body; read it with --body-format storage"
+                ),
+            );
+            Value::Null
+        }
+        _ => rendered_body(&v, format, &format!("template {id}")),
+    };
+    v["body"] = body;
+    Ok(v)
 }
 
 // --- space permissions -------------------------------------------------------
