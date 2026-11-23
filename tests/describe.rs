@@ -59,8 +59,21 @@ fn describe_snapshots_match() {
         if update {
             std::fs::create_dir_all(snapshots()).unwrap();
             std::fs::write(&file, &text).unwrap();
-        } else if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
-            stale.push(file.display().to_string());
+        } else {
+            // Windows checkouts may turn LF into CRLF.
+            let saved = std::fs::read_to_string(&file)
+                .unwrap_or_default()
+                .replace("\r\n", "\n");
+            if saved != text {
+                let line = saved
+                    .lines()
+                    .zip(text.lines())
+                    .enumerate()
+                    .find(|(_, (a, b))| a != b)
+                    .map(|(i, (a, b))| format!("line {}: saved {a:?}, now {b:?}", i + 1))
+                    .unwrap_or_else(|| "length differs".into());
+                stale.push(format!("{} ({line})", file.display()));
+            }
         }
     }
     assert!(
