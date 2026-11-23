@@ -129,13 +129,13 @@ fn unknown_fields_exit_2_before_any_request() {
 }
 
 #[test]
-fn fields_on_unregistered_commands_select_paths() {
+fn fields_select_record_fields_and_reject_unknown_ones() {
     let srv = server();
     let o = atlx(
         &srv,
         &[
             "confluence",
-            "content",
+            "page",
             "get",
             "123",
             "-o",
@@ -153,7 +153,7 @@ fn fields_on_unregistered_commands_select_paths() {
         &srv,
         &[
             "confluence",
-            "content",
+            "page",
             "get",
             "123",
             "-o",
@@ -235,9 +235,11 @@ fn body_only_output_file_writes_the_body() {
     let f = file.to_str().unwrap();
     let args = [
         "confluence",
-        "content",
+        "page",
         "get",
         "123",
+        "--body-format",
+        "storage",
         "--body-only",
         "--output-file",
         f,

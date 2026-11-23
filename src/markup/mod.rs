@@ -57,7 +57,7 @@ pub use to_storage::{adf_to_storage, adf_to_storage_checked};
 /// HTML is not a format Atlassian stores, and converting it loses content.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum BodyFormat {
-    /// Markdown (the dialect described in this module), converted through ADF.
+    /// Markdown, converted through ADF (see `atlx describe --records` for the extensions).
     #[default]
     #[value(alias = "md")]
     Markdown,

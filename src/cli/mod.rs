@@ -502,18 +502,18 @@ mod tests {
             "atlx jira workitem comment create --issue-id PROJ-1 --body hi --body-format plain",
             "atlx jira field list --query story --custom-only",
             "atlx user search alice --limit 10 -o json",
-            "atlx confluence search query --cql type=page --excerpt",
-            "atlx confluence content get 12345 --detail full --format md",
-            "atlx confluence content update 12345 --snapshot-token 3 --body x --format markdown --dry-run",
-            "atlx bb repo query --workspace acme",
-            "atlx bb pull-requests merge 930 --repo api --strategy squash --yes",
-            "atlx bb pipeline get --pipeline 1234 --logs --failed-steps --repo api",
+            "atlx confluence search --cql type=page",
+            "atlx confluence page get 12345 --body-format markdown --full",
+            "atlx confluence page update 12345 --if-version 3 --body x --body-format markdown --dry-run",
+            "atlx bb repo list --workspace acme",
+            "atlx bb pr merge 930 --repo acme/api --strategy squash --yes",
+            "atlx bb pipeline log 1234 --failed --repo acme/api",
             "atlx doctor --strict -o json",
             "atlx jira workitem get PROJ-1 -o json --fields key,status --output-file /tmp/x.json",
             "atlx jira workitem get PROJ-1 -o ids --full",
             "atlx jira workitem get PROJ-1 --raw --max-chars 0",
             "atlx --dry-run --read-only --no-cache jira workitem get PROJ-1",
-            "atlx confluence content get 12345 --body-only --output-file ./page.md -o json",
+            "atlx confluence page get 12345 --body-only --output-file ./page.md -o json",
             "atlx -p work jira workitem get PROJ-1",
             "atlx jira workitem get PROJ-1 --profile default",
             "atlx auth login --new-profile",
@@ -589,10 +589,10 @@ mod tests {
     #[test]
     fn descending_sort_values_parse_as_documented() {
         for args in [
-            "bb branch query -r acme/api --sort -name",
-            "bb repo query --workspace acme --sort -updated_on",
+            "bb repo branch list -r acme/api --sort -name",
+            "bb repo list --workspace acme --sort -updated_on",
             "jira space query --sort-by -lastIssueUpdatedDate",
-            "confluence content attachments list --id 1 --sort -created-date",
+            "confluence page attachment list --page 1 --sort -created-date",
         ] {
             if let Err(e) = Cli::try_parse_from(["atlx"].into_iter().chain(args.split(' '))) {
                 panic!("{args}: {e}");
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn local_flags_shadow_globals() {
-        assert!(defines_locally("confluence content update", "dry_run"));
+        assert!(!defines_locally("confluence page update", "dry_run"));
         assert!(!defines_locally("auth status", "dry_run"));
         assert!(!defines_locally("nope nope", "fields"));
     }

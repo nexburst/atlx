@@ -92,12 +92,10 @@ fn space_statuses_are_listed_once() {
 
 #[test]
 fn bitbucket_output_is_enveloped_too() {
-    let (_, v) = json_run(json!({}), "bitbucket repo url --workspace team --repo api");
-    assert_eq!(v["ok"], true);
-    assert_eq!(
-        (&v["data"]["workspace"], &v["data"]["repo"]),
-        (&json!("team"), &json!("api"))
-    );
+    let (code, v) = json_run(json!({}), "bitbucket pr merge 1 --repo team/api");
+    assert_eq!(code, Some(8));
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["code"], "refused");
 }
 
 #[test]
