@@ -291,7 +291,11 @@ struct Run {
 
 impl Run {
     fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("atlx-jira-cli-{tag}-{}", std::process::id()));
+        // Unique per call: several tests describe the same product at once.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir =
+            std::env::temp_dir().join(format!("atlx-jira-cli-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x.json"), "[{\"fields\": {\"summary\": \"s\"}}]").unwrap();

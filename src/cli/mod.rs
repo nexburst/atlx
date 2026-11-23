@@ -33,8 +33,8 @@ use serde_json::Value;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// The Atlassian command line for coding agents and people: Jira,
-/// Confluence and Bitbucket Cloud over their public REST APIs.
+/// A command line for Jira, Confluence and Bitbucket Cloud, built for coding
+/// agents and people on Atlassian's public REST APIs.
 ///
 /// Every command prints one JSON envelope when piped (`{"ok":…,"data":…}`)
 /// and tables on a terminal. Machine-readable: atlx describe <path>.
