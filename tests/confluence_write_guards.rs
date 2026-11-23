@@ -165,3 +165,25 @@ fn a_dry_run_needs_no_yes_and_only_reads() {
     );
     assert!(srv.requests().iter().all(|r| r.method == "GET"));
 }
+
+#[test]
+fn a_body_that_would_lose_content_is_refused_with_exit_8() {
+    for line in [
+        "update 123 --body <p>a<br>b</p> --format html --ack-body-formats --snapshot-token 1 --yes -o json",
+        "create --space-id 9 --content-type page --title T --body <custom>x</custom> --format html --ack-body-formats --yes -o json",
+    ] {
+        let srv = server();
+        let args: Vec<&str> = line.split(' ').collect();
+        let out = content(&srv.base_url(), &args);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(out.status.code(), Some(8), "{line}: {stdout}");
+        let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+        assert_eq!(v["ok"], false, "{line}");
+        assert_eq!(v["error"]["code"], "refused", "{line}: {v}");
+        assert!(
+            srv.requests().iter().all(|r| r.method == "GET"),
+            "{line}: sent {:?}",
+            srv.requests()
+        );
+    }
+}

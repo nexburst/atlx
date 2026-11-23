@@ -1391,20 +1391,23 @@ impl ApiError {
 
 /// Classify errors other modules define, before the generic fallback.
 ///
-/// When the markup package's `crate::markup::BodyError` lands, it maps here:
-/// `Refused` -> [`ErrorKind::Refused`] (exit 8), `Invalid` ->
-/// [`ErrorKind::Usage`], with its `hint` and `losses`:
-///
-/// ```ignore
-/// if let Some(b) = err.chain().find_map(|c| c.downcast_ref::<crate::markup::BodyError>()) {
-///     let kind = if b.is_refused() { ErrorKind::Refused } else { ErrorKind::Usage };
-///     let mut e = ApiError::new(kind, b.message.clone()).with_hint(b.hint.clone());
-///     e.losses = serde_json::to_value(&b.losses).ok();
-///     return Some(e);
-/// }
-/// ```
-fn foreign(_err: &anyhow::Error) -> Option<ApiError> {
-    None
+/// A refused body conversion ([`crate::markup::BodyError`]) becomes
+/// [`ErrorKind::Refused`] (exit 8); an invalid body becomes
+/// [`ErrorKind::Usage`]. Both carry the converter's `hint` and `losses`.
+fn foreign(err: &anyhow::Error) -> Option<ApiError> {
+    let b = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::markup::BodyError>())?;
+    let kind = if b.is_refused() {
+        ErrorKind::Refused
+    } else {
+        ErrorKind::Usage
+    };
+    let mut e = ApiError::new(kind, b.message.clone()).with_hint(b.hint.clone());
+    if !b.losses.is_empty() {
+        e.losses = serde_json::to_value(&b.losses).ok();
+    }
+    Some(e)
 }
 
 /// The request a `--dry-run` stopped before sending. It travels up as an
