@@ -167,7 +167,7 @@ Keep it independent of Atlassian's twg CLI:
 
 ## Cutting a release
 
-No release has been published yet. Releases are built by
+Releases are built by
 `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed. Only
 maintainers do this.
 
