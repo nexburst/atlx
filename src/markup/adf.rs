@@ -8,6 +8,8 @@
 
 use serde_json::{Map, Value, json};
 
+use super::Loss;
+
 /// Internal placeholder for an image; becomes `mediaSingle` or a link.
 pub(crate) const IMAGE: &str = "__image";
 /// Internal placeholder for a block boundary from a transparent HTML block.
@@ -63,10 +65,13 @@ fn take_content(v: &mut Value) -> Vec<Value> {
 }
 
 /// Accumulates nodes from an event stream. Each open node carries a tag (the
-/// source element name) so tolerant parsers can close by tag.
+/// source element name) so tolerant parsers can close by tag. Parsers record
+/// what they could not map with [`Builder::lose`]; normalization adds what it
+/// had to drop or flatten.
 pub(crate) struct Builder {
     stack: Vec<(String, Value)>,
     marks: Vec<(String, Value)>,
+    pub losses: Vec<Loss>,
 }
 
 impl Builder {
@@ -77,7 +82,12 @@ impl Builder {
                 json!({"type": "doc", "version": 1, "content": []}),
             )],
             marks: Vec::new(),
+            losses: Vec::new(),
         }
+    }
+
+    pub fn lose(&mut self, loss: Loss) {
+        self.losses.push(loss);
     }
 
     pub fn open(&mut self, tag: &str, mut node: Value) {
@@ -100,6 +110,11 @@ impl Builder {
             .iter()
             .rposition(|(t, _)| t == tag)
             .filter(|&i| i > 0)
+    }
+
+    /// Whether a node opened with `tag` is still open.
+    pub fn is_open(&self, tag: &str) -> bool {
+        self.position(tag).is_some()
     }
 
     /// Close everything up to and including the innermost node opened with
@@ -140,6 +155,11 @@ impl Builder {
             .find(|v| kind(v) == ty)
     }
 
+    /// Mutable access to the innermost open node.
+    pub fn top_mut(&mut self) -> &mut Value {
+        &mut self.stack.last_mut().unwrap().1
+    }
+
     /// Mutable access to the parent of the innermost open node of type `ty`.
     pub fn parent_of_mut(&mut self, ty: &str) -> Option<&mut Value> {
         let i = self.stack.iter().rposition(|(_, v)| kind(v) == ty)?;
@@ -153,6 +173,20 @@ impl Builder {
         }
     }
 
+    /// Remove and return the last node pushed into the innermost open node.
+    pub fn pop_last(&mut self) -> Option<Value> {
+        self.stack.last_mut().unwrap().1["content"]
+            .as_array_mut()
+            .and_then(Vec::pop)
+    }
+
+    /// The last node pushed into the innermost open node.
+    pub fn last_mut(&mut self) -> Option<&mut Value> {
+        self.stack.last_mut().unwrap().1["content"]
+            .as_array_mut()
+            .and_then(|a| a.last_mut())
+    }
+
     pub fn text(&mut self, s: &str) {
         if s.is_empty() {
             return;
@@ -162,6 +196,10 @@ impl Builder {
             node["marks"] = Value::Array(self.marks.iter().map(|(_, m)| m.clone()).collect());
         }
         self.push(node);
+    }
+
+    pub fn has_marks(&self) -> bool {
+        !self.marks.is_empty()
     }
 
     pub fn push_mark(&mut self, tag: &str, mark: Value) {
@@ -174,18 +212,20 @@ impl Builder {
         }
     }
 
-    pub fn finish(mut self) -> Value {
+    pub fn finish(mut self) -> (Value, Vec<Loss>) {
         while self.stack.len() > 1 {
             self.close();
         }
         let doc = self.stack.pop().unwrap().1;
-        finalize(doc)
+        let mut losses = self.losses;
+        let doc = finalize(doc, &mut losses);
+        (doc, losses)
     }
 }
 
 /// Normalize a whole document and assign task `localId`s.
-pub(crate) fn finalize(doc: Value) -> Value {
-    let mut doc = normalize(doc)
+pub(crate) fn finalize(doc: Value, losses: &mut Vec<Loss>) -> Value {
+    let mut doc = normalize(doc, losses)
         .into_iter()
         .next()
         .unwrap_or_else(|| json!({"type": "doc", "version": 1, "content": []}));
@@ -223,32 +263,33 @@ fn is_blank_run(run: &[Value]) -> bool {
 }
 
 /// Normalize children of a block container: wrap inline runs in paragraphs
-/// (splitting at `__break`), drop blank runs, and normalize block children.
-fn blocks(children: Vec<Value>, adopt_orphans: bool) -> Vec<Value> {
+/// (splitting at `__break`), drop blank runs (whitespace only, so nothing is
+/// lost), and normalize block children.
+fn blocks(children: Vec<Value>, adopt_orphans: bool, l: &mut Vec<Loss>) -> Vec<Value> {
     let mut out = Vec::new();
     let mut run: Vec<Value> = Vec::new();
-    let flush = |run: &mut Vec<Value>, out: &mut Vec<Value>| {
+    let flush = |run: &mut Vec<Value>, out: &mut Vec<Value>, l: &mut Vec<Loss>| {
         if !is_blank_run(run) {
-            out.extend(normalize(paragraph(std::mem::take(run))));
+            out.extend(normalize(paragraph(std::mem::take(run)), l));
         }
         run.clear();
     };
     for c in children {
         if kind(&c) == BREAK {
-            flush(&mut run, &mut out);
+            flush(&mut run, &mut out, l);
         } else if is_inline(&c) {
             run.push(c);
         } else {
-            flush(&mut run, &mut out);
-            out.extend(normalize(if adopt_orphans { adopt(c) } else { c }));
+            flush(&mut run, &mut out, l);
+            out.extend(normalize(if adopt_orphans { adopt(c) } else { c }, l));
         }
     }
-    flush(&mut run, &mut out);
+    flush(&mut run, &mut out, l);
     out
 }
 
 /// Give a node that appears outside its required parent (an `<li>` outside a
-/// list, a `<td>` outside a table) the parent it needs.
+/// list, a `<td>` outside a table) the parent it needs. Nothing is dropped.
 fn adopt(c: Value) -> Value {
     match kind(&c) {
         "listItem" => json!({"type": "bulletList", "content": [c]}),
@@ -260,35 +301,42 @@ fn adopt(c: Value) -> Value {
 }
 
 /// Normalize a node; may return zero nodes (dropped) or several (split).
-pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
+/// Anything dropped or flattened that carried content is recorded in `l`.
+pub(crate) fn normalize(mut node: Value, l: &mut Vec<Loss>) -> Vec<Value> {
     let ty = kind(&node).to_string();
     match ty.as_str() {
         "doc" | "blockquote" | "listItem" | "tableCell" | "tableHeader" | "panel" | "expand"
         | "nestedExpand" | "bodiedExtension" | "layoutColumn" => {
-            let mut kids = blocks(take_content(&mut node), true);
+            let mut kids = blocks(take_content(&mut node), true, l);
             match ty.as_str() {
-                "blockquote" | "panel" => {
-                    kids = kids.into_iter().flat_map(quote_child).collect();
-                    if kids.is_empty() {
-                        return Vec::new();
-                    }
+                "blockquote" | "panel" | "listItem" => {
+                    kids = kids
+                        .into_iter()
+                        .flat_map(|c| container_child(&ty, c, l))
+                        .collect();
                 }
+                // The other containers accept any block.
+                _ => {}
+            }
+            match ty.as_str() {
+                // An empty quote or panel holds nothing worth keeping.
+                "blockquote" | "panel" if kids.is_empty() => return Vec::new(),
                 "listItem" => {
-                    kids = kids.into_iter().flat_map(item_child).collect();
                     if kids.first().is_none_or(|k| kind(k) != "paragraph") {
                         kids.insert(0, empty_paragraph());
                     }
                 }
                 "tableCell" | "tableHeader" if kids.is_empty() => kids.push(empty_paragraph()),
+                // Other containers keep their (possibly empty) content as is.
                 _ => {}
             }
             node["content"] = Value::Array(kids);
             vec![node]
         }
-        "paragraph" | "heading" => inline_block(node),
+        "paragraph" | "heading" => inline_block(node, l),
         "bulletList" | "orderedList" => {
             let mut items: Vec<Value> = Vec::new();
-            for c in blocks(take_content(&mut node), false) {
+            for c in blocks(take_content(&mut node), false, l) {
                 match kind(&c) {
                     "listItem" => items.push(c),
                     // A list nested directly in a list belongs to the previous item.
@@ -298,9 +346,10 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
                             .unwrap()
                             .push(c);
                     }
-                    _ => items.extend(normalize(json!({"type": "listItem", "content": [c]}))),
+                    _ => items.extend(normalize(json!({"type": "listItem", "content": [c]}), l)),
                 }
             }
+            // Only reachable when every child was blank.
             if items.is_empty() {
                 return Vec::new();
             }
@@ -311,19 +360,28 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
             let mut items: Vec<Value> = Vec::new();
             for c in take_content(&mut node) {
                 match kind(&c) {
-                    "taskItem" => items.extend(normalize(c)),
+                    "taskItem" => items.extend(normalize(c, l)),
                     "listItem" => {
                         let mut c = c;
                         c["type"] = "taskItem".into();
-                        items.extend(normalize(c));
+                        items.extend(normalize(c, l));
                     }
-                    _ if is_list(&c) => items.extend(normalize(to_task_list(c))),
+                    "taskList" => items.extend(normalize(c, l)),
+                    _ if is_list(&c) => {
+                        l.push(Loss::new(
+                            kind(&c),
+                            "taskList",
+                            "a plain list inside a task list became a task list",
+                        ));
+                        items.extend(normalize(to_task_list(c), l));
+                    }
                     _ if is_inline(&c) => {
+                        // Blank inline runs (whitespace between elements) carry nothing.
                         if !is_blank_run(std::slice::from_ref(&c)) {
-                            items.extend(normalize(json!({"type": "taskItem", "content": [c]})));
+                            items.extend(normalize(json!({"type": "taskItem", "content": [c]}), l));
                         }
                     }
-                    _ => items.extend(normalize(json!({"type": "taskItem", "content": [c]}))),
+                    _ => items.extend(normalize(json!({"type": "taskItem", "content": [c]}), l)),
                 }
             }
             // A taskList must start with a taskItem.
@@ -341,24 +399,54 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
             let done = node["attrs"]["state"] == "DONE";
             let mut inline = Vec::new();
             let mut hoisted = Vec::new();
-            flatten_task(take_content(&mut node), &mut inline, &mut hoisted);
+            let mut blocks_seen = 0;
+            flatten_task(
+                take_content(&mut node),
+                &mut inline,
+                &mut hoisted,
+                &mut blocks_seen,
+                l,
+            );
+            if blocks_seen > 1 {
+                l.push(Loss::new(
+                    "paragraph",
+                    "taskItem",
+                    "a task holds one line of text; its paragraphs were joined",
+                ));
+            }
             let inline = clean_inline(inline);
             let mut out = vec![task_item(inline, done)];
-            out.extend(hoisted.into_iter().flat_map(|l| normalize(to_task_list(l))));
+            for h in hoisted {
+                if kind(&h) != "taskList" {
+                    l.push(Loss::new(
+                        kind(&h),
+                        "taskItem",
+                        "a plain list inside a task became a task list",
+                    ));
+                }
+                out.extend(normalize(to_task_list(h), l));
+            }
             out
         }
         "table" => {
-            let rows: Vec<Value> = take_content(&mut node)
-                .into_iter()
-                .filter_map(|c| match kind(&c) {
-                    "tableRow" => Some(c),
-                    "tableCell" | "tableHeader" => {
-                        Some(json!({"type": "tableRow", "content": [c]}))
+            let mut rows: Vec<Value> = Vec::new();
+            for c in take_content(&mut node) {
+                let row = match kind(&c) {
+                    "tableRow" => c,
+                    "tableCell" | "tableHeader" => json!({"type": "tableRow", "content": [c]}),
+                    // Whitespace between rows.
+                    _ if is_inline(&c) && is_blank_run(std::slice::from_ref(&c)) => continue,
+                    other => {
+                        l.push(Loss::new(
+                            other,
+                            "table",
+                            "content outside a table row was dropped",
+                        ));
+                        continue;
                     }
-                    _ => None,
-                })
-                .flat_map(normalize)
-                .collect();
+                };
+                rows.extend(normalize(row, l));
+            }
             if rows.is_empty() {
                 return Vec::new();
             }
@@ -369,9 +457,10 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
             let mut cells = Vec::new();
             for c in take_content(&mut node) {
                 match kind(&c) {
-                    "tableCell" | "tableHeader" => cells.extend(normalize(c)),
+                    "tableCell" | "tableHeader" => cells.extend(normalize(c, l)),
+                    // Whitespace between cells.
                     _ if is_inline(&c) && is_blank_run(std::slice::from_ref(&c)) => {}
-                    _ => cells.extend(normalize(json!({"type": "tableCell", "content": [c]}))),
+                    _ => cells.extend(normalize(json!({"type": "tableCell", "content": [c]}), l)),
                 }
             }
             if cells.is_empty() {
@@ -381,6 +470,16 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
             vec![node]
         }
         "codeBlock" => {
+            if content(&node)
+                .iter()
+                .any(|c| !matches!(kind(c), "text" | "hardBreak") || c.get("marks").is_some())
+            {
+                l.push(Loss::new(
+                    "codeBlock",
+                    "codeBlock",
+                    "a code block holds plain text; formatting and inline nodes inside it were reduced to text",
+                ));
+            }
             let mut text = String::new();
             collect_text(&node, &mut text);
             let text = text.strip_suffix('\n').unwrap_or(&text).to_string();
@@ -398,29 +497,83 @@ pub(crate) fn normalize(mut node: Value) -> Vec<Value> {
             vec![node]
         }
         IMAGE => vec![media_single(&node)],
-        _ if is_inline(&node) => normalize(paragraph(vec![node])),
+        _ if is_inline(&node) => normalize(paragraph(vec![node]), l),
+        // Every other node is kept unchanged.
         _ => vec![node],
     }
 }
 
-/// Blocks a blockquote may hold; others are adapted or flattened.
-fn quote_child(c: Value) -> Vec<Value> {
-    match kind(&c) {
-        "paragraph" | "bulletList" | "orderedList" | "codeBlock" | "mediaSingle" | "mediaGroup" => {
-            vec![c]
-        }
-        "heading" => vec![json!({"type": "paragraph", "content": c["content"]})],
-        "blockquote" | "panel" => content(&c).to_vec(),
-        "rule" => Vec::new(),
-        _ => vec![c],
+/// Blocks a blockquote, panel or list item may hold; others are adapted or
+/// flattened, and each change is recorded.
+fn container_child(parent: &str, c: Value, l: &mut Vec<Loss>) -> Vec<Value> {
+    let ok: &[&str] = match parent {
+        "panel" => &[
+            "paragraph",
+            "heading",
+            "bulletList",
+            "orderedList",
+            "taskList",
+            "codeBlock",
+            "mediaSingle",
+            "mediaGroup",
+            "rule",
+            "blockCard",
+            "decisionList",
+            "extension",
+        ],
+        "listItem" => &[
+            "paragraph",
+            "bulletList",
+            "orderedList",
+            "taskList",
+            "codeBlock",
+            "mediaSingle",
+            "extension",
+        ],
+        _ => &[
+            "paragraph",
+            "bulletList",
+            "orderedList",
+            "codeBlock",
+            "mediaSingle",
+            "mediaGroup",
+            "extension",
+        ],
+    };
+    let k = kind(&c).to_string();
+    if ok.contains(&k.as_str()) {
+        return vec![c];
     }
-}
-
-fn item_child(c: Value) -> Vec<Value> {
-    match kind(&c) {
-        "heading" => vec![json!({"type": "paragraph", "content": c["content"]})],
-        "blockquote" | "panel" => content(&c).to_vec(),
-        "rule" => Vec::new(),
+    match k.as_str() {
+        "heading" => {
+            l.push(Loss::new(
+                "heading",
+                parent,
+                format!("a {parent} cannot hold a heading; it became a paragraph"),
+            ));
+            vec![json!({"type": "paragraph", "content": c["content"]})]
+        }
+        "blockquote" | "panel" => {
+            l.push(Loss::new(
+                &k,
+                parent,
+                format!("a {k} inside a {parent} was flattened into it"),
+            ));
+            content(&c)
+                .iter()
+                .cloned()
+                .flat_map(|g| container_child(parent, g, l))
+                .collect()
+        }
+        "rule" => {
+            l.push(Loss::new(
+                "rule",
+                parent,
+                format!("a {parent} cannot hold a horizontal rule; it was dropped"),
+            ));
+            Vec::new()
+        }
+        // Kept as is; the target schema decides.
         _ => vec![c],
     }
 }
@@ -443,26 +596,52 @@ fn to_task_list(mut list: Value) -> Value {
 
 /// Task items hold inline content only: paragraphs are joined with hard
 /// breaks and nested lists are hoisted out as sibling task lists.
-fn flatten_task(children: Vec<Value>, inline: &mut Vec<Value>, hoisted: &mut Vec<Value>) {
+fn flatten_task(
+    children: Vec<Value>,
+    inline: &mut Vec<Value>,
+    hoisted: &mut Vec<Value>,
+    blocks_seen: &mut usize,
+    l: &mut Vec<Loss>,
+) {
+    let mut had_inline = false;
     for c in children {
         if is_inline(&c) {
+            // A block boundary marker carries no content.
             if kind(&c) == BREAK {
                 continue;
+            }
+            if !had_inline {
+                had_inline = true;
+                *blocks_seen += 1;
             }
             inline.push(c);
         } else if is_list(&c) {
             hoisted.push(c);
         } else if kind(&c) == "codeBlock" {
+            l.push(Loss::new(
+                "codeBlock",
+                "taskItem",
+                "a task cannot hold a code block; it became inline code",
+            ));
             let mut t = String::new();
             collect_text(&c, &mut t);
             push_break(inline);
             inline.push(json!({"type": "text", "text": t, "marks": [{"type": "code"}]}));
         } else {
+            if kind(&c) != "paragraph" {
+                l.push(Loss::new(
+                    kind(&c),
+                    "taskItem",
+                    "a task holds inline content only; this block was flattened",
+                ));
+            }
             push_break(inline);
             flatten_task(
                 c["content"].as_array().cloned().unwrap_or_default(),
                 inline,
                 hoisted,
+                blocks_seen,
+                l,
             );
         }
     }
@@ -513,7 +692,7 @@ fn image_link(img: &Value) -> Value {
 
 /// Normalize a paragraph or heading: clean inline content, hoist block
 /// children out (splitting the node), and turn lone images into media.
-fn inline_block(mut node: Value) -> Vec<Value> {
+fn inline_block(mut node: Value, l: &mut Vec<Loss>) -> Vec<Value> {
     let heading = kind(&node) == "heading";
     let mut out = Vec::new();
     let mut run = Vec::new();
@@ -537,7 +716,7 @@ fn inline_block(mut node: Value) -> Vec<Value> {
         } else {
             segments.push(std::mem::take(&mut run));
             blocks_between.push(std::mem::take(&mut pending_blocks));
-            pending_blocks.extend(normalize(c));
+            pending_blocks.extend(normalize(c, l));
         }
     }
     segments.push(run);
@@ -554,7 +733,18 @@ fn inline_block(mut node: Value) -> Vec<Value> {
         }
         let seg: Vec<Value> = seg
             .into_iter()
-            .map(|n| if kind(&n) == IMAGE { image_link(&n) } else { n })
+            .map(|n| {
+                if kind(&n) == IMAGE {
+                    l.push(Loss::new(
+                        "image",
+                        if heading { "heading" } else { "paragraph" },
+                        "an image inside a line of text became a link to the image",
+                    ));
+                    image_link(&n)
+                } else {
+                    n
+                }
+            })
             .collect();
         let inline = clean_inline(seg);
         if !inline.is_empty() {
@@ -564,6 +754,9 @@ fn inline_block(mut node: Value) -> Vec<Value> {
     out
 }
 
+/// Marks in canonical order. ADF lets `code` combine only with `link`, so
+/// other marks on code text are dropped here; every ADF editor applies the
+/// same rule, and the text itself is kept.
 fn canonical_marks(marks: &[Value]) -> Vec<Value> {
     let mut seen: Vec<Value> = Vec::new();
     for m in marks {
@@ -584,7 +777,8 @@ fn canonical_marks(marks: &[Value]) -> Vec<Value> {
 }
 
 /// Clean inline content: canonical marks, merged adjacent text, no empty
-/// text, trimmed edges and whitespace around hard breaks.
+/// text, trimmed edges and whitespace around hard breaks. Only whitespace and
+/// internal block markers are removed.
 pub(crate) fn clean_inline(nodes: Vec<Value>) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     for mut n in nodes {

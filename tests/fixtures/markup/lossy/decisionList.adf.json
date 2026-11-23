@@ -1,0 +1,27 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "decisionList",
+      "attrs": {
+        "localId": "d"
+      },
+      "content": [
+        {
+          "type": "decisionItem",
+          "attrs": {
+            "localId": "e",
+            "state": "DECIDED"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Use ADF"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

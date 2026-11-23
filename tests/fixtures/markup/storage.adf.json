@@ -34,7 +34,7 @@
       ]
     },
     {
-      "type": "blockquote",
+      "type": "panel",
       "content": [
         {
           "type": "paragraph",
@@ -58,7 +58,10 @@
             }
           ]
         }
-      ]
+      ],
+      "attrs": {
+        "panelType": "info"
+      }
     },
     {
       "type": "codeBlock",

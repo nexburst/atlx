@@ -1,0 +1,44 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "expand",
+      "attrs": {
+        "title": "More <details> & notes"
+      },
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hidden "
+            },
+            {
+              "type": "text",
+              "text": "text",
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "sh"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "make"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

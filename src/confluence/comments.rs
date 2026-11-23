@@ -322,7 +322,7 @@ pub fn create(
     };
     let mut req = json!({
         id_field: id,
-        "body": {"representation": "storage", "value": to_storage(body, format)},
+        "body": {"representation": "storage", "value": to_storage(body, format)?},
     });
     let mut surface = Surface::Footer;
     if let Some(s) = selection {
@@ -385,7 +385,7 @@ pub fn reply(c: &Client, comment: &str, body: &str, format: TextFormat) -> Resul
         &format!("/api/v2/{}", surface.collection()),
         &json!({
             "parentCommentId": id,
-            "body": {"representation": "storage", "value": to_storage(body, format)},
+            "body": {"representation": "storage", "value": to_storage(body, format)?},
         }),
     )?;
     Ok(written(c, surface, v))
@@ -422,7 +422,7 @@ pub fn update(
         &path(surface, &id),
         &json!({
             "version": {"number": n + 1},
-            "body": {"representation": "storage", "value": to_storage(body, format)},
+            "body": {"representation": "storage", "value": to_storage(body, format)?},
         }),
     )?;
     Ok(written(c, surface, v))

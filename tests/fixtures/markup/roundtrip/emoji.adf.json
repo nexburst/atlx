@@ -1,0 +1,25 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Shipped "
+        },
+        {
+          "type": "emoji",
+          "attrs": {
+            "shortName": ":tada:"
+          }
+        },
+        {
+          "type": "text",
+          "text": " at 10:30:00, literal :smile: text"
+        }
+      ]
+    }
+  ]
+}
