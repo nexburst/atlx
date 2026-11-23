@@ -61,8 +61,8 @@ On macOS, use `shasum -a 256 --check --ignore-missing SHA256SUMS`. If
 Gatekeeper blocks the binary, run `xattr -d com.apple.quarantine atlx`.
 
 Each archive also holds shell completions in `completions/` and man pages in
-`man/`. To generate a completion script instead, use `atlx completion script`
-with `bash`, `zsh`, `fish`, `powershell` or `elvish`:
+`man/`. To generate a completion script instead, run the `completion script`
+command with `bash`, `zsh`, `fish`, `powershell` or `elvish`:
 
 ```sh
 mkdir -p ~/.local/share/bash-completion/completions
