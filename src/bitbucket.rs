@@ -1,29 +1,48 @@
-//! Bitbucket Cloud REST 2.0, shaped after twg's `bitbucket repo|pull-requests|pipeline|search`.
+//! Bitbucket Cloud REST 2.0: repositories, branches, commits, pull requests,
+//! pipelines, deployments and workspaces.
+//!
+//! API functions take a repository as its REST path
+//! (`/repositories/{workspace}/{slug}`, see [`repo_path`]) and return the
+//! REST objects; the command layer projects them onto the records in
+//! [`records`]. List functions return one page of results and the cursor
+//! for the next (see [`list`]).
 
-use crate::client::{ApiError, Client};
+use crate::client::{ApiError, Client, ErrorKind};
 use crate::markup::quote;
+use crate::paging::{self, Cursor, Page, Position};
 use crate::time;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
 pub mod deployments;
 pub mod lifecycle;
 pub mod pipelines;
+pub mod records;
 pub mod repos;
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
 }
 
-/// Resolve twg-style `--workspace` / `--repo` (slug, `ws/slug`, or URL) to an API path.
+fn usage(msg: impl Into<String>) -> anyhow::Error {
+    ApiError::usage(msg).into()
+}
+
+/// The REST path of a repository given as `workspace/slug`, a Bitbucket URL,
+/// or a bare slug in `workspace` (else `default_ws`).
 pub fn repo_path(
     repo: Option<&str>,
     workspace: Option<&str>,
     default_ws: Option<&str>,
 ) -> Result<String> {
-    let repo =
-        repo.ok_or_else(|| anyhow!("pass --repo (slug, workspace/slug, or Bitbucket URL)"))?;
+    let repo = repo.ok_or_else(|| {
+        anyhow::Error::from(
+            ApiError::usage("no repository: pass --repo workspace/slug").with_hint(
+                "inside a clone of a bitbucket.org repository, or with `bitbucket.repo` in .atlx.toml, --repo can be left out",
+            ),
+        )
+    })?;
     let trimmed = repo
         .trim()
         .trim_start_matches("https://")
@@ -32,9 +51,13 @@ pub fn repo_path(
         .trim_end_matches('/');
     let mut parts = trimmed.split('/');
     let (ws, slug) = match (parts.next(), parts.next()) {
-        (Some(ws), Some(slug)) if !slug.is_empty() => (ws, slug),
-        (Some(slug), _) => (workspace_or(workspace, default_ws)?, slug),
-        _ => bail!("invalid --repo '{repo}'"),
+        (Some(ws), Some(slug)) if !ws.is_empty() && !slug.is_empty() => (ws, slug),
+        (Some(slug), None) if !slug.is_empty() => (workspace_or(workspace, default_ws)?, slug),
+        _ => {
+            return Err(usage(format!(
+                "invalid --repo '{repo}': use workspace/slug"
+            )));
+        }
     };
     Ok(format!(
         "/repositories/{}/{}",
@@ -43,66 +66,239 @@ pub fn repo_path(
     ))
 }
 
-/// The workspace a `--repo` value points at: its own `workspace/` part or
-/// URL, else `--workspace`, else the default workspace.
+/// The workspace a repository value points at: its own `workspace/` part or
+/// URL, else `workspace`, else the default workspace.
 pub fn workspace_of(
     repo: &str,
     workspace: Option<&str>,
     default_ws: Option<&str>,
 ) -> Result<String> {
     let path = repo_path(Some(repo), workspace, default_ws)?;
-    let ws = path
-        .trim_start_matches("/repositories/")
-        .split('/')
-        .next()
-        .unwrap_or_default();
-    Ok(urlencoding::decode(ws)
-        .map(|s| s.into_owned())
-        .unwrap_or_else(|_| ws.to_string()))
+    let (ws, _) = split_path(&path);
+    Ok(ws)
+}
+
+/// `(workspace, slug)` of a `/repositories/{ws}/{slug}` path, decoded.
+pub fn split_path(path: &str) -> (String, String) {
+    let mut parts = path.trim_start_matches("/repositories/").splitn(2, '/');
+    let decode = |s: &str| urlencoding::decode(s).map_or(s.to_string(), |d| d.into_owned());
+    let ws = decode(parts.next().unwrap_or_default());
+    let slug = decode(parts.next().unwrap_or_default());
+    (ws, slug)
+}
+
+/// `workspace/slug` from a `/repositories/{ws}/{slug}` path.
+pub fn full_name(path: &str) -> String {
+    let (ws, slug) = split_path(path);
+    format!("{ws}/{slug}")
 }
 
 pub fn workspace_or<'a>(ws: Option<&'a str>, default_ws: Option<&'a str>) -> Result<&'a str> {
     ws.or(default_ws).ok_or_else(|| {
-        anyhow!("no Bitbucket workspace; pass --workspace or run `atlx setup bitbucket`")
+        ApiError::config("no Bitbucket workspace: pass --workspace")
+            .with_hint("save a default with `atlx auth bitbucket --workspace NAME`, or set ATLX_BB_WORKSPACE")
+            .into()
     })
 }
 
-/// Collect up to `limit` items, following `next` links.
-fn paginate(c: &Client, path: &str, query: &[(&str, &str)], limit: usize) -> Result<Vec<Value>> {
-    Ok(paginate_more(c, path, query, limit)?.0)
+// --- paging ------------------------------------------------------------------
+
+/// Records per REST page (most Bitbucket list endpoints allow 50 at most).
+pub const PAGELEN: usize = 50;
+
+/// How many REST pages a client-side filter reads per call before it stops
+/// and hands back a cursor.
+pub const SCAN_PAGES: usize = 20;
+
+/// `--limit` and `--cursor` of a list command.
+#[derive(Debug, Clone, Default)]
+pub struct Paging {
+    pub limit: usize,
+    pub cursor: Option<String>,
 }
 
-/// [`paginate`], also saying whether more items exist past `limit`.
-fn paginate_more(
+impl Paging {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            cursor: None,
+        }
+    }
+}
+
+/// One page of records and the cursor that continues it (`None` when there
+/// is no more).
+pub type Listed = (Vec<Value>, Option<String>);
+
+/// A REST page position, as atlx encodes it in a cursor token:
+/// `<pagelen>:<page>`, so later pages keep the page size of the first.
+fn token(pagelen: usize, page: &str) -> Position {
+    Position::Token(format!("{pagelen}:{page}"))
+}
+
+/// The page size and page of a position; `None` page for the first.
+fn at(pos: &Position, wanted: usize) -> Result<(usize, Option<String>)> {
+    match pos {
+        Position::Start => Ok((wanted.clamp(1, PAGELEN), None)),
+        Position::Page(p) => Ok((PAGELEN, Some(p.to_string()))),
+        Position::Token(t) => {
+            let (len, page) = t
+                .split_once(':')
+                .and_then(|(l, p)| Some((l.parse::<usize>().ok()?, p)))
+                .filter(|(l, p)| (1..=PAGELEN).contains(l) && !p.is_empty())
+                .ok_or_else(|| usage("--cursor is not a cursor from a Bitbucket result"))?;
+            Ok((len, Some(page.to_string())))
+        }
+        Position::Offset(_) => Err(usage("--cursor is not a cursor from a Bitbucket result")),
+    }
+}
+
+/// The `page` parameter of a REST `next` link.
+fn next_page(v: &Value) -> Option<String> {
+    let next = v["next"].as_str()?;
+    let query = next.split_once('?')?.1;
+    query.split('&').find_map(|kv| {
+        let (k, val) = kv.split_once('=')?;
+        (k == "page").then(|| {
+            urlencoding::decode(val)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| val.to_string())
+        })
+    })
+}
+
+/// Fetch one REST page of `path` at `pos`.
+fn fetch_page(
     c: &Client,
     path: &str,
     query: &[(&str, &str)],
-    limit: usize,
-) -> Result<(Vec<Value>, bool)> {
-    let pagelen = limit.clamp(1, 50).to_string();
+    pos: &Position,
+    wanted: usize,
+) -> Result<(Vec<Value>, Option<Position>)> {
+    let (len, page) = at(pos, wanted)?;
+    let len_s = len.to_string();
     let mut q = query.to_vec();
-    q.push(("pagelen", &pagelen));
-    let mut v = c.get(path, &q)?;
-    let mut out = Vec::new();
-    let more = loop {
-        out.extend(v["values"].as_array().into_iter().flatten().cloned());
-        match v["next"].as_str() {
-            Some(next) if out.len() < limit => v = c.get(next, &[])?,
-            Some(_) => break true,
-            None => break false,
-        }
+    q.push(("pagelen", &len_s));
+    if let Some(p) = &page {
+        q.push(("page", p));
+    }
+    let v = c.get(path, &q)?;
+    let items = v["values"].as_array().cloned().unwrap_or_default();
+    let next = next_page(&v).map(|p| token(len, &p));
+    Ok((items, next))
+}
+
+/// `--limit` records of a REST collection from `--cursor` on.
+pub fn list(c: &Client, path: &str, query: &[(&str, &str)], p: &Paging) -> Result<Listed> {
+    paging::collect(p.limit, p.cursor.as_deref(), |pos, wanted| {
+        let (items, next) = fetch_page(c, path, query, pos, wanted)?;
+        Ok(Page { items, next })
+    })
+}
+
+/// [`list`] with a client-side filter. Reads full pages, keeps what `keep`
+/// accepts, and stops after [`SCAN_PAGES`] pages with a cursor, so a filter
+/// that matches nothing costs a bounded number of requests.
+pub fn list_where(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    p: &Paging,
+    keep: impl FnMut(&mut Value) -> Result<bool>,
+) -> Result<Listed> {
+    list_where_capped(c, path, query, p, SCAN_PAGES, keep)
+}
+
+/// [`list_where`] reading at most `max_pages` REST pages per call (each
+/// item may cost `keep` a request of its own).
+pub fn list_where_capped(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    p: &Paging,
+    max_pages: usize,
+    mut keep: impl FnMut(&mut Value) -> Result<bool>,
+) -> Result<Listed> {
+    let limit = p.limit.clamp(1, paging::HARD_CAP);
+    let mut cur = match p.cursor.as_deref() {
+        Some(s) => Cursor::decode(s)?,
+        None => Cursor::start(),
     };
-    let more = more || out.len() > limit;
-    out.truncate(limit);
-    Ok((out, more))
+    let mut out = Vec::new();
+    let mut pages = 0;
+    loop {
+        let (items, next) = fetch_page(c, path, query, &cur.position, PAGELEN)?;
+        let mut kept = Vec::new();
+        for mut item in items {
+            if keep(&mut item)? {
+                kept.push(item);
+            }
+        }
+        let available = kept.len().saturating_sub(cur.skip);
+        let need = limit - out.len();
+        let take = available.min(need);
+        let used = cur.skip + take;
+        out.extend(kept.into_iter().skip(cur.skip).take(take));
+        if take < available {
+            let resume = Cursor {
+                position: cur.position,
+                skip: used,
+            };
+            return Ok((out, Some(resume.encode())));
+        }
+        let Some(next) = next else {
+            return Ok((out, None));
+        };
+        pages += 1;
+        if out.len() >= limit || pages >= max_pages {
+            return Ok((out, Some(Cursor::at(next).encode())));
+        }
+        cur = Cursor::at(next);
+    }
+}
+
+/// Up to `cap` items of a collection, for scans that need all of them
+/// (counts, lookups). Also says whether more were left.
+pub(crate) fn scan(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    cap: usize,
+) -> Result<(Vec<Value>, bool)> {
+    let mut out = Vec::new();
+    let mut pos = Position::Start;
+    loop {
+        let (items, next) = fetch_page(c, path, query, &pos, PAGELEN)?;
+        out.extend(items);
+        match next {
+            Some(n) if out.len() < cap => pos = n,
+            next => {
+                let more = next.is_some() || out.len() > cap;
+                out.truncate(cap);
+                return Ok((out, more));
+            }
+        }
+    }
+}
+
+/// [`scan`] without the flag.
+pub(crate) fn scan_all(
+    c: &Client,
+    path: &str,
+    query: &[(&str, &str)],
+    cap: usize,
+) -> Result<Vec<Value>> {
+    Ok(scan(c, path, query, cap)?.0)
 }
 
 fn and(filters: Vec<String>) -> Option<String> {
     (!filters.is_empty()).then(|| filters.join(" AND "))
 }
 
-// --- repos -------------------------------------------------------------------
+// --- repositories ------------------------------------------------------------
 
+/// Kept for the cross-product search and the doctor: repositories whose
+/// name contains `query`.
 pub struct RepoQuery<'a> {
     pub query: Option<&'a str>,
     pub project: Option<&'a str>,
@@ -112,10 +308,36 @@ pub struct RepoQuery<'a> {
     pub limit: usize,
 }
 
-/// `bitbucket repo query`: REST repositories as a list.
+/// Repositories of a workspace as an array (see [`repo_list`]).
 pub fn repo_query(c: &Client, ws: &str, o: &RepoQuery) -> Result<Value> {
+    let l = RepoList {
+        name: o.query,
+        project: o.project,
+        language: o.language,
+        sort: Some(o.sort),
+        role: o.role,
+        bbql: None,
+    };
+    Ok(repo_list(c, ws, &l, &Paging::new(o.limit))?.0.into())
+}
+
+/// Filters for `bitbucket repo list`.
+#[derive(Debug, Default)]
+pub struct RepoList<'a> {
+    /// Name contains.
+    pub name: Option<&'a str>,
+    pub project: Option<&'a str>,
+    pub language: Option<&'a str>,
+    pub sort: Option<&'a str>,
+    /// owner, admin, contributor, member.
+    pub role: Option<&'a str>,
+    /// A BBQL filter, combined with the others by AND.
+    pub bbql: Option<&'a str>,
+}
+
+pub fn repo_list(c: &Client, ws: &str, o: &RepoList, p: &Paging) -> Result<Listed> {
     let mut f = Vec::new();
-    if let Some(q) = o.query {
+    if let Some(q) = o.name {
         f.push(format!("name ~ {}", quote(q)));
     }
     if let Some(p) = o.project {
@@ -124,28 +346,26 @@ pub fn repo_query(c: &Client, ws: &str, o: &RepoQuery) -> Result<Value> {
     if let Some(l) = o.language {
         f.push(format!("language = {}", quote(&l.to_lowercase())));
     }
+    if let Some(q) = o.bbql {
+        f.push(format!("({q})"));
+    }
     let filter = and(f);
-    let mut q = vec![("sort", o.sort)];
+    let mut q = vec![("sort", o.sort.unwrap_or("-updated_on"))];
     if let Some(f) = &filter {
         q.push(("q", f));
     }
     if let Some(r) = o.role {
         q.push(("role", r));
     }
-    Ok(paginate(c, &format!("/repositories/{}", enc(ws)), &q, o.limit)?.into())
+    list(c, &format!("/repositories/{}", enc(ws)), &q, p)
 }
 
-/// `bitbucket repo get`: the REST repository.
+/// The REST repository.
 pub fn repo_get(c: &Client, path: &str) -> Result<Value> {
     c.get(path, &[])
 }
 
-pub enum RepoFile {
-    Dir(Value),
-    Raw(String),
-}
-
-fn repo_src_path(repo_path: &str, git_ref: &str, file_path: &str) -> String {
+pub(crate) fn repo_src_path(repo_path: &str, git_ref: &str, file_path: &str) -> String {
     let clean = file_path.trim().trim_start_matches('/');
     let clean = if clean == "." { "" } else { clean };
     let rel: Vec<String> = clean
@@ -160,60 +380,17 @@ fn repo_src_path(repo_path: &str, git_ref: &str, file_path: &str) -> String {
     }
 }
 
-/// `bitbucket repo file`
-pub fn repo_file(
-    c: &Client,
-    path: &str,
-    file_path: &str,
-    ref_name: Option<&str>,
-) -> Result<RepoFile> {
-    let git_ref = match ref_name {
-        Some(r) => r.to_string(),
-        None => {
-            let meta = c.get(path, &[])?;
-            meta["mainbranch"]["name"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("HEAD")
-                .to_string()
-        }
-    };
-    let mut v = c.get(&repo_src_path(path, &git_ref, file_path), &[])?;
-    if v["values"].is_array() {
-        let mut items = Vec::new();
-        loop {
-            items.extend(v["values"].as_array().into_iter().flatten().cloned());
-            match v["next"].as_str() {
-                Some(next) if items.len() < 500 => v = c.get(next, &[])?,
-                _ => break,
-            }
-        }
-        items.truncate(500);
-        return Ok(RepoFile::Dir(items.into()));
-    }
-    let text = match v {
-        Value::String(s) => s,
-        Value::Null => String::new(),
-        other => serde_json::to_string_pretty(&other)?,
-    };
-    Ok(RepoFile::Raw(text))
-}
-
-/// Options for `bitbucket branch query`.
+/// Options for `bitbucket repo branch list`.
 #[derive(Default)]
 pub struct BranchQuery<'a> {
-    /// Branch name substring.
-    pub query: Option<&'a str>,
-    /// Head commit author: display name (substring) or account ID.
+    /// Name contains.
+    pub name: Option<&'a str>,
+    /// Head commit author: display name (part of it) or account ID.
     pub author: Option<&'a str>,
     /// Sort field, e.g. `name` or `-target.date`.
     pub sort: Option<&'a str>,
-    pub limit: usize,
+    pub bbql: Option<&'a str>,
 }
-
-/// Most branches scanned when filtering by author, which Bitbucket can't do
-/// server side.
-const AUTHOR_SCAN: usize = 1000;
 
 fn branch_by_author(b: &Value, who: &str) -> bool {
     let user = &b["target"]["author"]["user"];
@@ -230,39 +407,38 @@ fn branch_by_author(b: &Value, who: &str) -> bool {
         .any(|s| s.to_lowercase().contains(&who_l))
 }
 
-/// `bitbucket branch query` (and the old `repo branches`): REST branches as
-/// a list.
-pub fn branch_query(c: &Client, path: &str, o: &BranchQuery) -> Result<Value> {
-    let filter = o.query.map(|q| format!("name ~ {}", quote(q)));
+/// Branches; the author filter runs client side.
+pub fn branch_list(c: &Client, path: &str, o: &BranchQuery, p: &Paging) -> Result<Listed> {
+    let mut f = Vec::new();
+    if let Some(q) = o.name {
+        f.push(format!("name ~ {}", quote(q)));
+    }
+    if let Some(q) = o.bbql {
+        f.push(format!("({q})"));
+    }
+    let filter = and(f);
     let mut params = Vec::new();
     if let Some(f) = &filter {
         params.push(("q", f.as_str()));
     }
-    if let Some(s) = o.sort {
-        params.push(("sort", s));
+    params.push(("sort", o.sort.unwrap_or("-target.date")));
+    let url = format!("{path}/refs/branches");
+    match o.author {
+        None => list(c, &url, &params, p),
+        Some(a) => list_where(c, &url, &params, p, |b| Ok(branch_by_author(b, a))),
     }
-    let fetch = if o.author.is_some() {
-        AUTHOR_SCAN.max(o.limit)
-    } else {
-        o.limit
-    };
-    let items = paginate(c, &format!("{path}/refs/branches"), &params, fetch)?;
-    Ok(items
-        .iter()
-        .filter(|b| o.author.is_none_or(|a| branch_by_author(b, a)))
-        .take(o.limit)
-        .cloned()
-        .collect())
 }
 
 // --- pull requests -----------------------------------------------------------
 
-#[derive(Default)]
+/// Filters for `bitbucket pr list`.
+#[derive(Default, Clone, Copy)]
 pub struct PrQuery<'a> {
     pub state: Option<&'a str>,
     pub author: Option<&'a str>,
     pub source: Option<&'a str>,
     pub dest: Option<&'a str>,
+    /// Title or description contains.
     pub text: Option<&'a str>,
     pub created_since: Option<&'a str>,
     pub created_before: Option<&'a str>,
@@ -270,18 +446,17 @@ pub struct PrQuery<'a> {
     pub updated_before: Option<&'a str>,
     /// `{uuid}`, account ID, or exact nickname.
     pub reviewer: Option<&'a str>,
-    /// One 1-based page instead of following pages up to `limit`.
-    pub page: Option<usize>,
-    pub limit: usize,
+    /// A BBQL filter, combined with the others by AND.
+    pub bbql: Option<&'a str>,
 }
 
-/// BBQL filter for `pull-requests query` (state is a separate query param).
-fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
+/// The BBQL filter for a pull request list (state is a separate parameter).
+pub(crate) fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
     let mut f = Vec::new();
     if let Some(a) = o.author {
         f.push(if a.starts_with('{') {
             format!("author.uuid = {}", quote(a))
-        } else if a.contains(':') {
+        } else if lifecycle::is_account_id(a) {
             format!("author.account_id = {}", quote(a))
         } else {
             format!(
@@ -293,7 +468,7 @@ fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
     if let Some(r) = o.reviewer {
         let field = if r.starts_with('{') {
             "uuid"
-        } else if r.contains(':') || (r.len() == 24 && r.bytes().all(|b| b.is_ascii_hexdigit())) {
+        } else if lifecycle::is_account_id(r) {
             "account_id"
         } else {
             "nickname"
@@ -319,72 +494,38 @@ fn pr_filter(o: &PrQuery) -> Result<Option<String>> {
             f.push(format!("{field} {op} {}", time::to_date(v)?));
         }
     }
+    if let Some(q) = o.bbql {
+        f.push(format!("({q})"));
+    }
     Ok(and(f))
 }
 
-/// `bitbucket pull-requests query`: REST's page of pull requests with
-/// twg's paging summary (`returned`, `hasNextPage`, `hasMore`).
-pub fn pr_query(c: &Client, path: &str, o: &PrQuery) -> Result<Value> {
-    let state = o.state.unwrap_or("OPEN").to_ascii_uppercase();
+/// The state parameter: one state, or every state for `ALL`.
+fn states(state: Option<&str>) -> Vec<String> {
+    match state.map(str::to_ascii_uppercase).as_deref() {
+        None => vec!["OPEN".into()],
+        Some("ALL") => ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]
+            .map(String::from)
+            .to_vec(),
+        Some(s) => s.split(',').map(|s| s.trim().to_string()).collect(),
+    }
+}
+
+/// Pull requests of a repository, newest update first.
+pub fn pr_list(c: &Client, path: &str, o: &PrQuery, p: &Paging) -> Result<Listed> {
+    let states = states(o.state);
     let filter = pr_filter(o)?;
-    let mut q = vec![("state", state.as_str()), ("sort", "-updated_on")];
+    let mut q: Vec<(&str, &str)> = states.iter().map(|s| ("state", s.as_str())).collect();
+    q.push(("sort", "-updated_on"));
     if let Some(f) = &filter {
         q.push(("q", f));
     }
-    let url = format!("{path}/pullrequests");
-    if let Some(page) = o.page {
-        let size = o.limit.clamp(1, 50);
-        let (page_s, size_s) = (page.to_string(), size.to_string());
-        q.push(("page", &page_s));
-        q.push(("pagelen", &size_s));
-        let v = c.get(&url, &q)?;
-        let items = v["values"].as_array().cloned().unwrap_or_default();
-        let more = v["next"].is_string();
-        return Ok(json!({
-            "values": items,
-            "page": page,
-            "pagelen": size,
-            "returned": items.len(),
-            "hasNextPage": more,
-            "hasMore": more,
-        }));
-    }
-    let (items, more) = paginate_more(c, &url, &q, o.limit)?;
-    Ok(json!({
-        "values": items,
-        "page": 1,
-        "pagelen": o.limit.clamp(1, 50),
-        "returned": items.len(),
-        "hasNextPage": more,
-        "hasMore": more,
-    }))
+    list(c, &format!("{path}/pullrequests"), &q, p)
 }
 
-pub struct PrGet {
-    pub comments: bool,
-    pub diff: bool,
-    pub statuses: bool,
-}
-
-/// `bitbucket pull-requests get`: the REST pull request. `--comments`,
-/// `--diff` and `--statuses` add `_comments`, `_diffstat` and `_statuses`
-/// (REST lists, as twg names its extra sections).
-pub fn pr_get(c: &Client, path: &str, id: u64, o: &PrGet) -> Result<Value> {
-    let base = format!("{path}/pullrequests/{id}");
-    let mut out = c.get(&base, &[])?;
-    if o.comments {
-        out["_comments"] = paginate(c, &format!("{base}/comments"), &[], 500)?
-            .into_iter()
-            .filter(|cm| cm["deleted"] != true)
-            .collect();
-    }
-    if o.diff {
-        out["_diffstat"] = paginate(c, &format!("{base}/diffstat"), &[], 500)?.into();
-    }
-    if o.statuses {
-        out["_statuses"] = paginate(c, &format!("{base}/statuses"), &[], 100)?.into();
-    }
-    Ok(out)
+/// One pull request.
+pub fn pr_get(c: &Client, path: &str, id: u64) -> Result<Value> {
+    c.get(&format!("{path}/pullrequests/{id}"), &[])
 }
 
 pub struct NewPr<'a> {
@@ -398,7 +539,6 @@ pub struct NewPr<'a> {
     pub draft: bool,
 }
 
-/// `bitbucket pull-requests create`
 pub fn pr_create(c: &Client, path: &str, n: NewPr) -> Result<Value> {
     let mut req = json!({
         "title": n.title,
@@ -428,7 +568,7 @@ pub fn pr_create(c: &Client, path: &str, n: NewPr) -> Result<Value> {
     c.post(&format!("{path}/pullrequests"), &req)
 }
 
-/// A PR number or a Bitbucket pull-request URL.
+/// A pull request number, or a Bitbucket pull request URL.
 pub fn pr_number(s: &str) -> Result<u64> {
     let s = s.trim().trim_end_matches('/');
     let tail = match s.find("/pull-requests/") {
@@ -439,7 +579,26 @@ pub fn pr_number(s: &str) -> Result<u64> {
         None => s,
     };
     tail.parse()
-        .map_err(|_| anyhow!("'{s}' is not a pull request number or URL"))
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| usage(format!("'{s}' is not a pull request number or URL")))
+}
+
+/// The repository of a pull request URL (`workspace/slug`), if it is one.
+pub fn pr_url_repo(s: &str) -> Option<String> {
+    let s = s.trim();
+    let i = s.find("/pull-requests/")?;
+    let head = s[..i]
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("bitbucket.org/");
+    let mut parts = head.split('/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(ws), Some(slug), None) if !ws.is_empty() && !slug.is_empty() => {
+            Some(format!("{ws}/{slug}"))
+        }
+        _ => None,
+    }
 }
 
 /// Where an inline comment sits in the diff. `line`/`from_line` pick one
@@ -458,10 +617,6 @@ impl Anchor {
     fn is_empty(&self) -> bool {
         *self == Anchor::default()
     }
-}
-
-fn usage(msg: impl Into<String>) -> anyhow::Error {
-    ApiError::usage(msg).into()
 }
 
 /// One end of a range: both or neither of `start`/`end`, with start <= end.
@@ -542,8 +697,11 @@ pub struct NewComment<'a> {
     pub anchor: Anchor,
 }
 
-/// The request body for `pull-requests comment create`.
+/// The request body for a new comment.
 pub fn comment_body(n: &NewComment) -> Result<Value> {
+    if n.text.trim().is_empty() {
+        return Err(usage("the comment body can't be empty"));
+    }
     let mut req = json!({"content": {"raw": n.text}});
     if let Some(p) = n.reply_to {
         req["parent"] = json!({"id": p});
@@ -557,7 +715,6 @@ pub fn comment_body(n: &NewComment) -> Result<Value> {
     Ok(req)
 }
 
-/// `bitbucket pull-requests comment create`: the REST comment.
 pub fn pr_comment(c: &Client, path: &str, id: u64, n: NewComment) -> Result<Value> {
     let req = comment_body(&n)?;
     c.post(&format!("{path}/pullrequests/{id}/comments"), &req)
@@ -567,62 +724,59 @@ fn comment_path(path: &str, id: u64, cid: u64) -> String {
     format!("{path}/pullrequests/{id}/comments/{cid}")
 }
 
-/// `bitbucket pull-requests comment query`: REST comments as a list, in
-/// creation order, without deleted ones (as `pull-requests get --comments`).
-pub fn pr_comment_query(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    let items = paginate(
+/// Comments in creation order, without deleted ones.
+pub fn pr_comment_list(c: &Client, path: &str, id: u64, p: &Paging) -> Result<Listed> {
+    list_where(
         c,
         &format!("{path}/pullrequests/{id}/comments"),
         &[("sort", "created_on")],
-        limit,
-    )?;
-    Ok(items
-        .into_iter()
-        .filter(|cm| cm["deleted"] != true)
-        .collect())
+        p,
+        |cm| Ok(cm["deleted"] != true),
+    )
 }
 
-/// `bitbucket pull-requests comment get`: the REST comment.
 pub fn pr_comment_get(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
     c.get(&comment_path(path, id, cid), &[])
 }
 
-/// `bitbucket pull-requests comment update`: replaces the comment text.
+/// Replaces the comment text.
 pub fn pr_comment_update(c: &Client, path: &str, id: u64, cid: u64, text: &str) -> Result<Value> {
+    if text.trim().is_empty() {
+        return Err(usage("the comment body can't be empty"));
+    }
     c.put(
         &comment_path(path, id, cid),
         &json!({"content": {"raw": text}}),
     )
 }
 
-/// `bitbucket pull-requests comment delete`. Bitbucket answers 204, so the
-/// result names what was removed.
+/// Bitbucket answers 204, so the result names what was removed.
 pub fn pr_comment_delete(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
     c.delete(&comment_path(path, id, cid), &[])?;
-    Ok(json!({"id": cid, "pullRequest": id, "deleted": true}))
+    Ok(json!({"id": cid, "deleted": true}))
 }
 
-/// `bitbucket pull-requests comment resolve`: the REST resolution object.
+/// Resolves the thread, then reads the comment back.
 pub fn pr_comment_resolve(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
     c.request(
         "POST",
         &format!("{}/resolve", comment_path(path, id, cid)),
         &[],
         None,
-    )
+    )?;
+    pr_comment_get(c, path, id, cid)
 }
 
-/// `bitbucket pull-requests comment reopen`. Bitbucket answers 204.
+/// Reopens the thread (204), then reads the comment back.
 pub fn pr_comment_reopen(c: &Client, path: &str, id: u64, cid: u64) -> Result<Value> {
     c.delete(&format!("{}/resolve", comment_path(path, id, cid)), &[])?;
-    Ok(json!({"id": cid, "pullRequest": id, "resolved": false}))
+    pr_comment_get(c, path, id, cid)
 }
 
 fn task_path(path: &str, id: u64, tid: u64) -> String {
     format!("{path}/pullrequests/{id}/tasks/{tid}")
 }
 
-/// `bitbucket pull-requests task create`: the REST task.
 pub fn pr_task_create(
     c: &Client,
     path: &str,
@@ -630,6 +784,9 @@ pub fn pr_task_create(
     text: &str,
     comment: Option<u64>,
 ) -> Result<Value> {
+    if text.trim().is_empty() {
+        return Err(usage("the task body can't be empty"));
+    }
     let mut req = json!({"content": {"raw": text}});
     if let Some(cid) = comment {
         req["comment"] = json!({"id": cid});
@@ -637,12 +794,11 @@ pub fn pr_task_create(
     c.post(&format!("{path}/pullrequests/{id}/tasks"), &req)
 }
 
-/// `bitbucket pull-requests task get`: the REST task.
 pub fn pr_task_get(c: &Client, path: &str, id: u64, tid: u64) -> Result<Value> {
     c.get(&task_path(path, id, tid), &[])
 }
 
-/// Changes for `bitbucket pull-requests task update|resolve|reopen`.
+/// A change to a task.
 #[derive(Default)]
 pub struct TaskChange<'a> {
     pub text: Option<&'a str>,
@@ -654,55 +810,71 @@ pub struct TaskChange<'a> {
 pub fn task_body(t: &TaskChange) -> Result<Value> {
     let mut req = json!({});
     if let Some(text) = t.text {
+        if text.trim().is_empty() {
+            return Err(usage("the task body can't be empty"));
+        }
         req["content"] = json!({"raw": text});
     }
     if let Some(r) = t.resolved {
         req["state"] = if r { "RESOLVED" } else { "UNRESOLVED" }.into();
     }
     if req.as_object().is_some_and(|o| o.is_empty()) {
-        return Err(usage("pass --text, --resolve or --reopen"));
+        return Err(usage("nothing to change: pass --body"));
     }
     Ok(req)
 }
 
-/// `bitbucket pull-requests task update|resolve|reopen`: the REST task.
 pub fn pr_task_update(c: &Client, path: &str, id: u64, tid: u64, t: &TaskChange) -> Result<Value> {
     let req = task_body(t)?;
     c.put(&task_path(path, id, tid), &req)
 }
 
-/// `bitbucket pull-requests task delete`. Bitbucket answers 204.
+/// Bitbucket answers 204.
 pub fn pr_task_delete(c: &Client, path: &str, id: u64, tid: u64) -> Result<Value> {
     c.delete(&task_path(path, id, tid), &[])?;
-    Ok(json!({"id": tid, "pullRequest": id, "deleted": true}))
+    Ok(json!({"id": tid, "deleted": true}))
 }
 
-/// `bitbucket pull-requests diffstat`: REST diffstat entries as a list.
-pub fn pr_diffstat(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    Ok(paginate(c, &format!("{path}/pullrequests/{id}/diffstat"), &[], limit)?.into())
+pub fn pr_tasks(c: &Client, path: &str, id: u64, p: &Paging) -> Result<Listed> {
+    list(c, &format!("{path}/pullrequests/{id}/tasks"), &[], p)
 }
 
-/// `bitbucket pull-requests commits`: REST commits as a list.
-pub fn pr_commits(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    Ok(paginate(c, &format!("{path}/pullrequests/{id}/commits"), &[], limit)?.into())
+fn is_conflict(file: &Value) -> bool {
+    matches!(
+        file["status"].as_str(),
+        Some("merge conflict" | "local deleted" | "remote deleted")
+    )
 }
 
-fn raw_text(c: &Client, path: &str) -> Result<String> {
-    match c.get(path, &[])? {
-        Value::String(s) => Ok(s),
-        Value::Null => Ok(String::new()),
-        other => Ok(other.to_string()),
+/// Files changed, with lines added and removed; `conflicts` keeps only
+/// the files with merge conflicts.
+pub fn pr_diffstat(c: &Client, path: &str, id: u64, conflicts: bool, p: &Paging) -> Result<Listed> {
+    let url = format!("{path}/pullrequests/{id}/diffstat");
+    if conflicts {
+        list_where(c, &url, &[], p, |f| Ok(is_conflict(f)))
+    } else {
+        list(c, &url, &[], p)
     }
 }
 
-/// `bitbucket pull-requests diff`
-pub fn pr_diff(c: &Client, path: &str, id: u64) -> Result<String> {
-    raw_text(c, &format!("{path}/pullrequests/{id}/diff"))
+pub fn pr_commits(c: &Client, path: &str, id: u64, p: &Paging) -> Result<Listed> {
+    list(c, &format!("{path}/pullrequests/{id}/commits"), &[], p)
 }
 
-/// `bitbucket pull-requests patch`: the mbox-style patch as text.
+fn raw_text(c: &Client, path: &str, query: &[(&str, &str)]) -> Result<String> {
+    let b = c.get_bytes(path, query)?;
+    Ok(String::from_utf8_lossy(&b.data).into_owned())
+}
+
+/// The unified diff, optionally of one file.
+pub fn pr_diff(c: &Client, path: &str, id: u64, file: Option<&str>) -> Result<String> {
+    let q: Vec<(&str, &str)> = file.iter().map(|f| ("path", *f)).collect();
+    raw_text(c, &format!("{path}/pullrequests/{id}/diff"), &q)
+}
+
+/// The mbox-style patch (for `git am`).
 pub fn pr_patch(c: &Client, path: &str, id: u64) -> Result<String> {
-    raw_text(c, &format!("{path}/pullrequests/{id}/patch"))
+    raw_text(c, &format!("{path}/pullrequests/{id}/patch"), &[])
 }
 
 /// Parse `@@ -a,b +c,d @@` into (old start, old count, new start, new count).
@@ -798,92 +970,100 @@ pub fn diff_lines(diff: &str, needle: &str, only_path: Option<&str>) -> Vec<Valu
     out
 }
 
-/// `bitbucket pull-requests diff-line`: matching diff lines with the line
-/// numbers an inline comment needs.
-pub fn pr_diff_line(
-    c: &Client,
-    path: &str,
-    id: u64,
-    needle: &str,
-    only_path: Option<&str>,
-) -> Result<Value> {
-    if needle.is_empty() {
-        return Err(usage("--text must not be empty"));
-    }
-    let diff = pr_diff(c, path, id)?;
-    Ok(diff_lines(&diff, needle, only_path).into())
+/// What `bitbucket pr diff` prints.
+#[derive(Debug, Default)]
+pub struct DiffOpts<'a> {
+    pub path: Option<&'a str>,
+    /// The mbox patch instead of the diff.
+    pub patch: bool,
+    /// Only the lines containing this, with the numbers a comment needs.
+    pub grep: Option<&'a str>,
 }
 
-fn activity_event(item: &Value) -> (&str, &Value) {
+/// `{pr, path, diff, matches}`: the diff (or patch) text, or with `grep`
+/// the matching lines instead.
+pub fn pr_diff_view(c: &Client, path: &str, id: u64, o: &DiffOpts) -> Result<Value> {
+    if o.grep.is_some_and(str::is_empty) {
+        return Err(usage("--grep must not be empty"));
+    }
+    let text = if o.patch {
+        pr_patch(c, path, id)?
+    } else {
+        pr_diff(c, path, id, o.path)?
+    };
+    Ok(match o.grep {
+        Some(needle) => json!({
+            "pr": id, "path": o.path, "diff": null,
+            "matches": diff_lines(&text, needle, o.path),
+        }),
+        None => json!({"pr": id, "path": o.path, "diff": text, "matches": null}),
+    })
+}
+
+/// The kind of an activity entry (`comment`, `approval`, `update`, ...).
+pub fn activity_kind(item: &Value) -> &str {
     for kind in ["comment", "approval", "update", "changes_requested"] {
         if item[kind].is_object() {
-            return (kind, &item[kind]);
+            return kind;
         }
     }
     if let Some(obj) = item.as_object() {
         for (k, v) in obj {
             if k != "pull_request" && v.is_object() {
-                return (k.as_str(), v);
+                return k.as_str();
             }
         }
     }
-    ("unknown", item)
+    "unknown"
 }
 
-/// `bitbucket pull-requests activity`: REST activity entries as a list.
 pub fn pr_activity(
     c: &Client,
     path: &str,
     id: u64,
-    event_type: Option<&str>,
-    limit: usize,
-) -> Result<Value> {
-    let fetch = if event_type.is_some() {
-        limit.max(100)
-    } else {
-        limit
-    };
-    let items = paginate(c, &format!("{path}/pullrequests/{id}/activity"), &[], fetch)?;
-    Ok(items
-        .iter()
-        .filter(|item| {
-            let (kind, _) = activity_event(item);
-            event_type.is_none_or(|want| want.eq_ignore_ascii_case(kind))
-        })
-        .take(limit)
-        .cloned()
-        .collect())
+    kind: Option<&str>,
+    p: &Paging,
+) -> Result<Listed> {
+    let url = format!("{path}/pullrequests/{id}/activity");
+    match kind {
+        None => list(c, &url, &[], p),
+        Some(want) => list_where(c, &url, &[], p, |item| {
+            Ok(want.eq_ignore_ascii_case(activity_kind(item)))
+        }),
+    }
 }
 
-/// `bitbucket pull-requests task query` (and the old `tasks`)
-pub fn pr_tasks(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    Ok(paginate(c, &format!("{path}/pullrequests/{id}/tasks"), &[], limit)?.into())
+/// The participant record Bitbucket returns, with the pull request number.
+fn review(mut v: Value, id: u64) -> Value {
+    if v.is_object() {
+        v["pr"] = id.into();
+    }
+    v
 }
 
-/// `bitbucket pull-requests approve`
 pub fn pr_approve(c: &Client, path: &str, id: u64) -> Result<Value> {
-    c.request(
+    let v = c.request(
         "POST",
         &format!("{path}/pullrequests/{id}/approve"),
         &[],
         None,
-    )
+    )?;
+    Ok(review(v, id))
 }
 
-/// `bitbucket pull-requests unapprove`
 pub fn pr_unapprove(c: &Client, path: &str, id: u64) -> Result<Value> {
     c.delete(&format!("{path}/pullrequests/{id}/approve"), &[])?;
-    Ok(json!({"id": id, "approved": false}))
+    Ok(json!({"pr": id, "approved": false, "state": null}))
 }
 
-/// `bitbucket pull-requests request-changes`
 pub fn pr_request_changes(c: &Client, path: &str, id: u64) -> Result<Value> {
-    c.request(
+    let v = c.request(
         "POST",
         &format!("{path}/pullrequests/{id}/request-changes"),
         &[],
         None,
-    )
+    )?;
+    Ok(review(v, id))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -913,9 +1093,11 @@ pub struct PrMerge<'a> {
     /// Keep the source branch even if the pull request asks to close it.
     pub keep_source_branch: bool,
     pub message: Option<&'a str>,
+    /// Merge only if the source branch head is still this commit.
+    pub if_head: Option<&'a str>,
 }
 
-fn pr_merge_body(o: &PrMerge) -> Value {
+pub(crate) fn pr_merge_body(o: &PrMerge) -> Value {
     let mut req = json!({});
     if let Some(s) = o.strategy {
         req["merge_strategy"] = s.as_api().into();
@@ -931,12 +1113,11 @@ fn pr_merge_body(o: &PrMerge) -> Value {
     req
 }
 
-/// `bitbucket pull-requests merge`
+/// Merge without waiting (see [`lifecycle::merge`]).
 pub fn pr_merge(c: &Client, path: &str, id: u64, o: &PrMerge) -> Result<Value> {
     lifecycle::merge(c, path, id, o, None)
 }
 
-/// `bitbucket pull-requests decline`
 pub fn pr_decline(c: &Client, path: &str, id: u64) -> Result<Value> {
     c.request(
         "POST",
@@ -946,7 +1127,7 @@ pub fn pr_decline(c: &Client, path: &str, id: u64) -> Result<Value> {
     )
 }
 
-// --- search ------------------------------------------------------------------
+// --- code search -------------------------------------------------------------
 
 fn repo_slug(repo: &str) -> &str {
     let repo = repo.trim().trim_end_matches('/');
@@ -954,9 +1135,9 @@ fn repo_slug(repo: &str) -> &str {
     last.trim_end_matches(".git")
 }
 
-/// The search term and the filters. The modifiers the retired endpoint read
-/// from the query (`repo:`, `project:`, `path:`, `ext:`, `lang:`) become
-/// filters here; text in quotes is never read as one.
+/// The search term and the filters. The modifiers `repo:`, `project:`,
+/// `path:`, `ext:`, `lang:` in the query become filters; text in quotes is
+/// never read as one.
 fn code_search_query(query: &str, repo: Option<&str>) -> (String, Option<Value>) {
     let mut filters = Vec::new();
     if let Some(r) = repo.map(repo_slug).filter(|r| !r.is_empty()) {
@@ -1001,68 +1182,78 @@ fn code_search_query(query: &str, repo: Option<&str>) -> (String, Option<Value>)
     (term, filters)
 }
 
-/// A matched file, with the `file.path` and `content_match_count` keys of
-/// the retired endpoint.
-fn code_hit(f: &Value) -> Value {
-    json!({
-        "file": {"path": f["path"], "commit": {"hash": f["version"]}},
-        "content_match_count": f["matched_chunks"].as_array().map_or(0, Vec::len),
-        "matched_chunks": f["matched_chunks"],
-        "branch": f["branch_or_tag_name"],
-        "language": f["language"],
-        "url": f["url"],
-    })
-}
-
-/// `bitbucket search code`: `POST /workspaces/{ws}/codesearch`.
+/// Code search across a workspace (`POST /workspaces/{ws}/codesearch`, a
+/// read). The cursor carries the search's request id and its own cursor.
 pub fn search_code(
     c: &Client,
     ws: &str,
     query: &str,
     repo: Option<&str>,
-    limit: usize,
-) -> Result<Value> {
+    p: &Paging,
+) -> Result<Listed> {
     let (term, filters) = code_search_query(query, repo);
     if term.is_empty() || term.chars().count() > 1024 {
-        return Err(ApiError::usage("search needs 1 to 1024 characters of text").into());
+        return Err(usage("search needs 1 to 1024 characters of text"));
     }
     let mut search = json!({"search_term": term});
     if let Some(f) = filters {
         search["filters"] = f;
     }
     let path = format!("/workspaces/{}/codesearch", enc(ws));
+    let limit = p.limit.clamp(1, paging::HARD_CAP);
+    let mut next: Option<(String, String)> = match p.cursor.as_deref() {
+        None => None,
+        Some(s) => match Cursor::decode(s)?.position {
+            Position::Token(t) => {
+                let (id, cur) = t
+                    .split_once('|')
+                    .ok_or_else(|| usage("--cursor is not a cursor from a code search"))?;
+                Some((id.to_string(), cur.to_string()))
+            }
+            _ => return Err(usage("--cursor is not a cursor from a code search")),
+        },
+    };
     let mut hits = Vec::new();
-    let mut next: Option<(Value, Value)> = None;
-    while hits.len() < limit {
+    loop {
         let mut body = json!({
             "query": search,
             "config": {"max_results": (limit - hits.len()).min(100)},
         });
         if let Some((id, cursor)) = &next {
-            body["request_id"] = id.clone();
+            body["request_id"] = id.clone().into();
             body["pagination"] = json!({"next_cursor": cursor});
         }
-        let v = c.post(&path, &body)?;
+        let v = c.post_read(&path, &body)?;
         let files = v["matched_files"]
             .as_array()
             .ok_or_else(|| anyhow!("Bitbucket returned no matched_files list"))?;
-        hits.extend(files.iter().take(limit - hits.len()).map(code_hit));
+        hits.extend(files.iter().take(limit - hits.len()).cloned());
         let page = &v["pagination"];
         if page["has_more"] != true {
-            break;
+            return Ok((hits, None));
         }
-        let following = (v["id"].clone(), page["next_cursor"].clone());
-        if following.0.is_null() || following.1.is_null() || next.as_ref() == Some(&following) {
-            bail!("Bitbucket said there are more results but gave no cursor for them");
+        let (Some(id), Some(cursor)) = (v["id"].as_str(), page["next_cursor"].as_str()) else {
+            return Err(anyhow!(
+                "Bitbucket said there are more results but gave no cursor for them"
+            ));
+        };
+        let following = (id.to_string(), cursor.to_string());
+        if next.as_ref() == Some(&following) {
+            return Err(anyhow!(
+                "Bitbucket returned the same code search page twice"
+            ));
+        }
+        if hits.len() >= limit {
+            let t = Position::Token(format!("{}|{}", following.0, following.1));
+            return Ok((hits, Some(Cursor::at(t).encode())));
         }
         next = Some(following);
     }
-    Ok(hits.into())
 }
 
 // --- pipelines ---------------------------------------------------------------
 
-fn state_of(p: &Value) -> (String, Option<String>) {
+pub(crate) fn state_of(p: &Value) -> (String, Option<String>) {
     let state = p["state"]["name"].as_str().unwrap_or_default().to_string();
     let result = p["state"]["result"]["name"]
         .as_str()
@@ -1071,62 +1262,62 @@ fn state_of(p: &Value) -> (String, Option<String>) {
     (state, result)
 }
 
-/// `workspace/slug` from a `/repositories/workspace/slug` path.
-fn full_name(path: &str) -> String {
-    path.trim_start_matches("/repositories/").to_string()
-}
-
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct PipelineQuery<'a> {
     pub state: Option<&'a str>,
-    pub status: Option<&'a str>,
+    /// SUCCESSFUL (or PASSED), FAILED, ERROR, STOPPED.
+    pub result: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub trigger: Option<&'a str>,
     /// The target selector's pattern, e.g. a custom pipeline's name.
     pub pattern: Option<&'a str>,
-    pub limit: usize,
 }
 
-/// `bitbucket pipeline query`: REST pipelines as a list, each with `_repo`
-/// (`workspace/slug`) as twg adds. State/result/trigger are filtered
-/// client-side over the most recent runs.
-pub fn pipeline_query(c: &Client, path: &str, o: &PipelineQuery) -> Result<Value> {
+impl PipelineQuery<'_> {
+    fn filters(&self) -> bool {
+        self.state.is_some()
+            || self.result.is_some()
+            || self.trigger.is_some()
+            || self.pattern.is_some()
+    }
+
+    fn keep(&self, p: &Value) -> bool {
+        let eq = |a: Option<&str>, b: Option<&str>| match (a, b) {
+            (None, _) => true,
+            (Some(want), Some(got)) => want.eq_ignore_ascii_case(got),
+            (Some(_), None) => false,
+        };
+        let (state, result) = state_of(p);
+        let result_ok = eq(self.result, result.as_deref())
+            || (self
+                .result
+                .is_some_and(|s| s.eq_ignore_ascii_case("PASSED"))
+                && result.as_deref() == Some("SUCCESSFUL"));
+        eq(self.state, Some(&state))
+            && result_ok
+            && eq(self.pattern, p["target"]["selector"]["pattern"].as_str())
+            && eq(
+                self.trigger,
+                p["trigger"]["name"]
+                    .as_str()
+                    .map(|t| t.trim_end_matches("_TRIGGER")),
+            )
+    }
+}
+
+/// Pipeline runs, newest first. State, result, trigger and pattern are
+/// filtered client side.
+pub fn pipeline_list(c: &Client, path: &str, o: &PipelineQuery, p: &Paging) -> Result<Listed> {
     let mut q = vec![("sort", "-created_on")];
     if let Some(b) = o.branch {
         q.push(("target.branch", b));
     }
-    let filtering =
-        o.state.is_some() || o.status.is_some() || o.trigger.is_some() || o.pattern.is_some();
-    let fetch = if filtering { o.limit.max(100) } else { o.limit };
-    let eq = |a: Option<&str>, b: Option<&str>| match (a, b) {
-        (None, _) => true,
-        (Some(want), Some(got)) => want.eq_ignore_ascii_case(got),
-        (Some(_), None) => false,
-    };
-    Ok(paginate(c, &format!("{path}/pipelines"), &q, fetch)?
-        .iter()
-        .filter(|p| {
-            let (state, result) = state_of(p);
-            eq(o.state, Some(&state))
-                // twg says PASSED where a pipeline's result says SUCCESSFUL.
-                && (eq(o.status, result.as_deref())
-                    || (o.status.is_some_and(|s| s.eq_ignore_ascii_case("PASSED"))
-                        && result.as_deref() == Some("SUCCESSFUL")))
-                && eq(o.pattern, p["target"]["selector"]["pattern"].as_str())
-                && eq(
-                    o.trigger,
-                    p["trigger"]["name"]
-                        .as_str()
-                        .map(|t| t.trim_end_matches("_TRIGGER")),
-                )
-        })
-        .take(o.limit)
-        .map(|p| {
-            let mut p = p.clone();
-            p["_repo"] = full_name(path).into();
-            p
-        })
-        .collect())
+    let url = format!("{path}/pipelines");
+    if o.filters() {
+        list_where(c, &url, &q, p, |v| Ok(o.keep(v)))
+    } else {
+        list(c, &url, &q, p)
+    }
 }
 
 /// Build number, `{uuid}`, or a pipeline result URL -> the id the API accepts.
@@ -1142,73 +1333,17 @@ pub fn pipeline_ref(s: &str) -> String {
     }
 }
 
-pub struct PipelineGet<'a> {
-    pub logs: bool,
-    pub failed_steps: bool,
-    pub lines: usize,
-    pub step: Option<&'a str>,
-}
-
-/// `bitbucket pipeline get`: the REST pipeline with its REST `steps`; with
-/// `--logs`, each selected step gets `log` (the last `lines` lines),
-/// `log_total_lines` and `log_truncated`, or `log_error`.
-pub fn pipeline_get(c: &Client, path: &str, pipeline: &str, o: &PipelineGet) -> Result<Value> {
-    let p = c.get(
+/// One pipeline run.
+pub fn pipeline_get(c: &Client, path: &str, pipeline: &str) -> Result<Value> {
+    c.get(
         &format!("{path}/pipelines/{}", enc(&pipeline_ref(pipeline))),
         &[],
-    )?;
-    let uuid = p["uuid"]
-        .as_str()
-        .ok_or_else(|| anyhow!("pipeline has no uuid"))?;
-    let mut out = p.clone();
-    let steps = paginate(
-        c,
-        &format!("{path}/pipelines/{}/steps", enc(uuid)),
-        &[],
-        100,
-    )?;
-    let selected: Vec<usize> = pipelines::select(&steps, o.step)?
-        .into_iter()
-        .map(|(i, _)| i)
-        .collect();
-    let mut rendered = Vec::new();
-    for (i, s) in steps.iter().enumerate() {
-        let (_, result) = state_of(s);
-        let mut step = s.clone();
-        let failed = matches!(result.as_deref(), Some("FAILED" | "ERROR"));
-        let wanted = selected.contains(&i);
-        if o.logs && wanted && (!o.failed_steps || failed) {
-            let log_path = format!(
-                "{path}/pipelines/{}/steps/{}/log",
-                enc(uuid),
-                enc(s["uuid"].as_str().unwrap_or(""))
-            );
-            match c.get_bytes(&log_path, &[]) {
-                Ok(bytes) => {
-                    // Not parsed: a log can happen to be valid JSON.
-                    let text = String::from_utf8_lossy(&bytes.data);
-                    let total = text.lines().count();
-                    step["log"] = tail(&text, o.lines).into();
-                    step["log_total_lines"] = total.into();
-                    step["log_truncated"] = (o.lines > 0 && total > o.lines).into();
-                }
-                Err(e) => step["log_error"] = format!("{e:#}").into(),
-            }
-        }
-        rendered.push(step);
-    }
-    out["steps"] = rendered.into();
-    Ok(out)
+    )
 }
 
-fn tail(text: &str, n: usize) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let start = if n == 0 {
-        0
-    } else {
-        lines.len().saturating_sub(n)
-    };
-    lines[start..].join("\n")
+/// A reason an API call came back as the wrong kind of thing.
+pub(crate) fn not_found(message: impl Into<String>) -> anyhow::Error {
+    ApiError::new(ErrorKind::NotFound, message).into()
 }
 
 #[cfg(test)]
@@ -1239,7 +1374,9 @@ mod tests {
             "/repositories/acme/api"
         );
         assert!(repo_path(Some("api"), None, None).is_err());
-        assert!(repo_path(None, Some("acme"), None).is_err());
+        let none = repo_path(None, Some("acme"), None).unwrap_err();
+        assert_eq!(ApiError::find(&none).unwrap().kind, ErrorKind::Usage);
+        assert_eq!(full_name("/repositories/ac%20me/api"), "ac me/api");
     }
 
     #[test]
@@ -1250,13 +1387,17 @@ mod tests {
             930
         );
         assert!(pr_number("abc").is_err());
+        assert!(pr_number("0").is_err());
+        assert_eq!(
+            pr_url_repo("https://bitbucket.org/acme/api/pull-requests/930/diff").as_deref(),
+            Some("acme/api")
+        );
+        assert_eq!(pr_url_repo("930"), None);
         assert_eq!(
             pipeline_ref("https://bitbucket.org/acme/api/pipelines/results/1234"),
             "1234"
         );
         assert_eq!(pipeline_ref("{abc-def}"), "{abc-def}");
-        assert_eq!(tail("a\nb\nc", 2), "b\nc");
-        assert_eq!(tail("a\nb\nc", 0), "a\nb\nc");
     }
 
     #[test]
@@ -1265,19 +1406,41 @@ mod tests {
             author: Some("jane"),
             source: Some("feat/x"),
             created_since: Some("2026-01-01"),
+            bbql: Some("comment_count > 2"),
             ..Default::default()
         })
         .unwrap()
         .unwrap();
         assert_eq!(
             f,
-            r#"(author.nickname = "jane" OR author.display_name ~ "jane") AND source.branch.name = "feat/x" AND created_on >= 2026-01-01"#
+            r#"(author.nickname = "jane" OR author.display_name ~ "jane") AND source.branch.name = "feat/x" AND created_on >= 2026-01-01 AND (comment_count > 2)"#
         );
         assert_eq!(pr_filter(&PrQuery::default()).unwrap(), None);
+        assert_eq!(states(Some("all")).len(), 4);
+        assert_eq!(states(None), ["OPEN"]);
     }
 
     #[test]
-    fn src_paths_and_summaries() {
+    fn cursors_keep_the_page_size() {
+        assert_eq!(at(&Position::Start, 10).unwrap(), (10, None));
+        assert_eq!(at(&Position::Start, 500).unwrap(), (50, None));
+        assert_eq!(
+            at(&Position::Token("25:3".into()), 1).unwrap(),
+            (25, Some("3".into()))
+        );
+        assert_eq!(
+            at(&Position::Token("25:a:b".into()), 1).unwrap(),
+            (25, Some("a:b".into()))
+        );
+        assert!(at(&Position::Token("x".into()), 1).is_err());
+        assert!(at(&Position::Offset(3), 1).is_err());
+        let v = json!({"next": "https://api.bitbucket.org/2.0/x?pagelen=10&page=Zm9v%3D"});
+        assert_eq!(next_page(&v).as_deref(), Some("Zm9v="));
+        assert_eq!(next_page(&json!({})), None);
+    }
+
+    #[test]
+    fn src_paths() {
         assert_eq!(
             repo_src_path("/repositories/acme/api", "main", "src/lib.rs"),
             "/repositories/acme/api/src/main/src/lib.rs"
@@ -1338,245 +1501,5 @@ mod tests {
                 .len(),
             2
         );
-    }
-
-    fn mock_server(
-        routes: Vec<(&'static str, &'static str, &'static str, u16, &'static str)>,
-    ) -> (String, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = std::thread::spawn(move || {
-            for (want_method, want_path, want_body_substr, status, resp_body) in routes {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut raw = Vec::new();
-                let mut buf = [0u8; 4096];
-                let header_end = loop {
-                    let n = stream.read(&mut buf).unwrap();
-                    assert!(n > 0, "unexpected EOF reading headers");
-                    raw.extend_from_slice(&buf[..n]);
-                    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
-                        break pos + 4;
-                    }
-                };
-                let headers = String::from_utf8_lossy(&raw[..header_end]);
-                let content_len = headers
-                    .lines()
-                    .find_map(|l| {
-                        let (k, v) = l.split_once(':')?;
-                        k.eq_ignore_ascii_case("content-length")
-                            .then(|| v.trim().parse::<usize>().ok())?
-                    })
-                    .unwrap_or(0);
-                while raw.len() < header_end + content_len {
-                    let n = stream.read(&mut buf).unwrap();
-                    assert!(n > 0, "unexpected EOF reading body");
-                    raw.extend_from_slice(&buf[..n]);
-                }
-                let req = String::from_utf8_lossy(&raw);
-                let first_line = req.lines().next().unwrap_or_default();
-                let mut parts = first_line.split_whitespace();
-                let method = parts.next().unwrap_or_default();
-                let path = parts.next().unwrap_or_default();
-                assert_eq!(
-                    method, want_method,
-                    "unexpected method in request: {first_line}"
-                );
-                assert_eq!(path, want_path, "unexpected path in request: {first_line}");
-                if !want_body_substr.is_empty() {
-                    let body = &req[header_end..];
-                    assert!(
-                        body.contains(want_body_substr),
-                        "expected body containing {want_body_substr:?} in {body}"
-                    );
-                }
-                let reason = match status {
-                    200 => "OK",
-                    204 => "No Content",
-                    _ => "Error",
-                };
-                let resp = format!(
-                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{resp_body}",
-                    resp_body.len()
-                );
-                stream.write_all(resp.as_bytes()).unwrap();
-            }
-        });
-        (format!("http://{addr}"), handle)
-    }
-
-    #[test]
-    fn pr_endpoints_roundtrip() {
-        let (base, h) = mock_server(vec![
-            (
-                "GET",
-                "/repositories/acme/api/pullrequests/5/diff",
-                "",
-                200,
-                "diff --git a/a b/a\n+hi\n",
-            ),
-            (
-                "GET",
-                "/repositories/acme/api/pullrequests/5/activity?pagelen=50",
-                "",
-                200,
-                r#"{"values":[{"approval":{"date":"2026-01-01","user":{"display_name":"Bob"}}},{"comment":{"id":1,"created_on":"2026-01-02","user":{"display_name":"Alice"},"content":{"raw":"hi"}}}]}"#,
-            ),
-            (
-                "GET",
-                "/repositories/acme/api/pullrequests/5/tasks?pagelen=50",
-                "",
-                200,
-                r#"{"values":[{"id":3,"state":"UNRESOLVED","content":{"raw":"Fix it"},"creator":{"display_name":"Alice"}}]}"#,
-            ),
-            (
-                "POST",
-                "/repositories/acme/api/pullrequests/5/approve",
-                "",
-                200,
-                r#"{"approved":true,"state":"approved","user":{"display_name":"Bob"}}"#,
-            ),
-            (
-                "DELETE",
-                "/repositories/acme/api/pullrequests/5/approve",
-                "",
-                204,
-                "",
-            ),
-            (
-                "POST",
-                "/repositories/acme/api/pullrequests/5/request-changes",
-                "",
-                200,
-                r#"{"approved":false,"state":"changes_requested","user":{"display_name":"Bob"}}"#,
-            ),
-            (
-                "POST",
-                "/repositories/acme/api/pullrequests/5/merge",
-                r#""merge_strategy":"fast_forward""#,
-                200,
-                r#"{"id":5,"title":"T","state":"MERGED"}"#,
-            ),
-            (
-                "POST",
-                "/repositories/acme/api/pullrequests/5/decline",
-                "",
-                200,
-                r#"{"id":5,"title":"T","state":"DECLINED"}"#,
-            ),
-        ]);
-        let c = Client::new(base, "u@e.com", "tok", Some(5000));
-        let p = "/repositories/acme/api";
-
-        assert_eq!(pr_diff(&c, p, 5).unwrap(), "diff --git a/a b/a\n+hi\n");
-        let act = pr_activity(&c, p, 5, Some("comment"), 10).unwrap();
-        assert_eq!(act.as_array().unwrap().len(), 1);
-        assert_eq!(act[0]["comment"]["content"]["raw"], "hi");
-
-        let tasks = pr_tasks(&c, p, 5, 50).unwrap();
-        assert_eq!(tasks[0]["id"], 3);
-        assert_eq!(tasks[0]["state"], "UNRESOLVED");
-
-        assert_eq!(pr_approve(&c, p, 5).unwrap()["approved"], true);
-        assert_eq!(pr_unapprove(&c, p, 5).unwrap()["approved"], false);
-        assert_eq!(
-            pr_request_changes(&c, p, 5).unwrap()["state"],
-            "changes_requested"
-        );
-
-        let merged = pr_merge(
-            &c,
-            p,
-            5,
-            &PrMerge {
-                strategy: Some(MergeStrategy::FastForward),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(merged["state"], "MERGED");
-        assert_eq!(pr_decline(&c, p, 5).unwrap()["state"], "DECLINED");
-        h.join().unwrap();
-    }
-
-    #[test]
-    fn repo_and_search_endpoints_roundtrip() {
-        let (base, h) = mock_server(vec![
-            (
-                "GET",
-                "/repositories/acme/api",
-                "",
-                200,
-                r#"{"mainbranch":{"name":"develop"}}"#,
-            ),
-            (
-                "GET",
-                "/repositories/acme/api/src/develop/README.md",
-                "",
-                200,
-                "# Hello\n",
-            ),
-            (
-                "GET",
-                "/repositories/acme/api",
-                "",
-                200,
-                r#"{"mainbranch":null}"#,
-            ),
-            (
-                "GET",
-                "/repositories/acme/api/src/HEAD/src",
-                "",
-                200,
-                r#"{"values":[{"path":"src/main.rs","type":"commit_file","size":10}]}"#,
-            ),
-            (
-                "GET",
-                "/repositories/acme/api/refs/branches?q=name+%7E+%22feat%22&pagelen=10",
-                "",
-                200,
-                r#"{"values":[{"name":"feat/x","target":{"hash":"abcdef1234567890"}}]}"#,
-            ),
-            (
-                "POST",
-                "/workspaces/acme/codesearch",
-                "needle",
-                200,
-                r#"{"id":"r1","matched_files":[{"path":"lib.rs","matched_chunks":[{},{}]}],"pagination":{"has_more":false}}"#,
-            ),
-        ]);
-        let c = Client::new(base, "u@e.com", "tok", Some(5000));
-        let p = "/repositories/acme/api";
-
-        match repo_file(&c, p, "README.md", None).unwrap() {
-            RepoFile::Raw(s) => assert_eq!(s, "# Hello\n"),
-            RepoFile::Dir(_) => panic!("expected raw file"),
-        }
-        match repo_file(&c, p, "src", None).unwrap() {
-            RepoFile::Dir(v) => {
-                assert_eq!(v[0]["path"], "src/main.rs");
-                assert_eq!(v[0]["type"], "commit_file");
-            }
-            RepoFile::Raw(_) => panic!("expected directory listing"),
-        }
-        let branches = branch_query(
-            &c,
-            p,
-            &BranchQuery {
-                query: Some("feat"),
-                limit: 10,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(branches[0]["name"], "feat/x");
-        assert!(branches[0]["target"]["hash"].is_string());
-
-        let hits = search_code(&c, "acme", "needle", Some("api"), 10).unwrap();
-        assert_eq!(hits[0]["file"]["path"], "lib.rs");
-        assert_eq!(hits[0]["content_match_count"], 2);
-        h.join().unwrap();
     }
 }

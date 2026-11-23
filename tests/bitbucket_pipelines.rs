@@ -1,8 +1,8 @@
-//! Offline tests for Pipelines and deployments (#34).
+//! Offline tests for pipelines, steps, logs, deployments and environments.
 
 mod common;
 
-use atlx::bitbucket::{self, PipelineGet, PipelineQuery, deployments, pipelines as pl};
+use atlx::bitbucket::{self, Paging, PipelineQuery, deployments, pipelines as pl};
 use atlx::client::{ApiError, ErrorKind};
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
@@ -114,11 +114,7 @@ fn run_never_echoes_secured_values() {
 }
 
 #[test]
-fn rerun_needs_consent_a_failure_and_readable_variables() {
-    let srv = MockServer::with_responses([]);
-    assert!(pl::rerun(&srv.client(), REPO, "7", false).is_err());
-    assert!(srv.requests().is_empty());
-
+fn rerun_needs_a_failure_a_commit_and_readable_variables() {
     let failed = json!({"result": {"name": "FAILED"}});
     let target = json!({"commit": {"hash": "abc"}});
     for p in [
@@ -127,7 +123,7 @@ fn rerun_needs_consent_a_failure_and_readable_variables() {
         json!({"uuid": "{p}", "target": {"ref_name": "main"}, "state": failed}),
     ] {
         let srv = MockServer::with_responses([ok(p)]);
-        assert!(pl::rerun(&srv.client(), REPO, "7", true).is_err());
+        assert!(pl::rerun(&srv.client(), REPO, "7").is_err());
         assert_eq!(srv.requests().len(), 1);
     }
 }
@@ -142,7 +138,7 @@ fn rerun_uses_the_same_commit() {
         })),
         ok(json!({"build_number": 8})),
     ]);
-    let out = pl::rerun(&srv.client(), REPO, "7", true).unwrap();
+    let out = pl::rerun(&srv.client(), REPO, "7").unwrap();
     assert_eq!(out["rerunOf"], 7);
     assert_eq!(
         srv.requests()[1].json_body()["target"],
@@ -152,93 +148,105 @@ fn rerun_uses_the_same_commit() {
 }
 
 #[test]
-fn get_selects_steps_by_index_and_adds_tests() {
+fn steps_are_numbered_and_one_comes_with_its_tests() {
+    let steps = || page(json!([{"uuid": "{a}", "name": "Lint"}, {"uuid": "{b}", "name": "Test"}]));
     let srv = MockServer::with_responses([
         run_state("COMPLETED", Some("FAILED")),
-        page(json!([{"uuid": "{a}", "name": "Lint"}, {"uuid": "{b}", "name": "Test"}])),
-        MockResponse::text(200, "123"),
+        steps(),
+        run_state("COMPLETED", Some("FAILED")),
+        steps(),
         ok(json!({"number_of_failed_test_cases": 1})),
-        page(json!([{"name": "t1"}])),
+        page(json!([{"name": "t1", "status": "FAILED"}])),
     ]);
-    let o = PipelineGet {
-        logs: true,
-        failed_steps: false,
-        lines: 10,
-        step: Some("2"),
-    };
+    let c = srv.client();
+    let (list, next) = pl::step_list(&c, REPO, "7", &Paging::new(1)).unwrap();
+    assert_eq!(list[0]["index"], 1);
+    assert_eq!(next.as_deref(), Some("o:1"));
+
     let t = pl::Tests {
-        reports: true,
         cases: true,
         case_limit: 100,
     };
-    let out = pl::get(&srv.client(), REPO, "7", &o, &t).unwrap();
-    let test = &out["steps"][1];
-    assert_eq!(test["log"], "123", "a log that is valid JSON stays text");
+    let test = pl::step_get(&c, REPO, "7", "2", &t).unwrap();
+    assert_eq!(test["index"], 2);
     assert_eq!(test["test_report"]["number_of_failed_test_cases"], 1);
     assert_eq!(test["test_cases"][0]["name"], "t1");
-    assert!(out["steps"][0].get("test_report").is_none());
+    let rec = atlx::schema::project(
+        &test,
+        &bitbucket::records::STEP,
+        &atlx::schema::Selection::Default,
+    )
+    .unwrap();
+    assert_eq!(
+        rec["testCases"],
+        json!([{"name": "t1", "status": "FAILED", "duration": null}])
+    );
     assert!(
-        srv.requests()[4]
+        srv.requests()[5]
             .path
             .ends_with("/steps/%7Bb%7D/test_reports/test_cases")
     );
 }
 
 #[test]
-fn get_reports_an_unknown_step() {
+fn an_unknown_step_is_a_usage_error() {
     let srv = MockServer::with_responses([run_state("COMPLETED", None), step("COMPLETED", None)]);
-    let o = PipelineGet {
-        logs: true,
-        failed_steps: false,
-        lines: 10,
+    let o = pl::LogOpts {
         step: Some("Deploy"),
+        ..Default::default()
     };
-    let err = bitbucket::pipeline_get(&srv.client(), REPO, "7", &o).unwrap_err();
+    let err = pl::logs(&srv.client(), REPO, Some("7"), &o).unwrap_err();
     assert_eq!(ApiError::find(&err).unwrap().kind, ErrorKind::Usage);
 }
 
 #[test]
-fn query_matches_pattern_and_passed() {
+fn list_matches_pattern_and_passed() {
     let runs = json!([
         {"uuid": "{1}", "state": {"result": {"name": "SUCCESSFUL"}}, "target": {"selector": {"pattern": "nightly"}}},
         {"uuid": "{2}", "state": {"result": {"name": "SUCCESSFUL"}}, "target": {}}
     ]);
     let srv = MockServer::with_responses([page(runs)]);
     let q = PipelineQuery {
-        status: Some("passed"),
+        result: Some("passed"),
         pattern: Some("nightly"),
-        limit: 5,
         ..Default::default()
     };
-    let out = bitbucket::pipeline_query(&srv.client(), REPO, &q).unwrap();
-    assert_eq!(out.as_array().unwrap().len(), 1);
+    let (out, _) = bitbucket::pipeline_list(&srv.client(), REPO, &q, &Paging::new(5)).unwrap();
+    assert_eq!(out.len(), 1);
     assert_eq!(out[0]["uuid"], "{1}");
 }
 
 #[test]
-fn latest_failure_reads_the_failed_steps() {
+fn logs_of_the_newest_failure_keep_only_failed_steps() {
     let srv = MockServer::with_responses([
         page(json!([
             {"uuid": "{ok}", "state": {"result": {"name": "SUCCESSFUL"}}},
-            {"uuid": "{p}", "state": {"result": {"name": "FAILED"}}}
+            {"uuid": "{p}", "build_number": 7, "state": {"result": {"name": "FAILED"}}}
         ])),
-        run_state("COMPLETED", Some("FAILED")),
-        step("COMPLETED", Some("FAILED")),
-        MockResponse::text(200, "a\nb\nc"),
+        page(json!([
+            {"uuid": "{s1}", "name": "Lint", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}},
+            {"uuid": "{s2}", "name": "Test", "state": {"name": "COMPLETED", "result": {"name": "FAILED"}}}
+        ])),
+        MockResponse::text(200, "123"),
     ]);
-    let q = PipelineQuery {
+    let o = pl::LogOpts {
+        failed: true,
         branch: Some("main"),
         ..Default::default()
     };
-    let out = pl::latest_failure(&srv.client(), REPO, &q, false, 2).unwrap();
-    assert_eq!(out["steps"][0]["log"], "b\nc");
-    assert_eq!(
-        srv.requests()[0].query_param("target.branch").as_deref(),
-        Some("main")
-    );
+    let out = pl::logs(&srv.client(), REPO, None, &o).unwrap();
+    let recs = out.as_array().unwrap();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0]["step"], "Test");
+    assert_eq!(recs[0]["stepIndex"], 2);
+    assert_eq!(recs[0]["pipeline"], 7);
+    assert_eq!(recs[0]["log"], "123", "a log that is valid JSON stays text");
+    let r = srv.requests();
+    assert_eq!(r[0].query_param("target.branch").as_deref(), Some("main"));
+    assert!(r[2].path.ends_with("/steps/%7Bs2%7D/log"), "{}", r[2].path);
 
     let srv = MockServer::with_responses([page(json!([]))]);
-    let err = pl::latest_failure(&srv.client(), REPO, &q, false, 2).unwrap_err();
+    let err = pl::logs(&srv.client(), REPO, None, &o).unwrap_err();
     assert_eq!(ApiError::find(&err).unwrap().kind, ErrorKind::NotFound);
 }
 
@@ -249,22 +257,23 @@ fn grep_numbers_lines_and_stops_at_the_cap() {
         step("COMPLETED", None),
         MockResponse::text(200, "one\nERROR a\nthree\nerror b\n"),
     ]);
-    let o = pl::Grep {
-        pattern: "error",
-        ignore_case: true,
-        context: 1,
-        max_matches: 1,
-        step: None,
+    let o = pl::LogOpts {
+        grep: Some(pl::Grep {
+            pattern: "error",
+            ignore_case: true,
+            context: 1,
+            max_matches: 1,
+        }),
+        ..Default::default()
     };
-    let out = pl::grep(&srv.client(), REPO, "7", &o).unwrap();
-    let m = &out["matches"][0];
-    assert_eq!(
-        (m["line"].as_u64(), m["step"].as_str()),
-        (Some(2), Some("Test"))
-    );
+    let out = pl::logs(&srv.client(), REPO, Some("7"), &o).unwrap();
+    let rec = &out[0];
+    assert_eq!(rec["log"], Value::Null);
+    let m = &rec["matches"][0];
+    assert_eq!(m["line"], 2);
     assert_eq!(m["before"], json!(["one"]));
     assert_eq!(m["after"], json!(["three"]));
-    assert_eq!(out["truncated"], true);
+    assert_eq!(rec["matches"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -373,9 +382,11 @@ fn environment_variables_hide_secured_values() {
             json!([{"key": "A", "value": "1", "secured": false}, {"key": "B", "value": "s3cret", "secured": true}]),
         ),
     ]);
-    let out = deployments::variables(&srv.client(), REPO, "production").unwrap();
+    let (out, _) =
+        deployments::variables(&srv.client(), REPO, "production", &Paging::new(25)).unwrap();
     assert_eq!(out[0]["value"], "1");
     assert!(out[1].get("value").is_none());
+    assert!(!json!(out).to_string().contains("s3cret"));
     assert_eq!(
         srv.requests()[1].path,
         "/repositories/acme/api/deployments_config/environments/%7Benv%7D/variables"
@@ -389,7 +400,7 @@ fn deployment(id: &str, env: &str, status: &str, at: &str, hash: &str) -> Value 
 }
 
 #[test]
-fn history_filters_and_sorts() {
+fn filtered_lists_sort_newest_first_with_an_offset_cursor() {
     let env = "{11111111-1111-1111-1111-111111111111}";
     let srv = MockServer::with_responses([page(json!([
         deployment("{1}", env, "SUCCESSFUL", "2026-01-01T00:00:00Z", "a"),
@@ -398,20 +409,27 @@ fn history_filters_and_sorts() {
         deployment("{4}", "{other}", "SUCCESSFUL", "2026-01-04T00:00:00Z", "d")
     ]))]);
     let statuses = ["successful".to_string()];
-    let o = deployments::History {
-        environment: env,
+    let o = deployments::Filter {
+        environment: Some(env),
         statuses: &statuses,
-        limit: 10,
         ..Default::default()
     };
-    let out = deployments::history(&srv.client(), REPO, &o).unwrap();
-    let ids: Vec<&str> = out["values"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|d| d["uuid"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids, ["{3}", "{1}"]);
+    let (out, next) =
+        deployments::deployment_list(&srv.client(), REPO, &o, &Paging::new(1)).unwrap();
+    assert_eq!(out[0]["uuid"], "{3}");
+    assert_eq!(next.as_deref(), Some("o:1"));
+    let srv = MockServer::with_responses([page(json!([
+        deployment("{1}", env, "SUCCESSFUL", "2026-01-01T00:00:00Z", "a"),
+        deployment("{3}", env, "SUCCESSFUL", "2026-01-03T00:00:00.123456Z", "c"),
+    ]))]);
+    let p = Paging {
+        limit: 5,
+        cursor: next,
+    };
+    let (out, next) = deployments::deployment_list(&srv.client(), REPO, &o, &p).unwrap();
+    let ids: Vec<&str> = out.iter().map(|d| d["uuid"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["{1}"]);
+    assert_eq!(next, None);
 }
 
 #[test]
@@ -428,8 +446,9 @@ fn commits_compare_with_the_previous_success() {
         page(json!([{"hash": "c"}])),
         page(json!([])),
     ]);
-    let out = deployments::commits(&srv.client(), REPO, env, "{3}", 50).unwrap();
+    let out = deployments::commits(&srv.client(), REPO, "{3}", Some(env), 50).unwrap();
     assert_eq!(out["previous"], "{1}");
+    assert_eq!(out["environment"], env);
     assert_eq!(out["added"][0]["hash"], "c");
     let r = &srv.requests()[2];
     assert_eq!(r.query_param("include").as_deref(), Some("c"));

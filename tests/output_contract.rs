@@ -152,15 +152,8 @@ fn user_lookup_prints_the_batch_whatever_the_exit_code() {
     }
 }
 
-/// Commands whose output is not JSON by design (shell scripts, raw file
-/// contents and diffs). Bitbucket's go once package D gives them records.
-const RAW_OUTPUT: &[&str] = &[
-    "completion script",
-    "skill print",
-    "bitbucket repo file",
-    "bitbucket pull-requests diff",
-    "bitbucket pull-requests patch",
-];
+/// Commands whose output is not JSON by design (shell scripts).
+const RAW_OUTPUT: &[&str] = &["completion script", "skill print"];
 
 /// Commands that wait, poll or need a terminal; not run by the walk.
 const SKIP: &[&str] = &["skill install"];

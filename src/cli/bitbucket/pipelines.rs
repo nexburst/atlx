@@ -1,222 +1,262 @@
-//! `bb pipeline` actions and `bb deployment`.
+//! `bb pipeline ...`, `bb deployment ...` and `bb environment ...`.
 
-use super::{RepoArgs, positive_limit};
-use crate::bitbucket::{self, deployments, pipelines};
+use super::{BatchArgs, Ctx, ListArgs, RepoArg, get_many, listed};
+use crate::bitbucket::{self, deployments, pipelines, records as rec};
 use crate::cli::{Out, util};
-use crate::client::{ApiError, Client};
+use crate::client::ApiError;
 use anyhow::{Context, Result};
-use clap::{Args, Subcommand, ValueEnum};
-use serde_json::Value;
+use clap::{Args, Subcommand};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::time::Duration;
-
-use super::lifecycle::PathOf;
 
 fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
 }
 
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum PipelineCmd {
+    /// Pipeline runs, newest first
+    List {
+        /// PENDING, IN_PROGRESS or COMPLETED
+        #[arg(long)]
+        state: Option<String>,
+        /// SUCCESSFUL, FAILED, ERROR or STOPPED
+        #[arg(long)]
+        result: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+        /// PUSH, MANUAL, SCHEDULE or PULLREQUEST
+        #[arg(long)]
+        trigger: Option<String>,
+        /// Custom pipeline name or selector pattern
+        #[arg(long)]
+        pattern: Option<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One or more runs: build number, {uuid} or result URL
+    Get {
+        #[arg(required = true, value_name = "PIPELINE")]
+        pipelines: Vec<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        batch: BatchArgs,
+    },
+    /// Start a run on a branch, tag or commit, or start a failed one again
+    Run(RunArgs),
+    /// Step logs (the last 200 lines of each; --log-offset reads further back)
+    ///
+    /// Without a pipeline: the newest run (the newest failed one with
+    /// --failed), on --branch if given. --follow waits for the run to end;
+    /// in text mode it prints lines as they come, and the exit code is 1 if
+    /// the run (or --step) did not succeed.
+    Log(LogArgs),
+    /// Steps of a run
+    Step {
+        #[command(subcommand)]
+        cmd: StepCmd,
+    },
+    /// Pipelines settings of a repository
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
+}
+
 #[derive(Args)]
 pub(crate) struct RunArgs {
     /// Run on this branch
-    #[arg(long, conflicts_with = "tag")]
+    #[arg(long, conflicts_with_all = ["tag", "rerun"])]
     branch: Option<String>,
     /// Run on this tag
-    #[arg(long)]
+    #[arg(long, conflicts_with = "rerun")]
     tag: Option<String>,
     /// Run at this commit; needs --custom unless --branch or --tag is given
-    #[arg(long)]
+    #[arg(long, conflicts_with = "rerun")]
     commit: Option<String>,
     /// The custom pipeline to run
-    #[arg(long, visible_alias = "selector")]
+    #[arg(long, conflicts_with = "rerun")]
     custom: Option<String>,
     /// KEY=VALUE; repeatable
-    #[arg(long, value_name = "KEY=VALUE", num_args = 1..)]
+    #[arg(long, value_name = "KEY=VALUE", num_args = 1.., conflicts_with = "rerun")]
     variable: Vec<String>,
     /// KEY, whose value is read from the environment variable of that name,
     /// so it stays out of the command line; repeatable
-    #[arg(long, value_name = "KEY", num_args = 1..)]
+    #[arg(long, value_name = "KEY", num_args = 1.., conflicts_with = "rerun")]
     secured_variable: Vec<String>,
-    /// Add the new run's web URL as `url`
-    #[arg(long)]
-    open: bool,
+    /// Start this failed run again: same target, same commit, every step
+    /// (REST can't rerun only the failed steps)
+    #[arg(long, value_name = "PIPELINE")]
+    rerun: Option<String>,
     #[command(flatten)]
-    repo: RepoArgs,
+    repo: RepoArg,
 }
 
 #[derive(Args)]
-pub(crate) struct RerunArgs {
-    /// Build number, {uuid}, or result URL
-    #[arg(long)]
-    pipeline: String,
-    /// Agree to repeat every step: REST can't rerun only the failed ones
-    /// (atlx extra)
-    #[arg(long)]
-    whole_pipeline: bool,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct LatestFailureArgs {
-    /// PENDING, IN_PROGRESS, COMPLETED
-    #[arg(long)]
-    state: Option<String>,
-    /// FAILED (default), ERROR or STOPPED
-    #[arg(long, ignore_case = true, value_parser = ["FAILED", "ERROR", "STOPPED"])]
-    status: Option<String>,
-    #[arg(long)]
-    branch: Option<String>,
-    /// PUSH, MANUAL, SCHEDULE, PULLREQUEST
-    #[arg(long)]
-    trigger: Option<String>,
-    /// The pipeline's pattern, such as a custom pipeline's name
-    #[arg(long)]
-    pattern: Option<String>,
-    /// Logs of every step, not only the failed ones
-    #[arg(long)]
-    all_steps: bool,
-    /// Max log lines per step (0 = all)
-    #[arg(long, default_value_t = 40)]
-    lines: usize,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct GrepArgs {
-    /// Text to look for (not a regular expression)
-    #[arg(value_name = "pattern", conflicts_with = "pattern")]
-    text: Option<String>,
-    /// Same as the positional argument (atlx extra)
-    #[arg(long)]
-    pattern: Option<String>,
-    /// Build number, {uuid}, or result URL
-    #[arg(long)]
-    pipeline: String,
-    /// Only this step: 1-based index, UUID or name
-    #[arg(long)]
-    step: Option<String>,
-    /// Ignore case
-    #[arg(long, short = 'i')]
-    ignore_case: bool,
-    /// Lines of context around each match
-    #[arg(long, short = 'C', default_value_t = 0)]
-    context: usize,
-    /// Stop after this many matches
-    #[arg(long, default_value_t = 200, value_parser = positive_limit)]
-    max_matches: usize,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct TailArgs {
-    /// Pipeline build number or result URL (a step in the URL selects it)
-    target: Option<String>,
-    /// Build number, {uuid}, or result URL
-    #[arg(long, conflicts_with = "target")]
+pub(crate) struct LogArgs {
+    /// Build number, {uuid} or result URL [default: the newest run]
+    #[arg(value_name = "PIPELINE")]
     pipeline: Option<String>,
-    /// One step: 1-based index, UUID or name [default: every step]
+    /// One step: 1-based index, UUID or name
     #[arg(long)]
     step: Option<String>,
-    /// Existing log lines to show first: a number, or all
-    #[arg(long, short = 'n', default_value = "10")]
-    lines: String,
-    /// Print what is logged so far and exit
+    /// Only failed steps; without a pipeline, the newest failed run
     #[arg(long)]
-    no_follow: bool,
-    /// Milliseconds between polls
-    #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(250..))]
-    poll_interval: u64,
-    /// Seconds between polls (atlx extra)
-    #[arg(long, conflicts_with = "poll_interval", value_parser = clap::value_parser!(u64).range(1..))]
-    interval: Option<u64>,
-    /// Give up after this many seconds (atlx extra)
-    #[arg(long, default_value_t = 1800)]
+    failed: bool,
+    /// Without a pipeline: the newest run on this branch
+    #[arg(long, conflicts_with = "pipeline")]
+    branch: Option<String>,
+    /// Only lines containing this text (not a regular expression)
+    #[arg(long, value_name = "TEXT", conflicts_with = "follow")]
+    grep: Option<String>,
+    /// With --grep: ignore case
+    #[arg(long, short = 'i', requires = "grep")]
+    ignore_case: bool,
+    /// With --grep: lines of context around each match
+    #[arg(
+        long,
+        short = 'C',
+        value_name = "N",
+        default_value_t = 0,
+        requires = "grep"
+    )]
+    context: usize,
+    /// With --grep: stop after this many matches
+    #[arg(long, value_name = "N", default_value_t = 200, value_parser = super::positive)]
+    max_matches: usize,
+    /// Wait until the run (or --step) ends
+    #[arg(long, conflicts_with = "failed")]
+    follow: bool,
+    /// With --follow: seconds between polls
+    #[arg(long, value_name = "SECONDS", default_value_t = 2, value_parser = clap::value_parser!(u64).range(1..))]
+    interval: u64,
+    /// With --follow: give up after this many seconds
+    #[arg(long, value_name = "SECONDS", default_value_t = 1800)]
     timeout: u64,
-    /// Accepted for compatibility; atlx always polls
-    #[arg(long, hide = true)]
-    no_ws: bool,
+    /// Skip this many lines from the end of each log
+    #[arg(long, value_name = "N")]
+    log_offset: Option<usize>,
     #[command(flatten)]
-    repo: RepoArgs,
+    repo: RepoArg,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum StepCmd {
+    /// The steps of a run
+    List {
+        /// Build number, {uuid} or result URL
+        #[arg(long)]
+        pipeline: String,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One step with its test report
+    Get {
+        /// 1-based index, UUID or name
+        step: String,
+        /// Build number, {uuid} or result URL
+        #[arg(long)]
+        pipeline: String,
+        /// Add the test cases
+        #[arg(long)]
+        test_cases: bool,
+        /// With --test-cases: at most this many (0 = all, up to 5000)
+        #[arg(long, value_name = "N", default_value_t = 100)]
+        case_limit: usize,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ConfigCmd {
-    /// The repository's Pipelines settings
+    /// Whether Pipelines is on
     Get {
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
     },
     /// Turn Pipelines on or off; off stops all future runs
     Update {
         /// true or false
-        #[arg(long)]
+        #[arg(long, required = true)]
         enabled: Option<bool>,
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum Direction {
-    Asc,
-    Desc,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum DeploymentCmd {
-    /// List deployments
-    Query {
-        /// Only this environment: UUID, name or slug (atlx extra)
+    /// Deployments; any filter reads up to 5000 of them and sorts by start, newest first
+    List {
+        /// Environment UUID, name or slug
         #[arg(long)]
         environment: Option<String>,
-        #[arg(long, short = 'n', default_value_t = 25, value_parser = positive_limit)]
-        limit: usize,
+        /// Only this outcome, e.g. SUCCESSFUL or FAILED; repeatable
+        #[arg(long)]
+        status: Vec<String>,
+        /// Only deployments from this pipeline (UUID)
+        #[arg(long, value_name = "UUID")]
+        pipeline: Option<String>,
+        /// Started at or after this time (YYYY-MM-DD, ISO time, or 7d)
+        #[arg(long, value_name = "TIME")]
+        started_after: Option<String>,
+        /// Started at or before this time
+        #[arg(long, value_name = "TIME")]
+        started_before: Option<String>,
+        /// Oldest first
+        #[arg(long)]
+        oldest_first: bool,
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
     },
-    /// One deployment
+    /// One or more deployments by UUID
     Get {
+        #[arg(required = true, value_name = "UUID")]
+        uuids: Vec<String>,
+        /// Fail unless each is in this environment (UUID, name or slug)
+        #[arg(long)]
+        environment: Option<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        batch: BatchArgs,
+    },
+    /// Commits a deployment added and removed since its environment's
+    /// previous successful one
+    Commits {
         /// Deployment UUID
         uuid: String,
+        /// Fail unless it is in this environment (UUID, name or slug)
+        #[arg(long)]
+        environment: Option<String>,
+        /// At most this many commits each way
+        #[arg(long, value_name = "N", default_value_t = 50, value_parser = super::positive)]
+        limit: usize,
         #[command(flatten)]
-        repo: RepoArgs,
-    },
-    /// Deployment environments
-    Environments {
-        #[command(subcommand)]
-        cmd: EnvironmentsCmd,
-    },
-    /// One environment's settings
-    Environment {
-        #[command(subcommand)]
-        cmd: EnvironmentCmd,
-    },
-    /// An environment's past deployments
-    History {
-        #[command(subcommand)]
-        cmd: HistoryCmd,
-    },
-    /// What a deployment changed
-    Commits {
-        #[command(subcommand)]
-        cmd: CommitsCmd,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum EnvironmentsCmd {
-    /// List the environments
-    Query {
-        #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
     },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum EnvironmentCmd {
+    /// Deployment environments
+    List {
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
     /// Deployment variables
     Variable {
         #[command(subcommand)]
@@ -226,73 +266,15 @@ pub(crate) enum EnvironmentCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum VariableCmd {
-    /// List the variables; secured values are never shown
-    Query {
-        /// Environment UUID, name or slug
-        #[arg(value_name = "environment", required_unless_present = "environment")]
-        environment_arg: Option<String>,
-        /// Same as the positional argument (atlx extra)
-        #[arg(long, conflicts_with = "environment_arg")]
-        environment: Option<String>,
-        #[command(flatten)]
-        repo: RepoArgs,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum HistoryCmd {
-    /// Deployment attempts, newest first
-    Query {
-        /// Environment UUID, name or slug
-        #[arg(long)]
-        environment: String,
-        /// Only this outcome, e.g. SUCCESSFUL or FAILED; repeatable
-        #[arg(long)]
-        status: Vec<String>,
-        /// Only deployments from this pipeline
-        #[arg(long)]
-        pipeline_uuid: Option<String>,
-        /// Started at or after this time
-        #[arg(long)]
-        started_after: Option<String>,
-        /// Started at or before this time
-        #[arg(long)]
-        started_before: Option<String>,
-        /// By start time
-        #[arg(long, value_enum, default_value = "desc")]
-        sort: Direction,
-        #[arg(long, short = 'n', default_value_t = 25, value_parser = positive_limit)]
-        limit: usize,
-        #[command(flatten)]
-        repo: RepoArgs,
-    },
-    /// One deployment in an environment
-    Get {
-        /// Deployment UUID
-        #[arg(value_name = "deployment-uuid")]
-        uuid: String,
+    /// An environment's variables; secured values are never shown
+    List {
         /// Environment UUID, name or slug
         #[arg(long)]
         environment: String,
         #[command(flatten)]
-        repo: RepoArgs,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum CommitsCmd {
-    /// Commits added and removed since the previous successful deployment
-    Query {
-        /// Environment UUID, name or slug
-        #[arg(long)]
-        environment: String,
-        /// Deployment UUID
-        #[arg(long)]
-        deployment: String,
-        #[arg(long, short = 'n', default_value_t = 50, value_parser = positive_limit)]
-        limit: usize,
+        repo: RepoArg,
         #[command(flatten)]
-        repo: RepoArgs,
+        list: ListArgs,
     },
 }
 
@@ -331,132 +313,167 @@ fn variables(
     Ok(out)
 }
 
-pub(super) fn run(c: &Client, path: PathOf, a: RunArgs) -> Result<Value> {
-    let variables = variables(&a.variable, &a.secured_variable, |k| std::env::var(k).ok())?;
-    let path = path(&a.repo)?;
-    let mut v = pipelines::run(
-        c,
-        &path,
-        &pipelines::Run {
-            branch: a.branch.as_deref(),
-            tag: a.tag.as_deref(),
-            commit: a.commit.as_deref(),
-            custom: a.custom.as_deref(),
-            variables,
-        },
-    )?;
-    if a.open
-        && let Some(url) = pipelines::web_url(&path, &v)
-    {
-        v["url"] = url.into();
-    }
-    Ok(v)
-}
-
-pub(super) fn rerun(c: &Client, path: PathOf, a: RerunArgs) -> Result<Value> {
-    pipelines::rerun(c, &path(&a.repo)?, &a.pipeline, a.whole_pipeline)
-}
-
-pub(super) fn latest_failure(c: &Client, path: PathOf, a: LatestFailureArgs) -> Result<Value> {
-    let q = bitbucket::PipelineQuery {
-        state: a.state.as_deref(),
-        status: a.status.as_deref(),
-        branch: a.branch.as_deref(),
-        trigger: a.trigger.as_deref(),
-        pattern: a.pattern.as_deref(),
-        limit: 1,
+pub(super) fn pipeline(ctx: &Ctx, cmd: PipelineCmd) -> Result<Out> {
+    let c = ctx.c;
+    let data = match cmd {
+        PipelineCmd::List {
+            state,
+            result,
+            branch,
+            trigger,
+            pattern,
+            repo,
+            list,
+        } => {
+            let q = bitbucket::PipelineQuery {
+                state: state.as_deref(),
+                result: result.as_deref(),
+                branch: branch.as_deref(),
+                trigger: trigger.as_deref(),
+                pattern: pattern.as_deref(),
+            };
+            listed(bitbucket::pipeline_list(
+                c,
+                &ctx.repo(&repo)?,
+                &q,
+                &list.paging(),
+            )?)
+        }
+        PipelineCmd::Get {
+            pipelines,
+            repo,
+            batch,
+        } => {
+            let p = ctx.repo(&repo)?;
+            get_many(pipelines, &batch, |id| bitbucket::pipeline_get(c, &p, id))?
+        }
+        PipelineCmd::Run(a) => {
+            let p = ctx.repo(&a.repo)?;
+            match &a.rerun {
+                Some(r) => pipelines::rerun(c, &p, r)?,
+                None => {
+                    let vars =
+                        variables(&a.variable, &a.secured_variable, |k| std::env::var(k).ok())?;
+                    pipelines::run(
+                        c,
+                        &p,
+                        &pipelines::Run {
+                            branch: a.branch.as_deref(),
+                            tag: a.tag.as_deref(),
+                            commit: a.commit.as_deref(),
+                            custom: a.custom.as_deref(),
+                            variables: vars,
+                        },
+                    )?
+                }
+            }
+        }
+        PipelineCmd::Log(a) => return log(ctx, a),
+        PipelineCmd::Step {
+            cmd:
+                StepCmd::List {
+                    pipeline,
+                    repo,
+                    list,
+                },
+        } => listed(pipelines::step_list(
+            c,
+            &ctx.repo(&repo)?,
+            &pipeline,
+            &list.paging(),
+        )?),
+        PipelineCmd::Step {
+            cmd:
+                StepCmd::Get {
+                    step,
+                    pipeline,
+                    test_cases,
+                    case_limit,
+                    repo,
+                },
+        } => pipelines::step_get(
+            c,
+            &ctx.repo(&repo)?,
+            &pipeline,
+            &step,
+            &pipelines::Tests {
+                cases: test_cases,
+                case_limit,
+            },
+        )?,
+        PipelineCmd::Config {
+            cmd: ConfigCmd::Get { repo },
+        } => pipelines::config_get(c, &ctx.repo(&repo)?)?,
+        PipelineCmd::Config {
+            cmd: ConfigCmd::Update { enabled, repo },
+        } => {
+            let enabled = enabled.ok_or_else(|| usage("pass --enabled true or false"))?;
+            pipelines::config_update(c, &ctx.repo(&repo)?, enabled)?
+        }
     };
-    pipelines::latest_failure(c, &path(&a.repo)?, &q, a.all_steps, a.lines)
+    Ok(Out::Data(data))
 }
 
-pub(super) fn grep(c: &Client, path: PathOf, a: GrepArgs) -> Result<Out> {
-    let pattern = a
-        .text
-        .or(a.pattern)
-        .ok_or_else(|| usage("pass the text to look for"))?;
-    let o = pipelines::Grep {
-        pattern: &pattern,
+fn log(ctx: &Ctx, a: LogArgs) -> Result<Out> {
+    let path = ctx.repo(&a.repo)?;
+    let grep = a.grep.as_deref().map(|pattern| pipelines::Grep {
+        pattern,
         ignore_case: a.ignore_case,
         context: a.context,
         max_matches: a.max_matches,
+    });
+    let o = pipelines::LogOpts {
         step: a.step.as_deref(),
+        failed: a.failed,
+        branch: a.branch.as_deref(),
+        grep,
     };
-    let full = pipelines::grep(c, &path(&a.repo)?, &a.pipeline, &o)?;
-    Ok(Out::Doc {
-        text: grep_text(&full),
-        full,
-    })
+    if !a.follow {
+        return Ok(Out::Data(pipelines::logs(
+            ctx.c,
+            &path,
+            a.pipeline.as_deref(),
+            &o,
+        )?));
+    }
+    follow(ctx, &path, &a, &o)
 }
 
-/// `step:line: text`, with context lines as `step-line- text`, like grep.
-fn grep_text(v: &Value) -> String {
-    let mut out = Vec::new();
-    for m in v["matches"].as_array().into_iter().flatten() {
-        let step = m["step"].as_str().unwrap_or_default();
-        let n = m["line"].as_u64().unwrap_or_default();
-        let lines = |k: &str| -> Vec<&str> {
-            m[k].as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .collect()
-        };
-        let before = lines("before");
-        let first = n.saturating_sub(before.len() as u64);
-        for (line, at) in before.iter().zip(first..) {
-            out.push(format!("{step}-{at}- {line}"));
-        }
-        out.push(format!(
-            "{step}:{n}: {}",
-            m["text"].as_str().unwrap_or_default()
-        ));
-        for (line, at) in lines("after").iter().zip(n + 1..) {
-            out.push(format!("{step}-{at}- {line}"));
-        }
-    }
-    if v["truncated"] == true {
-        out.push("(more matches: raise --max-matches)".into());
-    }
-    out.join("\n")
-}
-
-pub(super) fn tail(c: &Client, path: PathOf, a: TailArgs) -> Result<Out> {
-    let target = a
-        .pipeline
-        .or(a.target)
-        .ok_or_else(|| usage("pass the pipeline as an argument or with --pipeline"))?;
-    let url_step = target
-        .split_once("/steps/")
-        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
-        .and_then(|s| urlencoding::decode(s).ok())
-        .map(|s| s.into_owned());
-    let step = url_step.or(a.step);
-    let lines = if a.lines.eq_ignore_ascii_case("all") {
-        None
-    } else {
-        Some(
-            a.lines
-                .parse()
-                .map_err(|_| usage("--lines takes a number or all"))?,
-        )
-    };
-    let o = pipelines::Tail {
-        step: step.as_deref(),
-        lines,
-        follow: !a.no_follow,
-        interval: a
-            .interval
-            .map_or(Duration::from_millis(a.poll_interval), Duration::from_secs),
+/// `pipeline log --follow`: poll until the run ends. Text mode prints lines
+/// as they come; JSON modes print the logs as records at the end. Exit 1
+/// when the run (or the one step) did not succeed.
+fn follow(ctx: &Ctx, path: &str, a: &LogArgs, o: &pipelines::LogOpts) -> Result<Out> {
+    let (p, uuid) = pipelines::pick(ctx.c, path, a.pipeline.as_deref(), o)?;
+    let text = util::text_output();
+    let t = pipelines::Tail {
+        step: o.step,
+        // Text mode starts with the last lines logged so far, like the
+        // record's budget; JSON modes keep everything and cut at the end.
+        lines: text.then_some(rec::LOG_BUDGET.limit),
+        follow: true,
+        interval: Duration::from_secs(a.interval),
         timeout: Duration::from_secs(a.timeout),
     };
-    let path = path(&a.repo)?;
-    let text = util::text_output();
     let mut out = std::io::stdout();
+    let mut steps: BTreeMap<u64, (Value, Vec<String>)> = BTreeMap::new();
+    let mut done = Value::Null;
     let mut emit = |event: &Value| -> Result<()> {
+        if event["event"] == "done" {
+            done = event.clone();
+        } else {
+            let index = event["step_index"].as_u64().unwrap_or_default();
+            let entry = steps
+                .entry(index)
+                .or_insert_with(|| (event.clone(), Vec::new()));
+            entry
+                .1
+                .push(event["text"].as_str().unwrap_or_default().to_string());
+        }
+        if !text {
+            return Ok(());
+        }
         let field = |k: &str| event[k].as_str().unwrap_or_default();
-        let line = if !text {
-            event.to_string()
-        } else if event["event"] == "done" {
+        let line = if event["event"] == "done" {
             format!(
                 "pipeline {}: {} {}",
                 event["pipeline"],
@@ -472,96 +489,127 @@ pub(super) fn tail(c: &Client, path: PathOf, a: TailArgs) -> Result<Out> {
             .and_then(|()| out.flush())
             .context("writing the log to stdout")
     };
-    let ok = pipelines::tail(c, &path, &target, &o, &mut emit)?;
-    Ok(Out::Streamed(if ok { 0 } else { 1 }))
-}
-
-pub(super) fn config(c: &Client, path: PathOf, cmd: ConfigCmd) -> Result<Value> {
-    match cmd {
-        ConfigCmd::Get { repo } => pipelines::config_get(c, &path(&repo)?),
-        ConfigCmd::Update { enabled, repo } => {
-            let enabled = enabled.ok_or_else(|| usage("pass --enabled true or false"))?;
-            pipelines::config_update(c, &path(&repo)?, enabled)
-        }
+    let ok = pipelines::tail(ctx.c, path, &uuid, &t, &mut emit)?;
+    if text {
+        return Ok(Out::Streamed(if ok { 0 } else { 1 }));
     }
+    if !ok {
+        util::mark_failed();
+    }
+    // The steps' final states, read once at the end.
+    let (finals, _) = pipelines::step_list(ctx.c, path, &uuid, &bitbucket::Paging::new(1000))?;
+    let state_of = |index: u64| {
+        finals
+            .iter()
+            .find(|s| s["index"].as_u64() == Some(index))
+            .map(bitbucket::state_of)
+            .unwrap_or_default()
+    };
+    let records: Vec<Value> = steps
+        .into_iter()
+        .map(|(index, (first, lines))| {
+            let (state, result) = state_of(index);
+            json!({
+                "pipeline": p["build_number"],
+                "pipelineUuid": uuid,
+                "step": first["step"],
+                "stepIndex": index,
+                "stepUuid": first["step_uuid"],
+                "state": state,
+                "result": result,
+                "log": lines.join("\n"),
+                "matches": null,
+            })
+        })
+        .collect();
+    if !done.is_null() && o.step.is_none() {
+        crate::output::notes::warn_value(json!({
+            "code": "pipeline_done",
+            "message": format!(
+                "pipeline {} ended {} {}",
+                done["pipeline"],
+                done["state"].as_str().unwrap_or_default(),
+                done["result"].as_str().unwrap_or_default()
+            ),
+            "state": done["state"],
+            "result": done["result"],
+        }));
+    }
+    Ok(Out::Data(records.into()))
 }
 
-pub(super) fn deployment(c: &Client, path: PathOf, cmd: DeploymentCmd) -> Result<Value> {
+pub(super) fn deployment(ctx: &Ctx, cmd: DeploymentCmd) -> Result<Value> {
+    let c = ctx.c;
     match cmd {
-        DeploymentCmd::Query {
+        DeploymentCmd::List {
+            environment,
+            status,
+            pipeline,
+            started_after,
+            started_before,
+            oldest_first,
+            repo,
+            list,
+        } => Ok(listed(deployments::deployment_list(
+            c,
+            &ctx.repo(&repo)?,
+            &deployments::Filter {
+                environment: environment.as_deref(),
+                statuses: &status,
+                pipeline: pipeline.as_deref(),
+                after: started_after.as_deref(),
+                before: started_before.as_deref(),
+                ascending: oldest_first,
+            },
+            &list.paging(),
+        )?)),
+        DeploymentCmd::Get {
+            uuids,
+            environment,
+            repo,
+            batch,
+        } => {
+            let p = ctx.repo(&repo)?;
+            get_many(uuids, &batch, |u| {
+                deployments::get(c, &p, u, environment.as_deref())
+            })
+        }
+        DeploymentCmd::Commits {
+            uuid,
             environment,
             limit,
             repo,
-        } => deployments::query(c, &path(&repo)?, environment.as_deref(), limit),
-        DeploymentCmd::Get { uuid, repo } => deployments::get(c, &path(&repo)?, &uuid),
-        DeploymentCmd::Environments {
-            cmd: EnvironmentsCmd::Query { repo },
-        } => deployments::environments(c, &path(&repo)?),
-        DeploymentCmd::Environment {
-            cmd:
-                EnvironmentCmd::Variable {
-                    cmd:
-                        VariableCmd::Query {
-                            environment_arg,
-                            environment,
-                            repo,
-                        },
-                },
-        } => {
-            let env = environment_arg
-                .or(environment)
-                .ok_or_else(|| usage("pass the environment"))?;
-            deployments::variables(c, &path(&repo)?, &env)
-        }
-        DeploymentCmd::History {
-            cmd:
-                HistoryCmd::Query {
-                    environment,
-                    status,
-                    pipeline_uuid,
-                    started_after,
-                    started_before,
-                    sort,
-                    limit,
-                    repo,
-                },
-        } => deployments::history(
+        } => deployments::commits(c, &ctx.repo(&repo)?, &uuid, environment.as_deref(), limit),
+    }
+}
+
+pub(super) fn environment(ctx: &Ctx, cmd: EnvironmentCmd) -> Result<Value> {
+    let c = ctx.c;
+    match cmd {
+        EnvironmentCmd::List { repo, list } => Ok(listed(deployments::environments(
             c,
-            &path(&repo)?,
-            &deployments::History {
-                environment: &environment,
-                statuses: &status,
-                pipeline: pipeline_uuid.as_deref(),
-                after: started_after.as_deref(),
-                before: started_before.as_deref(),
-                ascending: sort == Direction::Asc,
-                limit,
-            },
-        ),
-        DeploymentCmd::History {
+            &ctx.repo(&repo)?,
+            &list.paging(),
+        )?)),
+        EnvironmentCmd::Variable {
             cmd:
-                HistoryCmd::Get {
-                    uuid,
+                VariableCmd::List {
                     environment,
                     repo,
+                    list,
                 },
-        } => deployments::history_get(c, &path(&repo)?, &uuid, &environment),
-        DeploymentCmd::Commits {
-            cmd:
-                CommitsCmd::Query {
-                    environment,
-                    deployment,
-                    limit,
-                    repo,
-                },
-        } => deployments::commits(c, &path(&repo)?, &environment, &deployment, limit),
+        } => Ok(listed(deployments::variables(
+            c,
+            &ctx.repo(&repo)?,
+            &environment,
+            &list.paging(),
+        )?)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn secured_values_come_from_the_environment_and_stay_out_of_errors() {
@@ -573,13 +621,5 @@ mod tests {
         assert!(!err.to_string().contains("hunter2"), "{err}");
         assert!(variables(&[], &["ABSENT".into()], env).is_err());
         assert!(variables(&["TOKEN=x".into()], &["TOKEN".into()], env).is_err());
-    }
-
-    #[test]
-    fn grep_text_numbers_context() {
-        let v = json!({"matches": [
-            {"step": "T", "line": 3, "text": "boom", "before": ["a", "b"], "after": ["c"]}
-        ]});
-        assert_eq!(grep_text(&v), "T-1- a\nT-2- b\nT:3: boom\nT-4- c");
     }
 }

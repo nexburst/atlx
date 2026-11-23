@@ -1,9 +1,9 @@
 //! Offline tests for the Bitbucket pull request review loop: comments,
-//! inline anchors, tasks, diffstat, commits, patch and diff-line.
+//! inline anchors, tasks, diffstat, commits, patch and diff --grep.
 
 mod common;
 
-use atlx::bitbucket::{self, Anchor, NewComment, TaskChange};
+use atlx::bitbucket::{self, Anchor, NewComment, Paging, TaskChange};
 use atlx::client::ApiError;
 use common::{MockResponse, MockServer, RecordedRequest};
 use serde_json::{Value, json};
@@ -258,13 +258,14 @@ fn comment_get_update_delete_resolve_reopen() {
     assert_eq!(upd["method"], "PUT");
 
     let del = bitbucket::pr_comment_delete(&c, REPO, 42, 9).unwrap();
-    assert_eq!(del, json!({"id": 9, "pullRequest": 42, "deleted": true}));
+    assert_eq!(del, json!({"id": 9, "deleted": true}));
 
+    // Resolve and reopen read the comment back.
     let res = bitbucket::pr_comment_resolve(&c, REPO, 42, 9).unwrap();
-    assert_eq!(res["method"], "POST");
+    assert_eq!(res, json!({"method": "GET", "path": base}));
 
     let reo = bitbucket::pr_comment_reopen(&c, REPO, 42, 9).unwrap();
-    assert_eq!(reo, json!({"id": 9, "pullRequest": 42, "resolved": false}));
+    assert_eq!(reo, json!({"method": "GET", "path": base}));
 
     let reqs = srv.requests();
     let calls: Vec<(&str, &str)> = reqs
@@ -279,7 +280,9 @@ fn comment_get_update_delete_resolve_reopen() {
             ("PUT", base),
             ("DELETE", base),
             ("POST", resolve.as_str()),
+            ("GET", base),
             ("DELETE", resolve.as_str()),
+            ("GET", base),
         ]
     );
     assert_eq!(reqs[1].json_body(), json!({"content": {"raw": "Edited"}}));
@@ -287,7 +290,7 @@ fn comment_get_update_delete_resolve_reopen() {
 }
 
 #[test]
-fn comment_query_pages_in_order_and_drops_deleted() {
+fn comment_list_pages_in_order_and_drops_deleted() {
     let srv = MockServer::with_handler(|req| match req.query_param("page").as_deref() {
         None => MockResponse::json(
             200,
@@ -307,16 +310,17 @@ fn comment_query_pages_in_order_and_drops_deleted() {
             json!({"values": [{"id": 3, "inline": {"path": "f", "to": 4}}]}),
         ),
     });
-    let out = bitbucket::pr_comment_query(&srv.client(), REPO, 42, 5).unwrap();
-    let ids: Vec<_> = out.as_array().unwrap().iter().map(|c| &c["id"]).collect();
+    let (out, next) = bitbucket::pr_comment_list(&srv.client(), REPO, 42, &Paging::new(5)).unwrap();
+    let ids: Vec<_> = out.iter().map(|c| &c["id"]).collect();
     assert_eq!(ids, [&json!(1), &json!(3)]);
+    assert_eq!(next, None);
     let reqs = srv.requests();
     assert_eq!(
         reqs[0].path,
         "/repositories/acme/api/pullrequests/42/comments"
     );
     assert_eq!(reqs[0].query_param("sort").as_deref(), Some("created_on"));
-    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("5"));
+    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("50"));
 }
 
 #[test]
@@ -352,7 +356,7 @@ fn task_create_get_update_delete() {
     )
     .unwrap();
     let del = bitbucket::pr_task_delete(&c, REPO, 42, 6).unwrap();
-    assert_eq!(del, json!({"id": 6, "pullRequest": 42, "deleted": true}));
+    assert_eq!(del, json!({"id": 6, "deleted": true}));
 
     let reqs = srv.requests();
     let calls: Vec<(&str, &str)> = reqs
@@ -387,7 +391,7 @@ fn task_update_needs_a_change() {
     let srv = MockServer::with_responses([]);
     let err =
         bitbucket::pr_task_update(&srv.client(), REPO, 42, 6, &TaskChange::default()).unwrap_err();
-    assert!(usage_message(err).contains("--text"));
+    assert!(usage_message(err).contains("--body"));
     assert!(srv.requests().is_empty());
 }
 
@@ -411,13 +415,32 @@ fn diffstat_commits_and_patch() {
         _ => MockResponse::text(404, "unexpected route"),
     });
     let c = srv.client();
-    let stat = bitbucket::pr_diffstat(&c, REPO, 42, 1).unwrap();
-    assert_eq!(stat.as_array().unwrap().len(), 1);
+    let (stat, _) = bitbucket::pr_diffstat(&c, REPO, 42, false, &Paging::new(1)).unwrap();
+    assert_eq!(stat.len(), 1);
     assert_eq!(stat[0]["lines_added"], 3);
-    let commits = bitbucket::pr_commits(&c, REPO, 42, 50).unwrap();
+    let rec = atlx::schema::project(
+        &stat[0],
+        &bitbucket::records::DIFFSTAT,
+        &atlx::schema::Selection::Default,
+    )
+    .unwrap();
+    assert_eq!(
+        rec,
+        json!({"path": "a.rs", "status": "modified", "added": 3, "removed": 1})
+    );
+    let (commits, _) = bitbucket::pr_commits(&c, REPO, 42, &Paging::new(50)).unwrap();
     assert_eq!(commits[0]["hash"], "abc123");
-    let patch = bitbucket::pr_patch(&c, REPO, 42).unwrap();
-    assert!(patch.starts_with("From abc123"));
+    let patch = bitbucket::pr_diff_view(
+        &c,
+        REPO,
+        42,
+        &bitbucket::DiffOpts {
+            patch: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(patch["diff"].as_str().unwrap().starts_with("From abc123"));
 
     let reqs = srv.requests();
     assert_eq!(
@@ -507,23 +530,25 @@ fn diff_lines_give_new_and_old_line_numbers() {
 }
 
 #[test]
-fn pr_diff_line_reads_the_diff() {
+fn pr_diff_grep_reads_the_diff_of_one_file() {
     let srv = MockServer::with_responses([MockResponse::text(200, DIFF)]);
-    let out = bitbucket::pr_diff_line(
-        &srv.client(),
-        REPO,
-        42,
-        "validate_input",
-        Some("src/input.rs"),
-    )
-    .unwrap();
-    assert_eq!(out.as_array().unwrap().len(), 1);
-    assert_eq!(out[0]["line"], 11);
-    assert_eq!(
-        srv.requests()[0].path,
-        "/repositories/acme/api/pullrequests/42/diff"
-    );
+    let o = bitbucket::DiffOpts {
+        path: Some("src/input.rs"),
+        grep: Some("validate_input"),
+        ..Default::default()
+    };
+    let out = bitbucket::pr_diff_view(&srv.client(), REPO, 42, &o).unwrap();
+    assert_eq!(out["diff"], Value::Null);
+    assert_eq!(out["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(out["matches"][0]["line"], 11);
+    let r = &srv.requests()[0];
+    assert_eq!(r.path, "/repositories/acme/api/pullrequests/42/diff");
+    assert_eq!(r.query_param("path").as_deref(), Some("src/input.rs"));
 
-    let err = bitbucket::pr_diff_line(&srv.client(), REPO, 42, "", None).unwrap_err();
-    assert!(usage_message(err).contains("--text"));
+    let empty = bitbucket::DiffOpts {
+        grep: Some(""),
+        ..Default::default()
+    };
+    let err = bitbucket::pr_diff_view(&srv.client(), REPO, 42, &empty).unwrap_err();
+    assert!(usage_message(err).contains("--grep"));
 }

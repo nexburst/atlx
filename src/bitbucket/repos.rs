@@ -1,18 +1,17 @@
 //! Branch and commit writes, commit history, Code Insights, workspaces and
 //! repository extras.
 
-use super::{enc, lifecycle, paginate, paginate_more, repo_src_path};
+use super::{Listed, Paging, enc, lifecycle, list, list_where, repo_src_path, scan};
 use crate::client::{ApiError, Client, ErrorKind, Part};
 use crate::markup::quote;
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// How many commits `repo contributors` reads at most.
 pub const COMMIT_SCAN: usize = 1000;
-const MEMBER_SCAN: usize = 5000;
 
 fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
@@ -73,9 +72,13 @@ pub fn branch_create(c: &Client, path: &str, name: &str, from: Option<&str>) -> 
     )
 }
 
+pub fn branch_get(c: &Client, path: &str, name: &str) -> Result<Value> {
+    c.get(&branch_path(path, name)?, &[])
+}
+
 pub fn branch_delete(c: &Client, path: &str, name: &str) -> Result<Value> {
     c.delete(&branch_path(path, name)?, &[])?;
-    Ok(json!({"name": name, "deleted": true}))
+    Ok(json!({"id": name, "deleted": true}))
 }
 
 // --- commits -----------------------------------------------------------------
@@ -85,11 +88,10 @@ pub struct CommitQuery<'a> {
     pub include: &'a [String],
     pub exclude: &'a [String],
     pub file_path: Option<&'a str>,
-    pub limit: usize,
 }
 
 /// Without `include` the main branch's history, not every branch's.
-pub fn commit_query(c: &Client, path: &str, o: &CommitQuery) -> Result<Value> {
+pub fn commit_list(c: &Client, path: &str, o: &CommitQuery, p: &Paging) -> Result<Listed> {
     let mut include = o.include.to_vec();
     if include.is_empty() {
         include.push(main_branch(c, path)?);
@@ -99,7 +101,14 @@ pub fn commit_query(c: &Client, path: &str, o: &CommitQuery) -> Result<Value> {
     if let Some(p) = o.file_path {
         q.push(("path", p));
     }
-    Ok(paginate(c, &format!("{path}/commits"), &q, o.limit)?.into())
+    list(c, &format!("{path}/commits"), &q, p)
+}
+
+pub fn commit_get(c: &Client, path: &str, hash: &str) -> Result<Value> {
+    if hash.trim().is_empty() {
+        return Err(usage("pass a commit hash"));
+    }
+    c.get(&format!("{path}/commit/{}", enc(hash.trim())), &[])
 }
 
 /// What happens to one file in `commit create`.
@@ -147,7 +156,7 @@ pub struct NewCommit<'a> {
     pub changes: &'a [Change],
 }
 
-/// `commit create` through `POST /src`. File fields get a leading `/`, so a
+/// A commit through `POST /src`. File fields get a leading `/`, so a
 /// file called `message` or `branch` can't pass for that field.
 pub fn commit_create(c: &Client, path: &str, n: &NewCommit) -> Result<Value> {
     if n.message.trim().is_empty() {
@@ -234,14 +243,11 @@ pub fn report_create(
     )
 }
 
-pub fn reports(c: &Client, path: &str, commit: &str, limit: usize) -> Result<Value> {
-    Ok(paginate(
-        c,
-        &format!("{path}/commit/{}/reports", enc(commit)),
-        &[],
-        limit,
-    )?
-    .into())
+pub fn reports(c: &Client, path: &str, commit: &str, p: &Paging) -> Result<Listed> {
+    if commit.trim().is_empty() {
+        return Err(usage("pass --commit"));
+    }
+    list(c, &format!("{path}/commit/{}/reports", enc(commit)), &[], p)
 }
 
 // --- workspaces --------------------------------------------------------------
@@ -250,40 +256,31 @@ pub fn workspace_get(c: &Client, ws: &str) -> Result<Value> {
     c.get(&format!("/workspaces/{}", enc(ws)), &[])
 }
 
-/// `query` keeps members whose nickname or display name contains it.
+/// Members; `name` keeps those whose nickname or display name contains
+/// it, `permissions` reads the permission list instead (needs admin).
 pub fn members(
     c: &Client,
     ws: &str,
-    query: Option<&str>,
+    name: Option<&str>,
     permissions: bool,
-    limit: usize,
-) -> Result<Value> {
+    p: &Paging,
+) -> Result<Listed> {
     let what = if permissions {
         "permissions"
     } else {
         "members"
     };
-    let fetch = if query.is_some() {
-        MEMBER_SCAN.max(limit)
-    } else {
-        limit
+    let url = format!("/workspaces/{}/{what}", enc(ws));
+    let Some(needle) = name.map(str::to_lowercase) else {
+        return list(c, &url, &[], p);
     };
-    let needle = query.map(str::to_lowercase);
-    Ok(
-        paginate(c, &format!("/workspaces/{}/{what}", enc(ws)), &[], fetch)?
-            .into_iter()
-            .filter(|m| {
-                needle.as_deref().is_none_or(|n| {
-                    ["nickname", "display_name"].iter().any(|k| {
-                        m["user"][*k]
-                            .as_str()
-                            .is_some_and(|v| v.to_lowercase().contains(n))
-                    })
-                })
-            })
-            .take(limit)
-            .collect(),
-    )
+    list_where(c, &url, &[], p, |m| {
+        Ok(["nickname", "display_name"].iter().any(|k| {
+            m["user"][*k]
+                .as_str()
+                .is_some_and(|v| v.to_lowercase().contains(&needle))
+        }))
+    })
 }
 
 /// A member by `me`, UUID, account ID, nickname or display name.
@@ -328,59 +325,98 @@ pub fn repo_create(c: &Client, path: &str, n: &NewRepo) -> Result<Value> {
     c.post(path, &Value::Object(body))
 }
 
-pub fn list_files(
+/// A ref as `/src` takes it: the main branch when none is given, and the
+/// commit of a branch whose name has a slash.
+fn src_ref(c: &Client, path: &str, git_ref: Option<&str>) -> Result<String> {
+    let git_ref = match git_ref {
+        Some(r) => r.to_string(),
+        None => main_branch(c, path)?,
+    };
+    if git_ref.contains('/') {
+        resolve_commit(c, path, &git_ref)
+    } else {
+        Ok(git_ref)
+    }
+}
+
+/// The entries of a directory (`max_depth` descends).
+pub fn file_list(
     c: &Client,
     path: &str,
     git_ref: Option<&str>,
     dir: Option<&str>,
     max_depth: Option<u32>,
-    limit: usize,
-) -> Result<Value> {
-    let git_ref = match git_ref {
-        Some(r) => r.to_string(),
-        None => main_branch(c, path)?,
-    };
-    // /src/{ref}/{path} can't hold a ref with a slash, so use its commit.
-    let at = if git_ref.contains('/') {
-        resolve_commit(c, path, &git_ref)?
-    } else {
-        git_ref
-    };
+    p: &Paging,
+) -> Result<Listed> {
+    let at = src_ref(c, path, git_ref)?;
     let mut url = repo_src_path(path, &at, dir.unwrap_or_default());
     if !url.ends_with('/') {
         url.push('/');
     }
     let depth = max_depth.map(|d| d.to_string());
     let q: Vec<(&str, &str)> = depth.iter().map(|d| ("max_depth", d.as_str())).collect();
-    Ok(paginate(c, &url, &q, limit)?.into())
+    list(c, &url, &q, p)
 }
 
-/// A repository or file web URL; needs no request.
-pub fn web_url(
+/// A file with its text: `{path, ref, commit, size, type, content}`. A
+/// directory is a usage error pointing at `file list`; a file that is not
+/// UTF-8 text has `content: null` and a warning.
+pub fn file_get(c: &Client, path: &str, file: &str, git_ref: Option<&str>) -> Result<Value> {
+    let clean = file.trim().trim_matches('/');
+    if clean.is_empty() || clean == "." {
+        return Err(usage(
+            "pass a file path; list a directory with `repo file list`",
+        ));
+    }
+    let at = src_ref(c, path, git_ref)?;
+    let url = repo_src_path(path, &at, clean);
+    let meta = c.get(&url, &[("format", "meta")])?;
+    if meta["type"] == "commit_directory" {
+        return Err(ApiError::usage(format!("{clean} is a directory"))
+            .with_hint(format!(
+                "list it with `atlx bitbucket repo file list --path {clean}`"
+            ))
+            .into());
+    }
+    let bytes = c.get_bytes(&url, &[])?;
+    let content = match String::from_utf8(bytes.data) {
+        Ok(text) => Value::String(text),
+        Err(_) => {
+            crate::output::notes::warn(
+                "binary_file",
+                format!(
+                    "{clean} is not UTF-8 text; save it with `atlx bitbucket repo file download {clean}`"
+                ),
+            );
+            Value::Null
+        }
+    };
+    Ok(json!({
+        "path": meta["path"].as_str().unwrap_or(clean),
+        "ref": git_ref.map_or(at.clone(), String::from),
+        "commit": meta["commit"]["hash"],
+        "size": meta["size"],
+        "type": meta["type"],
+        "content": content,
+    }))
+}
+
+/// Save a file to `dest`: `{path, file, bytes}`.
+pub fn file_download(
+    c: &Client,
     path: &str,
-    file: Option<&str>,
+    file: &str,
     git_ref: Option<&str>,
-    line: Option<u64>,
-) -> Result<String> {
-    let mut url = format!(
-        "https://bitbucket.org/{}",
-        path.trim_start_matches("/repositories/")
-    );
-    let file = file.map(|f| f.trim_matches('/')).filter(|f| !f.is_empty());
-    if line.is_some() && file.is_none() {
-        return Err(usage("--line needs --path"));
+    dest: &Path,
+    overwrite: bool,
+) -> Result<Value> {
+    let clean = file.trim().trim_matches('/');
+    if clean.is_empty() {
+        return Err(usage("pass a file path"));
     }
-    if file.is_some() || git_ref.is_some() {
-        url.push_str(&format!("/src/{}/", enc(git_ref.unwrap_or("HEAD"))));
-    }
-    if let Some(f) = file {
-        let parts: Vec<String> = f.split('/').map(enc).collect();
-        url.push_str(&parts.join("/"));
-    }
-    if let Some(n) = line {
-        url.push_str(&format!("#lines-{n}"));
-    }
-    Ok(url)
+    let at = src_ref(c, path, git_ref)?;
+    let bytes = c.download_to(&repo_src_path(path, &at, clean), &[], dest, overwrite)?;
+    Ok(json!({"path": clean, "file": dest.display().to_string(), "bytes": bytes}))
 }
 
 #[derive(Debug, Default)]
@@ -410,7 +446,7 @@ pub fn contributors(c: &Client, path: &str, o: &Contributors) -> Result<Value> {
     if let Some(x) = exclude {
         q.push(("exclude", x));
     }
-    let (commits, more) = paginate_more(c, &format!("{path}/commits"), &q, COMMIT_SCAN)?;
+    let (commits, more) = scan(c, &format!("{path}/commits"), &q, COMMIT_SCAN)?;
     let mut by: HashMap<String, (Value, u64)> = HashMap::new();
     for commit in &commits {
         let day = commit["date"]
@@ -436,12 +472,18 @@ pub fn contributors(c: &Client, path: &str, o: &Contributors) -> Result<Value> {
         .take(o.limit)
         .map(|(_, (author, n))| json!({"author": author, "commits": n}))
         .collect();
-    Ok(json!({"values": values, "scannedCommits": commits.len(), "truncated": more}))
+    if more {
+        crate::output::notes::warn(
+            "scan_limit",
+            format!("counted the {COMMIT_SCAN} most recent commits only"),
+        );
+    }
+    Ok(values.into())
 }
 
 // --- search ------------------------------------------------------------------
 
-/// `--field` on `search prs`.
+/// `--in` on `pr search`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Field {
     Both,
@@ -459,49 +501,52 @@ impl Field {
     }
 }
 
+/// Pull requests whose title or description (per `field`) contains `text`.
 pub fn search_prs(
     c: &Client,
     path: &str,
     text: &str,
     field: Field,
-    state: &str,
-    limit: usize,
-) -> Result<Value> {
+    state: Option<&str>,
+    p: &Paging,
+) -> Result<Listed> {
+    if text.trim().is_empty() {
+        return Err(usage("pass the text to look for"));
+    }
     let terms: Vec<String> = field
         .names()
         .iter()
         .map(|f| format!("{f} ~ {}", quote(text)))
         .collect();
     let filter = format!("({})", terms.join(" OR "));
-    let state = state.to_ascii_uppercase();
-    let q = [
-        ("state", state.as_str()),
-        ("sort", "-updated_on"),
-        ("q", filter.as_str()),
-    ];
-    Ok(paginate(c, &format!("{path}/pullrequests"), &q, limit)?.into())
+    let states = super::states(state);
+    let mut q: Vec<(&str, &str)> = states.iter().map(|s| ("state", s.as_str())).collect();
+    q.push(("sort", "-updated_on"));
+    q.push(("q", filter.as_str()));
+    list(c, &format!("{path}/pullrequests"), &q, p)
 }
 
-/// `search prs --scope me`: scans like the inbox, then matches the text.
-pub fn search_my_prs(c: &Client, o: &lifecycle::Mine, text: &str, field: Field) -> Result<Value> {
+/// `pr search --mine`: scans like `pr list --mine`, then matches the text.
+pub fn search_my_prs(
+    c: &Client,
+    o: &lifecycle::Mine,
+    text: &str,
+    field: Field,
+) -> Result<lifecycle::Found> {
     let all = lifecycle::Mine {
         limit: usize::MAX,
         ..*o
     };
-    let found = lifecycle::mine(c, &all)?;
+    let mut found = lifecycle::mine(c, &all)?;
     let needle = text.to_lowercase();
-    Ok(found["values"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|pr| {
-            field.names().iter().any(|f| {
-                pr[*f]
-                    .as_str()
-                    .is_some_and(|v| v.to_lowercase().contains(&needle))
-            })
+    found.items.retain(|pr| {
+        field.names().iter().any(|f| {
+            pr[*f]
+                .as_str()
+                .is_some_and(|v| v.to_lowercase().contains(&needle))
         })
-        .take(o.limit)
-        .cloned()
-        .collect())
+    });
+    found.more |= found.items.len() > o.limit;
+    found.items.truncate(o.limit);
+    Ok(found)
 }

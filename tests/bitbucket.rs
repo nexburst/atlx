@@ -1,61 +1,47 @@
-//! Offline Bitbucket API tests against the mock HTTP server.
+//! Offline Bitbucket tests: API functions against the mock HTTP server, and
+//! the binary's safety rules (no network needed: they stop before any
+//! request).
 
 mod common;
 
-use atlx::bitbucket::{
-    self, NewComment, NewPr, PipelineGet, PipelineQuery, PrGet, PrQuery, RepoQuery,
-};
+use atlx::bitbucket::{self, NewComment, NewPr, Paging, PipelineQuery, PrQuery, RepoQuery};
+use atlx::schema::{Selection, project};
 use common::{MockResponse, MockServer};
-use serde_json::json;
+use serde_json::{Value, json};
+use std::process::{Command, Output, Stdio};
+
+fn page(n: usize) -> Paging {
+    Paging::new(n)
+}
 
 #[test]
-fn bitbucket_repo_query_and_pr_query_follow_next_urls_up_to_limit() {
+fn lists_follow_pages_up_to_the_limit_and_return_a_cursor() {
     let srv = MockServer::with_handler(|req| {
+        let host = req.header("host").unwrap().to_string();
         match (req.path.as_str(), req.query_param("page").as_deref()) {
             ("/repositories/acme", None) => MockResponse::json(
                 200,
                 json!({
-                    "values": [
-                        {"full_name": "acme/r1", "name": "r1", "is_private": true},
-                        {"full_name": "acme/r2", "name": "r2", "is_private": true}
-                    ],
-                    "next": format!("http://{}/repositories/acme?page=2", req.header("host").unwrap())
+                    "values": [{"full_name": "acme/r1"}, {"full_name": "acme/r2"}],
+                    "next": format!("http://{host}/repositories/acme?pagelen=2&page=2"),
                 }),
             ),
             ("/repositories/acme", Some("2")) => MockResponse::json(
                 200,
                 json!({
-                    "values": [
-                        {"full_name": "acme/r3", "name": "r3", "is_private": false},
-                        {"full_name": "acme/r4", "name": "r4", "is_private": false}
-                    ],
-                    "next": format!("http://{}/repositories/acme?page=3", req.header("host").unwrap())
+                    "values": [{"full_name": "acme/r3"}, {"full_name": "acme/r4"}],
+                    "next": format!("http://{host}/repositories/acme?pagelen=2&page=3"),
                 }),
             ),
-            ("/repositories/acme/api/pullrequests", None) => MockResponse::json(
-                200,
-                json!({
-                    "values": [
-                        {"id": 10, "title": "PR 10", "state": "OPEN"},
-                        {"id": 11, "title": "PR 11", "state": "OPEN"}
-                    ],
-                    "next": format!("http://{}/repositories/acme/api/pullrequests?page=2", req.header("host").unwrap())
-                }),
-            ),
-            ("/repositories/acme/api/pullrequests", Some("2")) => MockResponse::json(
-                200,
-                json!({
-                    "values": [
-                        {"id": 12, "title": "PR 12", "state": "OPEN"},
-                        {"id": 13, "title": "PR 13", "state": "OPEN"}
-                    ]
-                }),
-            ),
+            ("/repositories/acme/api/pullrequests", None) => {
+                MockResponse::json(200, json!({"values": [{"id": 10}, {"id": 11}, {"id": 12}]}))
+            }
             _ => MockResponse::text(404, "unexpected route"),
         }
     });
     let client = srv.client();
 
+    // The shared helper keeps its shape: an array.
     let repos = bitbucket::repo_query(
         &client,
         "acme",
@@ -65,132 +51,137 @@ fn bitbucket_repo_query_and_pr_query_follow_next_urls_up_to_limit() {
             language: Some("Rust"),
             sort: "-updated_on",
             role: Some("member"),
-            limit: 3,
+            limit: 2,
         },
     )
     .unwrap();
-    let repo_arr = repos.as_array().unwrap();
-    assert_eq!(repo_arr.len(), 3);
-    assert_eq!(repo_arr[0]["full_name"], "acme/r1");
-    assert_eq!(repo_arr[2]["full_name"], "acme/r3");
+    assert_eq!(repos.as_array().unwrap().len(), 2);
 
-    let prs = bitbucket::pr_query(
+    let (items, next) = bitbucket::repo_list(
+        &client,
+        "acme",
+        &bitbucket::RepoList {
+            name: Some("api"),
+            ..Default::default()
+        },
+        &Paging {
+            limit: 3,
+            cursor: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[2]["full_name"], "acme/r3");
+    // The third record came from page 2, so the cursor resumes inside it,
+    // with the page size of the first request.
+    assert_eq!(next.as_deref(), Some("t+1:3:2"));
+
+    let (prs, next) = bitbucket::pr_list(
         &client,
         "/repositories/acme/api",
         &PrQuery {
             state: Some("open"),
             dest: Some("main"),
-            limit: 3,
             ..Default::default()
         },
+        &page(3),
     )
     .unwrap();
-    let pr_arr = prs["values"].as_array().unwrap();
-    assert_eq!(pr_arr.len(), 3);
-    assert_eq!(prs["returned"], 3);
-    assert_eq!(prs["hasNextPage"], true);
-    assert_eq!(pr_arr[0]["id"], 10);
-    assert_eq!(pr_arr[2]["id"], 12);
+    assert_eq!(prs.len(), 3);
+    assert_eq!(next, None);
 
     let reqs = srv.requests();
-    assert_eq!(reqs.len(), 4);
     assert_eq!(reqs[0].query_param("role").as_deref(), Some("member"));
-    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("3"));
-    assert_eq!(reqs[2].query_param("state").as_deref(), Some("OPEN"));
+    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("2"));
+    let last = reqs.last().unwrap();
+    assert_eq!(last.query_param("state").as_deref(), Some("OPEN"));
     assert!(
-        reqs[2]
-            .query_param("q")
+        last.query_param("q")
             .unwrap()
             .contains("destination.branch.name = \"main\"")
     );
 }
 
 #[test]
-fn bitbucket_pr_get_with_comments_diff_and_statuses() {
+fn every_state_and_bbql_reach_the_request() {
+    let srv = MockServer::with_handler(|_| MockResponse::json(200, json!({"values": []})));
+    bitbucket::pr_list(
+        &srv.client(),
+        "/repositories/acme/api",
+        &PrQuery {
+            state: Some("ALL"),
+            bbql: Some("comment_count > 3"),
+            ..Default::default()
+        },
+        &page(5),
+    )
+    .unwrap();
+    let r = &srv.requests()[0];
+    let raw = r.query.clone();
+    for s in ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"] {
+        assert!(raw.contains(&format!("state={s}")), "{raw}");
+    }
+    assert_eq!(r.query_param("q").as_deref(), Some("(comment_count > 3)"));
+}
+
+fn pr_payload() -> Value {
+    json!({
+        "id": 42,
+        "title": "Add tests",
+        "state": "OPEN",
+        "draft": false,
+        "author": {"uuid": "{jane}", "display_name": "Jane", "links": {"avatar": {"href": "x"}}},
+        "source": {"branch": {"name": "feat/tests"}, "commit": {"hash": "3f2a9c1b7e44"}},
+        "destination": {"branch": {"name": "main"}, "repository": {"full_name": "acme/api"}},
+        "updated_on": "2026-01-05",
+        "links": {"html": {"href": "https://bitbucket.org/acme/api/pull-requests/42"}},
+        "reviewers": [{"uuid": "{bob}", "display_name": "Bob"}],
+        "participants": [
+            {"user": {"uuid": "{bob}", "display_name": "Bob"}, "approved": true, "state": "approved"},
+            {"user": {"uuid": "{carl}", "display_name": "Carl"}, "approved": false}
+        ],
+        "comment_count": 2,
+        "task_count": 0,
+        "description": "Adds integration tests"
+    })
+}
+
+#[test]
+fn a_pull_request_projects_onto_its_records() {
     let srv = MockServer::with_responses([
-        MockResponse::json(
-            200,
-            json!({
-                "id": 42,
-                "title": "Add tests",
-                "state": "OPEN",
-                "draft": false,
-                "author": {"display_name": "Jane"},
-                "source": {"branch": {"name": "feat/tests"}},
-                "destination": {"branch": {"name": "main"}},
-                "updated_on": "2026-01-05",
-                "links": {"html": {"href": "https://bitbucket.org/acme/api/pull-requests/42"}},
-                "reviewers": [{"display_name": "Bob"}],
-                "participants": [
-                    {"user": {"display_name": "Bob"}, "approved": true},
-                    {"user": {"display_name": "Carl"}, "approved": false}
-                ],
-                "comment_count": 2,
-                "task_count": 0,
-                "description": "Adds integration tests"
-            }),
-        ),
-        MockResponse::json(
-            200,
-            json!({
-                "values": [
-                    {"id": 1, "deleted": true, "user": {"display_name": "Bob"}, "content": {"raw": "deleted"}},
-                    {"id": 2, "deleted": false, "user": {"display_name": "Bob"}, "created_on": "2026-01-05", "inline": {"path": "src/lib.rs", "to": 12}, "content": {"raw": "LGTM"}}
-                ]
-            }),
-        ),
-        MockResponse::json(
-            200,
-            json!({
-                "values": [
-                    {"status": "modified", "lines_added": 20, "lines_removed": 3, "new": {"path": "src/lib.rs"}}
-                ]
-            }),
-        ),
-        MockResponse::json(
-            200,
-            json!({
-                "values": [
-                    {"name": "CI", "key": "ci/build", "state": "SUCCESSFUL", "url": "https://ci.example/1"}
-                ]
-            }),
-        ),
-        // Also verify pr_create & pr_comment endpoints
+        MockResponse::json(200, pr_payload()),
         MockResponse::json(
             201,
             json!({"id": 43, "title": "Follow-up", "state": "OPEN"}),
         ),
         MockResponse::json(
             201,
-            json!({"id": 99, "links": {"html": {"href": "https://bb/comment/99"}}}),
+            json!({"id": 99, "content": {"raw": "Nice"}, "inline": {"path": "README.md", "to": 5}}),
         ),
     ]);
     let client = srv.client();
+    let p = "/repositories/acme/api";
 
-    let out = bitbucket::pr_get(
-        &client,
-        "/repositories/acme/api",
-        42,
-        &PrGet {
-            comments: true,
-            diff: true,
-            statuses: true,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(out["id"], 42);
-    assert_eq!(out["reviewers"][0]["display_name"], "Bob");
-    assert_eq!(out["_comments"].as_array().unwrap().len(), 1);
-    assert_eq!(out["_comments"][0]["inline"]["path"], "src/lib.rs");
-    assert_eq!(out["_comments"][0]["inline"]["to"], 12);
-    assert_eq!(out["_comments"][0]["content"]["raw"], "LGTM");
-    assert_eq!(out["_diffstat"][0]["lines_added"], 20);
-    assert_eq!(out["_statuses"][0]["state"], "SUCCESSFUL");
+    let out = bitbucket::pr_get(&client, p, 42).unwrap();
+    let rec = project(&out, &bitbucket::records::PR, &Selection::Default).unwrap();
+    assert_eq!(rec["id"], 42);
+    assert_eq!(rec["author"], json!({"id": "{jane}", "name": "Jane"}));
+    assert_eq!(rec["head"], "3f2a9c1b7e44");
+    assert_eq!(rec["approvals"], 1);
+    assert_eq!(
+        rec["reviewers"],
+        json!([{"id": "{bob}", "name": "Bob", "approved": true, "state": "approved"}])
+    );
+    assert_eq!(rec["body"], "Adds integration tests");
+    assert!(!rec.to_string().contains("avatar"), "no link noise");
+    let row = project(&out, &bitbucket::records::PR_ROW, &Selection::Default).unwrap();
+    assert!(row.get("body").is_none() && row.get("reviewers").is_none());
+    let full = project(&out, &bitbucket::records::PR, &Selection::Full).unwrap();
+    assert_eq!(full["repo"], "acme/api");
 
     let created = bitbucket::pr_create(
         &client,
-        "/repositories/acme/api",
+        p,
         NewPr {
             title: "Follow-up",
             source: "feat/x",
@@ -204,14 +195,16 @@ fn bitbucket_pr_get_with_comments_diff_and_statuses() {
     )
     .unwrap();
     assert_eq!(created["id"], 43);
+    let body = srv.requests()[1].json_body();
+    assert_eq!(body["reviewers"], json!([{"uuid": "{u1}"}]));
+    assert_eq!(body["description"], "desc");
 
     let comment = bitbucket::pr_comment(
         &client,
-        "/repositories/acme/api",
+        p,
         43,
         NewComment {
             text: "Nice",
-            reply_to: None,
             path: Some("README.md"),
             anchor: bitbucket::Anchor {
                 line: Some(5),
@@ -221,152 +214,128 @@ fn bitbucket_pr_get_with_comments_diff_and_statuses() {
         },
     )
     .unwrap();
-    assert_eq!(comment["id"], 99);
-}
-
-#[test]
-fn bitbucket_pipeline_get_with_logs_failed_steps_and_lines() {
-    let srv = MockServer::with_responses([
-        MockResponse::json(
-            200,
-            json!({
-                "build_number": 1234,
-                "uuid": "{pipe-uuid}",
-                "state": {"name": "COMPLETED", "result": {"name": "FAILED"}},
-                "target": {"ref_name": "main", "commit": {"hash": "0123456789abcdef"}},
-                "trigger": {"name": "PUSH"},
-                "created_on": "2026-01-05",
-                "duration_in_seconds": 45
-            }),
-        ),
-        MockResponse::json(
-            200,
-            json!({
-                "values": [
-                    {"name": "Lint", "uuid": "{step-1}", "state": {"name": "COMPLETED", "result": {"name": "PASSED"}}, "duration_in_seconds": 10},
-                    {"name": "Test", "uuid": "{step-2}", "state": {"name": "COMPLETED", "result": {"name": "FAILED"}}, "duration_in_seconds": 35}
-                ]
-            }),
-        ),
-        MockResponse::text(200, "line1\nline2\nline3\nline4"),
-    ]);
-    let client = srv.client();
-
-    let out = bitbucket::pipeline_get(
-        &client,
-        "/repositories/acme/api",
-        "1234",
-        &PipelineGet {
-            logs: true,
-            failed_steps: true,
-            lines: 2,
-            step: None,
-        },
+    let rec = project(
+        &comment,
+        &bitbucket::records::PR_COMMENT,
+        &Selection::Default,
     )
     .unwrap();
-
-    assert_eq!(out["build_number"], 1234);
-    assert_eq!(out["target"]["commit"]["hash"], "0123456789abcdef");
-    let steps = out["steps"].as_array().unwrap();
-    assert_eq!(steps.len(), 2);
-    assert!(
-        steps[0].get("log").is_none(),
-        "passed step log should not be fetched"
-    );
-    assert_eq!(steps[1]["log"], "line3\nline4");
-    assert_eq!(steps[1]["log_total_lines"], 4);
-    assert_eq!(steps[1]["log_truncated"], true);
-
-    let reqs = srv.requests();
-    assert_eq!(reqs.len(), 3);
     assert_eq!(
-        reqs[2].path,
-        "/repositories/acme/api/pipelines/%7Bpipe-uuid%7D/steps/%7Bstep-2%7D/log"
+        (rec["path"].clone(), rec["line"].clone()),
+        (json!("README.md"), json!(5))
     );
+    assert_eq!(rec["body"], "Nice");
 }
 
 #[test]
-fn bitbucket_pipeline_query_filters_client_side() {
+fn pipelines_filter_client_side_and_carry_a_web_url() {
+    let run = |n: u64, result: &str, trigger: &str| {
+        json!({"build_number": n, "uuid": format!("{{p{n}}}"),
+               "state": {"name": "COMPLETED", "result": {"name": result}},
+               "trigger": {"name": trigger}, "repository": {"full_name": "acme/api"}})
+    };
     let srv = MockServer::with_responses([MockResponse::json(
         200,
-        json!({
-            "values": [
-                {"build_number": 1, "uuid": "{p1}", "state": {"name": "COMPLETED", "result": {"name": "PASSED"}}, "trigger": {"name": "PUSH"}},
-                {"build_number": 2, "uuid": "{p2}", "state": {"name": "COMPLETED", "result": {"name": "FAILED"}}, "trigger": {"name": "MANUAL_TRIGGER"}},
-                {"build_number": 3, "uuid": "{p3}", "state": {"name": "COMPLETED", "result": {"name": "FAILED"}}, "trigger": {"name": "PUSH"}}
-            ]
-        }),
+        json!({"values": [run(1, "SUCCESSFUL", "PUSH"), run(2, "FAILED", "MANUAL_TRIGGER"), run(3, "FAILED", "PUSH")]}),
     )]);
-    let client = srv.client();
-
-    let out = bitbucket::pipeline_query(
-        &client,
+    let (items, next) = bitbucket::pipeline_list(
+        &srv.client(),
         "/repositories/acme/api",
         &PipelineQuery {
-            pattern: None,
             state: Some("COMPLETED"),
-            status: Some("FAILED"),
+            result: Some("FAILED"),
             branch: Some("main"),
             trigger: Some("MANUAL"),
-            limit: 10,
+            pattern: None,
         },
+        &page(10),
     )
     .unwrap();
-    let arr = out.as_array().unwrap();
-    assert_eq!(arr.len(), 1);
-    assert_eq!(arr[0]["build_number"], 2);
-    assert_eq!(arr[0]["_repo"], "acme/api");
+    assert_eq!(items.len(), 1);
+    assert_eq!(next, None);
+    let rec = project(
+        &items[0],
+        &bitbucket::records::PIPELINE,
+        &Selection::Default,
+    )
+    .unwrap();
+    assert_eq!(rec["buildNumber"], 2);
+    assert_eq!(rec["result"], "FAILED");
+    assert_eq!(rec["trigger"], "MANUAL");
     assert_eq!(
-        srv.requests()[0].query_param("target.branch").as_deref(),
-        Some("main")
+        rec["url"],
+        "https://bitbucket.org/acme/api/pipelines/results/2"
     );
+    let r = &srv.requests()[0];
+    assert_eq!(r.query_param("target.branch").as_deref(), Some("main"));
+    assert_eq!(r.query_param("pagelen").as_deref(), Some("50"));
 }
 
 #[test]
-fn bitbucket_branch_query_sorts_and_filters_by_author() {
-    let branch = |name: &str, who: &str| json!({"name": name, "target": {"hash": "abc", "author": {"raw": format!("{who} <x@example.com>"), "user": {"display_name": who}}}});
+fn a_filter_that_matches_nothing_stops_with_a_cursor() {
+    let srv = MockServer::with_handler(|req| {
+        let host = req.header("host").unwrap().to_string();
+        let n: u64 = req
+            .query_param("page")
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(1);
+        MockResponse::json(
+            200,
+            json!({
+                "values": [{"build_number": n, "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}}],
+                "next": format!("http://{host}/x?page={}", n + 1),
+            }),
+        )
+    });
+    let (items, next) = bitbucket::pipeline_list(
+        &srv.client(),
+        "/repositories/acme/api",
+        &PipelineQuery {
+            result: Some("FAILED"),
+            ..Default::default()
+        },
+        &page(5),
+    )
+    .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(srv.requests().len(), bitbucket::SCAN_PAGES);
+    assert_eq!(next.as_deref(), Some("t:50:21"));
+}
+
+#[test]
+fn branches_filter_by_author_and_keep_their_head() {
+    let branch = |name: &str, who: &str| json!({"name": name, "target": {"hash": "abc", "date": "2026-01-01", "message": "First line\n\nmore", "author": {"raw": format!("{who} <x@example.com>"), "user": {"display_name": who}}}});
     let srv = MockServer::with_responses([MockResponse::json(
         200,
         json!({"values": [branch("a", "Alice Example"), branch("b", "Bob"), branch("c", "Alice Example")]}),
     )]);
-    let out = bitbucket::branch_query(
+    let (out, next) = bitbucket::branch_list(
         &srv.client(),
         "/repositories/acme/api",
         &bitbucket::BranchQuery {
-            query: Some("feat"),
+            name: Some("feat"),
             author: Some("alice"),
             sort: Some("-target.date"),
-            limit: 1,
+            bbql: None,
         },
+        &page(1),
     )
     .unwrap();
-    let names: Vec<_> = out.as_array().unwrap().iter().map(|b| &b["name"]).collect();
+    let names: Vec<_> = out.iter().map(|b| &b["name"]).collect();
     assert_eq!(names, [&json!("a")]);
+    // The second match is still on this page: resume inside it.
+    assert_eq!(next.as_deref(), Some("s+1:"));
+    let rec = project(&out[0], &bitbucket::records::BRANCH, &Selection::Default).unwrap();
+    assert_eq!(rec["title"], "First line");
+    assert_eq!(rec["author"], "Alice Example");
     let reqs = srv.requests();
     assert_eq!(reqs[0].path, "/repositories/acme/api/refs/branches");
     assert_eq!(reqs[0].query_param("sort").as_deref(), Some("-target.date"));
     assert_eq!(reqs[0].query_param("q").as_deref(), Some("name ~ \"feat\""));
-    // With an author filter more than `limit` branches are scanned.
-    assert_eq!(reqs[0].query_param("pagelen").as_deref(), Some("50"));
 }
 
 #[test]
-fn bitbucket_task_limit_and_workspace_from_repo() {
-    let srv = MockServer::with_responses([MockResponse::json(
-        200,
-        json!({"values": [{"id": 1, "state": "UNRESOLVED"}, {"id": 2, "state": "RESOLVED"}]}),
-    )]);
-    let tasks = bitbucket::pr_tasks(&srv.client(), "/repositories/acme/api", 42, 1).unwrap();
-    assert_eq!(tasks.as_array().unwrap().len(), 1);
-    assert_eq!(
-        srv.requests()[0].path,
-        "/repositories/acme/api/pullrequests/42/tasks"
-    );
-    assert_eq!(
-        srv.requests()[0].query_param("pagelen").as_deref(),
-        Some("1")
-    );
-
+fn workspaces_come_from_the_repository() {
     assert_eq!(
         bitbucket::workspace_of("acme/api", None, None).unwrap(),
         "acme"
@@ -382,5 +351,164 @@ fn bitbucket_task_limit_and_workspace_from_repo() {
     assert_eq!(
         bitbucket::workspace_of("api", None, Some("dflt")).unwrap(),
         "dflt"
+    );
+}
+
+// --- the binary --------------------------------------------------------------
+
+fn atlx(args: &[&str]) -> Output {
+    let dir = std::env::temp_dir().join(format!("atlx-bb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_atlx"));
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("ATLX_") {
+            cmd.env_remove(&key);
+        }
+    }
+    cmd.args(args)
+        .env("ATLX_CONFIG", dir.join("config.toml"))
+        .env("XDG_CACHE_HOME", dir.join("cache"))
+        .env("ATLX_EMAIL", "me@example.com")
+        .env("ATLX_TOKEN", "fake")
+        .env("ATLX_BB_WORKSPACE", "acme")
+        .current_dir(&dir)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn json_out(o: &Output) -> Value {
+    serde_json::from_slice(&o.stdout)
+        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&o.stdout)))
+}
+
+/// Every destructive Bitbucket command, run without `--yes`, is refused
+/// (exit 8) before it reads its config or sends anything.
+#[test]
+fn destructive_commands_refuse_without_yes() {
+    let all = json_out(&atlx(&["describe", "bitbucket", "--all", "-o", "json"]));
+    let destructive: Vec<&Value> = all["data"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["effect"] == "destructive")
+        .collect();
+    assert!(destructive.len() >= 7, "{}", destructive.len());
+    for c in destructive {
+        let path = c["path"].as_str().unwrap();
+        assert_eq!(c["confirm"], true, "{path}");
+        let mut argv: Vec<String> = path.split(' ').map(String::from).collect();
+        for p in c["positionals"].as_array().unwrap() {
+            if p["required"] == true {
+                argv.push("1".into());
+            }
+        }
+        for f in c["flags"].as_array().unwrap() {
+            if f["required"] == true {
+                argv.push(f["name"].as_str().unwrap().into());
+                argv.push("1".into());
+            }
+        }
+        argv.extend(["--repo", "acme/api", "-o", "json"].map(String::from));
+        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let o = atlx(&args);
+        assert_eq!(
+            o.status.code(),
+            Some(8),
+            "{path}: {}",
+            String::from_utf8_lossy(&o.stdout)
+        );
+        let v = json_out(&o);
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], "refused", "{path}");
+        assert!(
+            v["error"]["hint"].as_str().unwrap().contains("--dry-run"),
+            "{path}"
+        );
+        assert!(o.stderr.is_empty(), "{path}");
+    }
+}
+
+#[test]
+fn merge_and_decline_name_their_guard() {
+    for args in [
+        &[
+            "bb", "pr", "merge", "42", "--repo", "acme/api", "-o", "json",
+        ][..],
+        &["bitbucket", "pr", "decline", "42", "-o", "json"][..],
+    ] {
+        let o = atlx(args);
+        assert_eq!(o.status.code(), Some(8), "{args:?}");
+        let v = json_out(&o);
+        assert!(v["error"]["message"].as_str().unwrap().contains("--yes"));
+    }
+}
+
+#[test]
+fn bad_cursors_and_ids_are_usage_errors() {
+    for args in [
+        &["bb", "pr", "get", "abc", "--repo", "acme/api", "-o", "json"][..],
+        &[
+            "bb", "pr", "list", "--cursor", "o:5", "--repo", "acme/api", "-o", "json",
+        ][..],
+        &[
+            "bb", "pr", "list", "--cursor", "nope", "--repo", "acme/api", "-o", "json",
+        ][..],
+        &["bb", "pr", "list", "--repo", "/", "-o", "json"][..],
+    ] {
+        let o = atlx(args);
+        assert_eq!(
+            o.status.code(),
+            Some(2),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&o.stdout)
+        );
+        assert_eq!(json_out(&o)["error"]["code"], "usage", "{args:?}");
+    }
+}
+
+#[test]
+fn describe_shows_records_and_budgets() {
+    let d = json_out(&atlx(&[
+        "describe",
+        "bitbucket",
+        "pr",
+        "diff",
+        "-o",
+        "json",
+    ]));
+    let diff = d["data"]["record"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["name"] == "diff")
+        .unwrap()
+        .clone();
+    assert_eq!(diff["truncated"]["limit"], 40_000);
+    assert_eq!(diff["truncated"]["more"], "--diff-offset");
+    let log = json_out(&atlx(&[
+        "describe",
+        "bitbucket",
+        "pipeline",
+        "log",
+        "-o",
+        "json",
+    ]));
+    assert_eq!(log["data"]["effect"], "read");
+    assert!(log["data"]["examples"].as_array().unwrap().len() >= 2);
+    let merge = json_out(&atlx(&[
+        "describe",
+        "bitbucket",
+        "pr",
+        "merge",
+        "-o",
+        "json",
+    ]));
+    assert_eq!(merge["data"]["effect"], "destructive");
+    assert!(
+        merge["data"]["exitCodes"]
+            .as_array()
+            .unwrap()
+            .contains(&6.into())
     );
 }
