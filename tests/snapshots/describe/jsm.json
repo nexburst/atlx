@@ -1,0 +1,1024 @@
+[
+  {
+    "contract": 1,
+    "path": "jsm request create",
+    "summary": "Create a request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key, exact name or portal URL"
+      },
+      {
+        "name": "--request-type",
+        "type": "string",
+        "required": false,
+        "description": "Request type ID or exact name; without it the error lists the types"
+      },
+      {
+        "name": "--summary",
+        "type": "string",
+        "required": false,
+        "description": "Summary"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description; `-` reads stdin"
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "FIELD_ID=VALUE, sent as given (parsed as JSON when valid); repeatable"
+      },
+      {
+        "name": "--fields-json",
+        "type": "string",
+        "required": false,
+        "description": "JSON object of field IDs to REST values"
+      },
+      {
+        "name": "--answer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Question=value, by label or field ID; options by their label"
+      },
+      {
+        "name": "--answers-json",
+        "type": "string",
+        "required": false,
+        "description": "JSON object of answers"
+      },
+      {
+        "name": "--answers-file",
+        "type": "path",
+        "required": false,
+        "description": "File holding a JSON object of answers"
+      },
+      {
+        "name": "--on-behalf-of",
+        "type": "string",
+        "required": false,
+        "description": "Raise it for this customer (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request validate",
+    "summary": "Check a request's values without creating it",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key, exact name or portal URL"
+      },
+      {
+        "name": "--request-type",
+        "type": "string",
+        "required": false,
+        "description": "Request type ID or exact name; without it the error lists the types"
+      },
+      {
+        "name": "--summary",
+        "type": "string",
+        "required": false,
+        "description": "Summary"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description; `-` reads stdin"
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "FIELD_ID=VALUE, sent as given (parsed as JSON when valid); repeatable"
+      },
+      {
+        "name": "--fields-json",
+        "type": "string",
+        "required": false,
+        "description": "JSON object of field IDs to REST values"
+      },
+      {
+        "name": "--answer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Question=value, by label or field ID; options by their label"
+      },
+      {
+        "name": "--answers-json",
+        "type": "string",
+        "required": false,
+        "description": "JSON object of answers"
+      },
+      {
+        "name": "--answers-file",
+        "type": "path",
+        "required": false,
+        "description": "File holding a JSON object of answers"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request get",
+    "summary": "One request (atlx extra)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "REQUEST",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request query",
+    "summary": "Your requests (atlx extra)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "open",
+          "closed",
+          "all"
+        ],
+        "required": false,
+        "description": "open, closed or all"
+      },
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": false,
+        "description": "Service desk ID, project key or exact name"
+      },
+      {
+        "name": "--request-type",
+        "type": "string",
+        "required": false,
+        "description": "Request type ID or exact name (needs --service-desk)"
+      },
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Summary contains"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request comment list",
+    "summary": "List comments, public and internal",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request comment create",
+    "summary": "Add a comment: customers see it unless --internal",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": true,
+        "description": "Plain text or wiki markup; `-` reads stdin"
+      },
+      {
+        "name": "--internal",
+        "type": "boolean",
+        "required": false,
+        "description": "An internal note, hidden from customers"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request participant list",
+    "summary": "List participants",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request participant add",
+    "summary": "Add participants",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--participant",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "me, an email or an account ID; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request participant remove",
+    "summary": "Remove participants",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--participant",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "me, an email or an account ID; repeatable"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the removal (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request transition query",
+    "summary": "The transitions you can make",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request transition create",
+    "summary": "Make one",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--transition",
+        "type": "string",
+        "required": true,
+        "description": "Transition ID or exact name"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "Comment, seen by customers"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request-type query",
+    "summary": "List request types, of one service desk or all",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--portal-id",
+        "type": "string",
+        "required": false,
+        "description": "Portal (service desk) ID or URL"
+      },
+      {
+        "name": "--query-term",
+        "type": "string",
+        "required": false,
+        "description": "Name or description contains"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request-type field get",
+    "summary": "Get them, with allowed values",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk-id",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key or exact name"
+      },
+      {
+        "name": "--request-type-id",
+        "type": "string",
+        "required": true,
+        "description": "Request type ID or exact name"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request-type fields get",
+    "summary": "Get them, with allowed values",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk-id",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key or exact name"
+      },
+      {
+        "name": "--request-type-id",
+        "type": "string",
+        "required": true,
+        "description": "Request type ID or exact name"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm request-type form get",
+    "summary": "Its fields, and an example answers document",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key, exact name or portal URL"
+      },
+      {
+        "name": "--request-type",
+        "type": "string",
+        "required": false,
+        "description": "Request type ID or exact name"
+      },
+      {
+        "name": "--example-only",
+        "type": "boolean",
+        "required": false,
+        "description": "Only the example answers document"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm approval list",
+    "summary": "List a request's approvals",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm approval get",
+    "summary": "One approval",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--approval-id",
+        "type": "string",
+        "required": true,
+        "description": "Approval ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm approval approve",
+    "summary": "Approve, as yourself",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--approval-id",
+        "type": "string",
+        "required": false,
+        "description": "Approval ID [default: the only pending one you can answer]"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm approval reject",
+    "summary": "Decline, as yourself",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--request",
+        "type": "string",
+        "required": true,
+        "description": "Request key, ID or URL"
+      },
+      {
+        "name": "--approval-id",
+        "type": "string",
+        "required": false,
+        "description": "Approval ID [default: the only pending one you can answer]"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm portal query",
+    "summary": "List them",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query-term",
+        "type": "string",
+        "required": false,
+        "description": "Project key or name contains"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm servicedesk query",
+    "summary": "List them",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query-term",
+        "type": "string",
+        "required": false,
+        "description": "Project key or name contains"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm queue query",
+    "summary": "A service desk's queues, with counts",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key, exact name or portal URL"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm queue workitems query",
+    "summary": "List the work items",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--service-desk",
+        "type": "string",
+        "required": true,
+        "description": "Service desk ID, project key, exact name or portal URL"
+      },
+      {
+        "name": "--queue",
+        "type": "string",
+        "required": true,
+        "description": "Queue ID"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm sla get",
+    "summary": "A work item's SLAs",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--workitem",
+        "type": "string",
+        "required": true,
+        "description": "Work item key"
+      },
+      {
+        "name": "--sla",
+        "type": "string",
+        "required": false,
+        "description": "Only this SLA: name or ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jsm knowledge-article query",
+    "summary": "Search a project's knowledge base",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--project-id",
+        "type": "string",
+        "required": true,
+        "description": "Project ID, key, ARI or URL"
+      },
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Text to search for; REST needs one (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50",
+        "description": "Most articles to return (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  }
+]

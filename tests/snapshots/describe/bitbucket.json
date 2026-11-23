@@ -1,0 +1,4586 @@
+[
+  {
+    "contract": 1,
+    "path": "bitbucket repo query",
+    "summary": "List repositories in a workspace",
+    "description": "List repositories in a workspace\n\n`--repo workspace/slug` (or a URL) also selects the workspace.",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query",
+        "short": "-q",
+        "type": "string",
+        "required": false,
+        "description": "Search by name"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      },
+      {
+        "name": "--project",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--language",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sort",
+        "type": "string",
+        "required": false,
+        "default": "-updated_on"
+      },
+      {
+        "name": "--role",
+        "type": "string",
+        "required": false,
+        "description": "owner, admin, contributor, member"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo get",
+    "summary": "Repository details",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SLUG",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo file",
+    "summary": "Read a file or list a directory from the repository",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "PATH",
+        "type": "string",
+        "required": true,
+        "description": "File or directory path within the repository"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--ref",
+        "type": "string",
+        "required": false,
+        "description": "Branch name, tag, or commit hash (defaults to the main branch)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo create",
+    "summary": "Create a repository (private unless --public)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SLUG",
+        "type": "string",
+        "required": true,
+        "description": "Slug of the new repository"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Display name"
+      },
+      {
+        "name": "--description",
+        "short": "-d",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--language",
+        "type": "string",
+        "required": false,
+        "description": "Primary language"
+      },
+      {
+        "name": "--project",
+        "type": "string",
+        "required": false,
+        "description": "Project key"
+      },
+      {
+        "name": "--private",
+        "type": "boolean",
+        "required": false,
+        "description": "Private (the default)"
+      },
+      {
+        "name": "--public",
+        "type": "boolean",
+        "required": false,
+        "description": "Public: visible to everyone"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo list-files",
+    "summary": "List a directory",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--path",
+        "type": "string",
+        "required": false,
+        "description": "Directory [default: the root]"
+      },
+      {
+        "name": "--ref",
+        "type": "string",
+        "required": false,
+        "description": "Branch, tag or commit [default: the main branch]"
+      },
+      {
+        "name": "--max-depth",
+        "type": "integer",
+        "required": false,
+        "description": "Descend this many levels (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "100"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo url",
+    "summary": "A repository's web URL; needs no credentials",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SLUG",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, or workspace/slug"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--path",
+        "type": "string",
+        "required": false,
+        "description": "File or directory in it (atlx extra)"
+      },
+      {
+        "name": "--ref",
+        "type": "string",
+        "required": false,
+        "description": "Branch, tag or commit (atlx extra)"
+      },
+      {
+        "name": "--line",
+        "type": "integer",
+        "required": false,
+        "description": "Line in --path (atlx extra)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket repo contributors",
+    "summary": "Top commit authors, over the 1000 most recent commits",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--ref",
+        "type": "string",
+        "required": false,
+        "description": "Branch, tag or commit [default: the main branch]"
+      },
+      {
+        "name": "--range",
+        "type": "string",
+        "required": false,
+        "description": "from..to"
+      },
+      {
+        "name": "--since",
+        "type": "string",
+        "required": false,
+        "description": "Only commits since this day (YYYY-MM-DD or 30d; atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "10"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests query",
+    "summary": "List pull requests in a repository",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEXT",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "description": "OPEN, MERGED, DECLINED, SUPERSEDED"
+      },
+      {
+        "name": "--author",
+        "type": "string",
+        "required": false,
+        "description": "Nickname, display name, account ID, or {uuid}"
+      },
+      {
+        "name": "--source",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--dest",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--created-since",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--created-before",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--updated-since",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--updated-before",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--reviewer",
+        "type": "string",
+        "required": false,
+        "description": "Nickname, account ID, {uuid} or me"
+      },
+      {
+        "name": "--merged-since",
+        "type": "string",
+        "required": false,
+        "description": "Merged on or after this day; reads each candidate's activity"
+      },
+      {
+        "name": "--merged-before",
+        "type": "string",
+        "required": false,
+        "description": "Merged before this day; reads each candidate's activity"
+      },
+      {
+        "name": "--scope",
+        "type": "enum",
+        "values": [
+          "repo",
+          "me"
+        ],
+        "required": false,
+        "description": "repo (default), or me: yours across recently updated repositories"
+      },
+      {
+        "name": "--role",
+        "type": "enum",
+        "values": [
+          "author",
+          "reviewer",
+          "participant"
+        ],
+        "required": false,
+        "description": "Your part in them, with --scope me (default author)"
+      },
+      {
+        "name": "--page",
+        "type": "integer",
+        "required": false,
+        "description": "One page, counted from 1"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests get",
+    "summary": "One or more pull requests by number or URL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "IDS",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--comments",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--diff",
+        "type": "boolean",
+        "required": false,
+        "description": "File-level diff stats"
+      },
+      {
+        "name": "--statuses",
+        "type": "boolean",
+        "required": false,
+        "description": "Build/CI statuses"
+      },
+      {
+        "name": "--full",
+        "type": "boolean",
+        "required": false,
+        "description": "Comments, diff stats and statuses"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--batch-concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many pull requests to fetch at once (1 to 20)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests create",
+    "summary": "Create a pull request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--title",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--source",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--dest",
+        "type": "string",
+        "required": false,
+        "description": "Defaults to the repository main branch"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--description-file",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--reviewer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Reviewers: names, nicknames, account IDs, {uuid}s or me"
+      },
+      {
+        "name": "--default-reviewers",
+        "type": "boolean",
+        "required": false,
+        "description": "Add the repository's default reviewers (atlx extra)"
+      },
+      {
+        "name": "--reviewer-uuid",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated Bitbucket user UUIDs"
+      },
+      {
+        "name": "--reviewer-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated Atlassian account IDs"
+      },
+      {
+        "name": "--close-source-branch",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment create",
+    "summary": "Add a general, reply, pending, or inline comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--text",
+        "type": "string",
+        "required": true,
+        "description": "`-` reads stdin"
+      },
+      {
+        "name": "--reply-to",
+        "type": "integer",
+        "required": false,
+        "description": "Comment id this one answers"
+      },
+      {
+        "name": "--pending",
+        "type": "boolean",
+        "required": false,
+        "description": "Keep the comment unpublished until the review is finished in Bitbucket"
+      },
+      {
+        "name": "--path",
+        "type": "string",
+        "required": false,
+        "description": "Inline comment on this file path"
+      },
+      {
+        "name": "--line",
+        "type": "integer",
+        "required": false,
+        "description": "New-side line number"
+      },
+      {
+        "name": "--start-line",
+        "type": "integer",
+        "required": false,
+        "description": "First new-side line of a range (with --end-line)"
+      },
+      {
+        "name": "--end-line",
+        "type": "integer",
+        "required": false,
+        "description": "Last new-side line of a range (with --start-line)"
+      },
+      {
+        "name": "--from-line",
+        "type": "integer",
+        "required": false,
+        "description": "Old-side line number"
+      },
+      {
+        "name": "--start-from-line",
+        "type": "integer",
+        "required": false,
+        "description": "First old-side line of a range (with --end-from-line)"
+      },
+      {
+        "name": "--end-from-line",
+        "type": "integer",
+        "required": false,
+        "description": "Last old-side line of a range (with --start-from-line)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment query",
+    "summary": "List the comments on a pull request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pullRequest",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment get",
+    "summary": "Show one comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pullRequest",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": true,
+        "description": "Comment id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment update",
+    "summary": "Replace a comment's text",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": true,
+        "description": "Comment id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      },
+      {
+        "name": "--text",
+        "type": "string",
+        "required": true,
+        "description": "New comment text; `-` reads stdin"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment delete",
+    "summary": "Delete a comment (needs --yes)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": true,
+        "description": "Comment id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the deletion"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment resolve",
+    "summary": "Mark a comment thread resolved",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": true,
+        "description": "Comment id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests comment reopen",
+    "summary": "Reopen a resolved comment thread",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": true,
+        "description": "Comment id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests diff",
+    "summary": "Raw unified diff for a pull request",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests diff-line",
+    "summary": "Find lines in a pull request diff and the line numbers to comment on",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--text",
+        "type": "string",
+        "required": true,
+        "description": "Text the diff line must contain"
+      },
+      {
+        "name": "--path",
+        "type": "string",
+        "required": false,
+        "description": "Only look in this file"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests diffstat",
+    "summary": "Files changed by a pull request, with lines added and removed",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "100"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests commits",
+    "summary": "Commits in a pull request",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pullRequest",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests patch",
+    "summary": "Pull request as an mbox patch (for `git am`)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests activity",
+    "summary": "Activity feed for one or more pull requests",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "IDS",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Pull request numbers or URLs"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--type",
+        "type": "string",
+        "required": false,
+        "description": "Filter by event type (e.g. comment, approval, update)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Maximum activities per pull request"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the batch if any pull request fails"
+      },
+      {
+        "name": "--batch-concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many pull requests to fetch at once (1 to 20)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task query",
+    "summary": "List the tasks on a pull request",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pullRequest",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task create",
+    "summary": "Add a task to a pull request, optionally tied to a comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--text",
+        "type": "string",
+        "required": true,
+        "description": "Task text; `-` reads stdin"
+      },
+      {
+        "name": "--comment",
+        "type": "integer",
+        "required": false,
+        "description": "Comment id to attach the task to"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task get",
+    "summary": "Show one task",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pullRequest",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--task",
+        "type": "integer",
+        "required": true,
+        "description": "Task id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task update",
+    "summary": "Change a task's text and/or state",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--task",
+        "type": "integer",
+        "required": true,
+        "description": "Task id"
+      },
+      {
+        "name": "--text",
+        "type": "string",
+        "required": false,
+        "description": "New task text; `-` reads stdin"
+      },
+      {
+        "name": "--resolve",
+        "type": "boolean",
+        "required": false,
+        "description": "Mark the task done"
+      },
+      {
+        "name": "--reopen",
+        "type": "boolean",
+        "required": false,
+        "description": "Mark the task open again"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task delete",
+    "summary": "Delete a task (needs --yes)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--task",
+        "type": "integer",
+        "required": true,
+        "description": "Task id"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the deletion"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task resolve",
+    "summary": "Mark a task done",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--task",
+        "type": "integer",
+        "required": true,
+        "description": "Task id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests task reopen",
+    "summary": "Mark a done task open again",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--task",
+        "type": "integer",
+        "required": true,
+        "description": "Task id"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests approve",
+    "summary": "Approve a pull request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests unapprove",
+    "summary": "Remove your approval from a pull request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests request-changes",
+    "summary": "Request changes on a pull request",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests update",
+    "summary": "Change a pull request's fields and reviewers",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "New title"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "New description; `-` reads stdin"
+      },
+      {
+        "name": "--description-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the new description from a file"
+      },
+      {
+        "name": "--clear-description",
+        "type": "boolean",
+        "required": false,
+        "description": "Empty the description"
+      },
+      {
+        "name": "--dest",
+        "type": "string",
+        "required": false,
+        "description": "New destination branch"
+      },
+      {
+        "name": "--reviewer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Replace the reviewers: names, nicknames, account IDs, {uuid}s or me"
+      },
+      {
+        "name": "--reviewer-account-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Replace the reviewers, by account ID"
+      },
+      {
+        "name": "--reviewer-uuid",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Replace the reviewers, by UUID"
+      },
+      {
+        "name": "--add-reviewer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Add reviewers"
+      },
+      {
+        "name": "--add-reviewer-account-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Add reviewers, by account ID"
+      },
+      {
+        "name": "--add-reviewer-uuid",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Add reviewers, by UUID"
+      },
+      {
+        "name": "--remove-reviewer",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Remove reviewers"
+      },
+      {
+        "name": "--remove-reviewer-account-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Remove reviewers, by account ID"
+      },
+      {
+        "name": "--remove-reviewer-uuid",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Remove reviewers, by UUID"
+      },
+      {
+        "name": "--clear-reviewers",
+        "type": "boolean",
+        "required": false,
+        "description": "Remove every reviewer"
+      },
+      {
+        "name": "--close-source-branch",
+        "type": "boolean",
+        "required": false,
+        "description": "Close the source branch on merge"
+      },
+      {
+        "name": "--keep-source-branch",
+        "type": "boolean",
+        "required": false,
+        "description": "Keep the source branch on merge"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Turn into a draft"
+      },
+      {
+        "name": "--ready",
+        "type": "boolean",
+        "required": false,
+        "description": "Mark ready for review"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests remove-request-changes",
+    "summary": "Withdraw your request for changes",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests mergeability",
+    "summary": "What blocks a merge, as far as the REST API tells",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--exclude-git-mergeability-check",
+        "type": "boolean",
+        "required": false,
+        "description": "Skip the merge conflict check"
+      },
+      {
+        "name": "--exclude-maximum-commits-behind",
+        "type": "boolean",
+        "required": false,
+        "description": "Don't report on how far the source branch is behind"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests merge-status",
+    "summary": "The state of a merge still in progress",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--task",
+        "type": "string",
+        "required": true,
+        "description": "Merge task ID, as a merge still in progress prints it"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests conflicts",
+    "summary": "Files with merge conflicts",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "100"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests for-commit",
+    "summary": "Pull requests that contain a commit",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "COMMIT",
+        "type": "string",
+        "required": true,
+        "description": "Commit hash"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests default-reviewer query",
+    "summary": "The repository's default reviewers",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests default-reviewer get",
+    "summary": "One default reviewer",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "UUID",
+        "type": "string",
+        "required": true,
+        "description": "User UUID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests default-reviewer add",
+    "summary": "Make a user a default reviewer",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "UUID",
+        "type": "string",
+        "required": true,
+        "description": "User UUID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the change (required)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests default-reviewer remove",
+    "summary": "Stop a user being a default reviewer",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "UUID",
+        "type": "string",
+        "required": true,
+        "description": "User UUID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the change (required)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests effective-default-reviewer query",
+    "summary": "Default reviewers, including those inherited from the project",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests merge",
+    "summary": "Merge a pull request",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pull-request",
+        "type": "string",
+        "required": false,
+        "description": "Pull request number or URL"
+      },
+      {
+        "name": "--merge-strategy",
+        "type": "enum",
+        "values": [
+          "merge_commit",
+          "squash",
+          "fast_forward"
+        ],
+        "required": false,
+        "description": "Defaults to the repository's merge strategy"
+      },
+      {
+        "name": "--merge-message",
+        "type": "string",
+        "required": false,
+        "description": "Commit message for the merge"
+      },
+      {
+        "name": "--close-source-branch",
+        "type": "boolean",
+        "required": false,
+        "description": "Delete the source branch after this merge"
+      },
+      {
+        "name": "--keep-source-branch",
+        "type": "boolean",
+        "required": false,
+        "description": "Keep the source branch even if the pull request was set to close it"
+      },
+      {
+        "name": "--wait",
+        "type": "boolean",
+        "required": false,
+        "description": "Wait until the merge has finished"
+      },
+      {
+        "name": "--wait-timeout",
+        "type": "integer",
+        "required": false,
+        "description": "Seconds --wait may take [default: 90]"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pull-requests decline",
+    "summary": "Decline a pull request",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Pull request number or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket branch create",
+    "summary": "Create a branch",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": true,
+        "description": "Name of the new branch"
+      },
+      {
+        "name": "--from",
+        "type": "string",
+        "required": false,
+        "description": "Branch or commit hash to start from [default: the main branch]"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket branch delete",
+    "summary": "Delete a branch",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "NAME",
+        "type": "string",
+        "required": true,
+        "description": "Branch name"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket branch query",
+    "summary": "List or search the branches of a repository",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query",
+        "short": "-q",
+        "type": "string",
+        "required": false,
+        "description": "Branch name substring"
+      },
+      {
+        "name": "--author",
+        "type": "string",
+        "required": false,
+        "description": "Head commit author: display name or account ID"
+      },
+      {
+        "name": "--sort",
+        "type": "string",
+        "required": false,
+        "default": "-target.date",
+        "description": "Sort field: name, -name, target.date or -target.date"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline query",
+    "summary": "Recent pipeline runs",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "description": "PENDING, IN_PROGRESS, COMPLETED"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "description": "PASSED, FAILED, STOPPED, ERROR"
+      },
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--trigger",
+        "type": "string",
+        "required": false,
+        "description": "PUSH, MANUAL, SCHEDULE, PULLREQUEST"
+      },
+      {
+        "name": "--pattern",
+        "type": "string",
+        "required": false,
+        "description": "The pipeline's pattern, such as a custom pipeline's name"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "15"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline get",
+    "summary": "One pipeline run with its steps",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pipeline",
+        "type": "string",
+        "required": true,
+        "description": "Build number, {uuid}, or result URL"
+      },
+      {
+        "name": "--logs",
+        "type": "boolean",
+        "required": false,
+        "description": "Include step logs"
+      },
+      {
+        "name": "--failed-steps",
+        "type": "boolean",
+        "required": false,
+        "description": "With --logs, only failed steps"
+      },
+      {
+        "name": "--lines",
+        "type": "integer",
+        "required": false,
+        "default": "100",
+        "description": "Max log lines per step (0 = all)"
+      },
+      {
+        "name": "--step",
+        "type": "string",
+        "required": false,
+        "description": "Limit logs and tests to one step (1-based index, UUID or name)"
+      },
+      {
+        "name": "--test-reports",
+        "type": "boolean",
+        "required": false,
+        "description": "Add each step's test report summary"
+      },
+      {
+        "name": "--test-cases",
+        "type": "boolean",
+        "required": false,
+        "description": "Add each step's test cases"
+      },
+      {
+        "name": "--case-limit",
+        "type": "integer",
+        "required": false,
+        "default": "100",
+        "description": "Max test cases per step (0 = all, up to 5000)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline run",
+    "summary": "Start a pipeline",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false,
+        "description": "Run on this branch"
+      },
+      {
+        "name": "--tag",
+        "type": "string",
+        "required": false,
+        "description": "Run on this tag"
+      },
+      {
+        "name": "--commit",
+        "type": "string",
+        "required": false,
+        "description": "Run at this commit; needs --custom unless --branch or --tag is given"
+      },
+      {
+        "name": "--custom",
+        "type": "string",
+        "required": false,
+        "description": "The custom pipeline to run"
+      },
+      {
+        "name": "--variable",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "KEY=VALUE; repeatable"
+      },
+      {
+        "name": "--secured-variable",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "KEY, whose value is read from the environment variable of that name, so it stays out of the command line; repeatable"
+      },
+      {
+        "name": "--open",
+        "type": "boolean",
+        "required": false,
+        "description": "Add the new run's web URL as `url`"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline trigger",
+    "summary": "Start a pipeline (same as run)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false,
+        "description": "Run on this branch"
+      },
+      {
+        "name": "--tag",
+        "type": "string",
+        "required": false,
+        "description": "Run on this tag"
+      },
+      {
+        "name": "--commit",
+        "type": "string",
+        "required": false,
+        "description": "Run at this commit; needs --custom unless --branch or --tag is given"
+      },
+      {
+        "name": "--custom",
+        "type": "string",
+        "required": false,
+        "description": "The custom pipeline to run"
+      },
+      {
+        "name": "--variable",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "KEY=VALUE; repeatable"
+      },
+      {
+        "name": "--secured-variable",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "KEY, whose value is read from the environment variable of that name, so it stays out of the command line; repeatable"
+      },
+      {
+        "name": "--open",
+        "type": "boolean",
+        "required": false,
+        "description": "Add the new run's web URL as `url`"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline latest-failure",
+    "summary": "The newest failed pipeline, with its failed steps' logs",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "description": "PENDING, IN_PROGRESS, COMPLETED"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "FAILED",
+          "ERROR",
+          "STOPPED"
+        ],
+        "required": false,
+        "description": "FAILED (default), ERROR or STOPPED"
+      },
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--trigger",
+        "type": "string",
+        "required": false,
+        "description": "PUSH, MANUAL, SCHEDULE, PULLREQUEST"
+      },
+      {
+        "name": "--pattern",
+        "type": "string",
+        "required": false,
+        "description": "The pipeline's pattern, such as a custom pipeline's name"
+      },
+      {
+        "name": "--all-steps",
+        "type": "boolean",
+        "required": false,
+        "description": "Logs of every step, not only the failed ones"
+      },
+      {
+        "name": "--lines",
+        "type": "integer",
+        "required": false,
+        "default": "40",
+        "description": "Max log lines per step (0 = all)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline tail",
+    "summary": "Follow a pipeline's logs; exits 1 if it fails",
+    "description": "Follow a pipeline's logs; exits 1 if it fails\n\nOutside text mode each line is a JSON event (JSONL). Output shaping flags don't apply to the stream.",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TARGET",
+        "type": "string",
+        "required": false,
+        "description": "Pipeline build number or result URL (a step in the URL selects it)"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--pipeline",
+        "type": "string",
+        "required": false,
+        "description": "Build number, {uuid}, or result URL"
+      },
+      {
+        "name": "--step",
+        "type": "string",
+        "required": false,
+        "description": "One step: 1-based index, UUID or name [default: every step]"
+      },
+      {
+        "name": "--lines",
+        "short": "-n",
+        "type": "string",
+        "required": false,
+        "default": "10",
+        "description": "Existing log lines to show first: a number, or all"
+      },
+      {
+        "name": "--no-follow",
+        "type": "boolean",
+        "required": false,
+        "description": "Print what is logged so far and exit"
+      },
+      {
+        "name": "--poll-interval",
+        "type": "integer",
+        "required": false,
+        "default": "2000",
+        "description": "Milliseconds between polls"
+      },
+      {
+        "name": "--interval",
+        "type": "integer",
+        "required": false,
+        "description": "Seconds between polls (atlx extra)"
+      },
+      {
+        "name": "--timeout",
+        "type": "integer",
+        "required": false,
+        "default": "1800",
+        "description": "Give up after this many seconds (atlx extra)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline grep",
+    "summary": "Search a pipeline's logs",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "pattern",
+        "type": "string",
+        "required": false,
+        "description": "Text to look for (not a regular expression)"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--pattern",
+        "type": "string",
+        "required": false,
+        "description": "Same as the positional argument (atlx extra)"
+      },
+      {
+        "name": "--pipeline",
+        "type": "string",
+        "required": true,
+        "description": "Build number, {uuid}, or result URL"
+      },
+      {
+        "name": "--step",
+        "type": "string",
+        "required": false,
+        "description": "Only this step: 1-based index, UUID or name"
+      },
+      {
+        "name": "--ignore-case",
+        "short": "-i",
+        "type": "boolean",
+        "required": false,
+        "description": "Ignore case"
+      },
+      {
+        "name": "--context",
+        "short": "-C",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Lines of context around each match"
+      },
+      {
+        "name": "--max-matches",
+        "type": "integer",
+        "required": false,
+        "default": "200",
+        "description": "Stop after this many matches"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline rerun-failed",
+    "summary": "Start a failed pipeline again (every step; needs --whole-pipeline)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--pipeline",
+        "type": "string",
+        "required": true,
+        "description": "Build number, {uuid}, or result URL"
+      },
+      {
+        "name": "--whole-pipeline",
+        "type": "boolean",
+        "required": false,
+        "description": "Agree to repeat every step: REST can't rerun only the failed ones (atlx extra)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline config get",
+    "summary": "The repository's Pipelines settings",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket pipeline config update",
+    "summary": "Turn Pipelines on or off; off stops all future runs",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--enabled",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket inbox",
+    "summary": "Pull requests waiting on you",
+    "description": "Pull requests waiting on you\n\nBitbucket has no workspace-wide reviewer query, so this scans your most recently updated repositories (25 unless --repo-limit says otherwise), at one request or more each.",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--scope",
+        "type": "enum",
+        "values": [
+          "workspace",
+          "repo"
+        ],
+        "required": false,
+        "description": "workspace (default), or only --repo"
+      },
+      {
+        "name": "--role",
+        "type": "enum",
+        "values": [
+          "reviewer",
+          "author",
+          "all"
+        ],
+        "required": false,
+        "default": "reviewer",
+        "description": "reviewer: not approved by you yet (default); author: yours, with changes requested; all: both"
+      },
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "default": "OPEN",
+        "description": "OPEN, MERGED, DECLINED, SUPERSEDED"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--repo-limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Most recently updated repositories to scan; each costs a request"
+      },
+      {
+        "name": "--repo-role",
+        "type": "string",
+        "required": false,
+        "default": "member",
+        "description": "Scan repositories where you have this role"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many repositories to read at once (1 to 20)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket commit query",
+    "summary": "Commit history, of the main branch by default",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false,
+        "description": "Branch to read"
+      },
+      {
+        "name": "--include",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Revisions to include; repeatable (atlx extra)"
+      },
+      {
+        "name": "--exclude",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Revisions to exclude; repeatable (atlx extra)"
+      },
+      {
+        "name": "--path",
+        "type": "string",
+        "required": false,
+        "description": "Only commits touching this path (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "20"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket commit create",
+    "summary": "Commit files without a checkout",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--message",
+        "short": "-m",
+        "type": "string",
+        "required": true,
+        "description": "Commit message"
+      },
+      {
+        "name": "--file",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Local file to commit at the same relative path, or repoPath=localPath (atlx extra); repeatable"
+      },
+      {
+        "name": "--file-local",
+        "type": "path",
+        "required": false,
+        "repeatable": true,
+        "description": "Local file for the --file-remote in the same position"
+      },
+      {
+        "name": "--file-remote",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Repository path for the --file-local in the same position"
+      },
+      {
+        "name": "--files-from",
+        "type": "path",
+        "required": false,
+        "description": "JSON object mapping repository paths to text or to {\"file\": localPath}"
+      },
+      {
+        "name": "--delete",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Repository path to delete; repeatable"
+      },
+      {
+        "name": "--branch",
+        "type": "string",
+        "required": false,
+        "description": "Branch to commit to"
+      },
+      {
+        "name": "--default-branch",
+        "type": "boolean",
+        "required": false,
+        "description": "Commit to the repository's default branch"
+      },
+      {
+        "name": "--author",
+        "type": "string",
+        "required": false,
+        "description": "Author, as \"Name <email>\""
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "Fail unless the branch is still at this commit"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the commit (required)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket commit report create",
+    "summary": "Create or replace a report",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "COMMIT",
+        "type": "string",
+        "required": true,
+        "description": "Commit hash"
+      },
+      {
+        "name": "report-id",
+        "type": "string",
+        "required": true,
+        "description": "Report ID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--report",
+        "type": "string",
+        "required": true,
+        "description": "Report JSON"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket commit report query",
+    "summary": "A commit's reports",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "COMMIT",
+        "type": "string",
+        "required": true,
+        "description": "Commit hash"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "100"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket workspace get",
+    "summary": "Workspace details",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket workspace member query",
+    "summary": "List members",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query",
+        "short": "-q",
+        "type": "string",
+        "required": false,
+        "description": "Nickname or display name contains (atlx extra)"
+      },
+      {
+        "name": "--include-permissions",
+        "type": "boolean",
+        "required": false,
+        "description": "Include permission levels (needs permission to read them)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket workspace member get",
+    "summary": "One member",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "MEMBER",
+        "type": "string",
+        "required": true,
+        "description": "UUID, account ID, nickname, display name or me"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment query",
+    "summary": "List deployments",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--environment",
+        "type": "string",
+        "required": false,
+        "description": "Only this environment: UUID, name or slug (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment get",
+    "summary": "One deployment",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "UUID",
+        "type": "string",
+        "required": true,
+        "description": "Deployment UUID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment environments query",
+    "summary": "List the environments",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment environment variable query",
+    "summary": "List the variables; secured values are never shown",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "environment",
+        "type": "string",
+        "required": false,
+        "description": "Environment UUID, name or slug"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--environment",
+        "type": "string",
+        "required": false,
+        "description": "Same as the positional argument (atlx extra)"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment history query",
+    "summary": "Deployment attempts, newest first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--environment",
+        "type": "string",
+        "required": true,
+        "description": "Environment UUID, name or slug"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only this outcome, e.g. SUCCESSFUL or FAILED; repeatable"
+      },
+      {
+        "name": "--pipeline-uuid",
+        "type": "string",
+        "required": false,
+        "description": "Only deployments from this pipeline"
+      },
+      {
+        "name": "--started-after",
+        "type": "string",
+        "required": false,
+        "description": "Started at or after this time"
+      },
+      {
+        "name": "--started-before",
+        "type": "string",
+        "required": false,
+        "description": "Started at or before this time"
+      },
+      {
+        "name": "--sort",
+        "type": "enum",
+        "values": [
+          "asc",
+          "desc"
+        ],
+        "required": false,
+        "default": "desc",
+        "description": "By start time"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment history get",
+    "summary": "One deployment in an environment",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "deployment-uuid",
+        "type": "string",
+        "required": true,
+        "description": "Deployment UUID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--environment",
+        "type": "string",
+        "required": true,
+        "description": "Environment UUID, name or slug"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket deployment commits query",
+    "summary": "Commits added and removed since the previous successful deployment",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--environment",
+        "type": "string",
+        "required": true,
+        "description": "Environment UUID, name or slug"
+      },
+      {
+        "name": "--deployment",
+        "type": "string",
+        "required": true,
+        "description": "Deployment UUID"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket search prs",
+    "summary": "Search pull request titles and descriptions",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEXT",
+        "type": "string",
+        "required": true,
+        "description": "Text to look for"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--scope",
+        "type": "enum",
+        "values": [
+          "repo",
+          "me"
+        ],
+        "required": false,
+        "description": "repo (default), or me: yours across recently updated repositories"
+      },
+      {
+        "name": "--field",
+        "type": "enum",
+        "values": [
+          "both",
+          "title",
+          "description"
+        ],
+        "required": false,
+        "default": "both",
+        "description": "Where to look"
+      },
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "default": "OPEN",
+        "description": "OPEN, MERGED, DECLINED, SUPERSEDED"
+      },
+      {
+        "name": "--role",
+        "type": "enum",
+        "values": [
+          "author",
+          "reviewer",
+          "participant"
+        ],
+        "required": false,
+        "description": "author (default) or reviewer, with --scope me"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--workspace",
+        "short": "-w",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket workspace slug"
+      },
+      {
+        "name": "--repo",
+        "short": "-r",
+        "type": "string",
+        "required": false,
+        "description": "Repository slug, workspace/repo, or Bitbucket URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "bitbucket search code",
+    "summary": "Search code across repositories in a workspace",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "QUERY",
+        "type": "string",
+        "required": true,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--workspace",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--repo",
+        "type": "string",
+        "required": false,
+        "description": "Restrict search to a repository slug"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  }
+]

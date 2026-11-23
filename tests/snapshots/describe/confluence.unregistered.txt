@@ -1,0 +1,68 @@
+# Commands without a CommandMeta yet. Package owners empty this list;
+# unregistered_commands_only_shrink fails if it grows.
+confluence search query
+confluence search text
+confluence content get
+confluence content create
+confluence content update
+confluence content list
+confluence content comments list
+confluence content comments get
+confluence content comments create
+confluence content comments reply
+confluence content comments update
+confluence content comments delete
+confluence content comments resolve
+confluence content comments reopen
+confluence content children
+confluence content labels list
+confluence content labels add
+confluence content labels remove
+confluence content labels watch
+confluence content labels unwatch
+confluence content delete
+confluence content tasks list
+confluence content tasks get
+confluence content tasks complete
+confluence content tasks reopen
+confluence content status get
+confluence content status set
+confluence content list-available-statuses
+confluence content watch
+confluence content unwatch
+confluence content move
+confluence content copy
+confluence content trash
+confluence content untrash
+confluence content purge
+confluence content archive
+confluence content publish
+confluence content delete-draft
+confluence content versions list
+confluence content versions get
+confluence content versions diff
+confluence content versions restore
+confluence content history list
+confluence content history get
+confluence content history diff
+confluence content attachments list
+confluence content attachments get
+confluence content attachments download
+confluence content attachments upload
+confluence content attachments delete
+confluence content body-formats
+confluence space list
+confluence space get
+confluence space me
+confluence space create
+confluence space update
+confluence space archive
+confluence space unarchive
+confluence space delete
+confluence space watch
+confluence space unwatch
+confluence space permission list
+confluence space permission available
+confluence templates list
+confluence templates get
+confluence tree

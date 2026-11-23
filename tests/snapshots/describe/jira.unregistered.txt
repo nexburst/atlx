@@ -1,0 +1,131 @@
+# Commands without a CommandMeta yet. Package owners empty this list;
+# unregistered_commands_only_shrink fails if it grows.
+jira workitem get
+jira workitem search
+jira workitem query
+jira workitem create
+jira workitem update
+jira workitem comment create
+jira workitem comment query
+jira workitem comment update
+jira workitem comment delete
+jira workitem transition
+jira workitem transitions query
+jira workitem field create-metadata
+jira workitem field update-metadata
+jira workitem link workitem
+jira workitem link weblink
+jira workitem link query
+jira workitem link-types query
+jira workitem unlink workitem
+jira workitem unlink weblink
+jira workitem delete
+jira workitem changelog query
+jira workitem types query
+jira workitem types get
+jira workitem statuses query
+jira workitem priorities query
+jira workitem attachment query
+jira workitem attachment get
+jira workitem attachment download
+jira workitem attachment thumbnail
+jira workitem attachment upload
+jira workitem attachment delete
+jira workitem worklog add
+jira workitem worklog update
+jira workitem worklog query
+jira workitem worklog get
+jira workitem worklog delete
+jira workitem worklog changed
+jira workitem worklog deleted
+jira workitem watcher query
+jira workitem watcher add
+jira workitem watcher remove
+jira workitem vote query
+jira workitem vote add
+jira workitem vote remove
+jira workitem bulk-get
+jira workitem create-bulk
+jira workitem bulk-transition
+jira workitem archive
+jira workitem unarchive
+jira workitem property query
+jira workitem property get
+jira workitem property set
+jira workitem property delete
+jira dashboard query
+jira dashboard get
+jira dashboard create
+jira dashboard update
+jira dashboard copy
+jira dashboard delete
+jira dashboard bulk-edit
+jira dashboard gadget query
+jira dashboard gadget catalog query
+jira dashboard gadget add
+jira dashboard gadget update
+jira dashboard gadget delete
+jira dashboard item-property query
+jira dashboard item-property get
+jira dashboard item-property set
+jira dashboard item-property delete
+jira filter query
+jira filter get
+jira filter create
+jira filter update
+jira filter delete
+jira filter add-favourite
+jira filter remove-favourite
+jira filter change-owner
+jira filter columns get
+jira filter columns set
+jira filter reset-columns
+jira filter share query
+jira filter share add
+jira filter share remove
+jira filter subscription query
+jira field list
+jira space query
+jira space get
+jira space create
+jira space update
+jira space delete
+jira space archive
+jira space restore
+jira space issue-types
+jira space status query
+jira space types query
+jira space notification-scheme get
+jira space versions query
+jira space version create
+jira space version get
+jira space version update
+jira space version delete
+jira space version merge
+jira space version move
+jira space version counts
+jira space component query
+jira space component get
+jira space component create
+jira space component update
+jira space component delete
+jira space component counts
+jira board query
+jira board get
+jira board create
+jira board delete
+jira board backlog query
+jira board projects query
+jira board quick-filter query
+jira board quick-filter get
+jira board sprints query
+jira sprint get
+jira sprint create
+jira sprint update
+jira sprint start
+jira sprint complete
+jira sprint delete
+jira sprint workitems query
+user search
+user get
+user bulk-lookup

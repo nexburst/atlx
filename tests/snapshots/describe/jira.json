@@ -1,0 +1,6277 @@
+[
+  {
+    "contract": 1,
+    "path": "jira workitem get",
+    "summary": "Get one or more work items by key, ID, ARI or URL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "IDS",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Issue key, ID, or ARI; repeat to batch"
+      },
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--fields",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated Jira REST fields to include"
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Jira REST field or customfield_* ID to include; repeatable"
+      },
+      {
+        "name": "--comments",
+        "type": "boolean",
+        "required": false,
+        "description": "Fetch complete comments"
+      },
+      {
+        "name": "--remote-links",
+        "type": "boolean",
+        "required": false,
+        "description": "Fetch remote links"
+      },
+      {
+        "name": "--full",
+        "type": "boolean",
+        "required": false,
+        "description": "All fields, comments and remote links"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the batch if any input fails"
+      },
+      {
+        "name": "--batch-concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many work items to fetch at once (1 to 20)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem search",
+    "summary": "Find work items by fuzzy text (text ~ \"…\" ORDER BY updated DESC)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEXT",
+        "type": "string",
+        "required": true,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Page size; alias for --limit"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Pagination cursor (next_cursor from a previous response)"
+      },
+      {
+        "name": "--fields",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem query",
+    "summary": "Run a JQL query",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "JQL_ARG",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "flags": [
+      {
+        "name": "--jql",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--filter",
+        "type": "string",
+        "required": false,
+        "description": "Run a saved filter's JQL: ID, URL or exact name (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--last",
+        "type": "integer",
+        "required": false,
+        "description": "Backward paging; Jira REST search only pages forward, so this returns a usage error"
+      },
+      {
+        "name": "--before",
+        "type": "string",
+        "required": false,
+        "description": "Backward paging cursor; see --last"
+      },
+      {
+        "name": "--fields",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem create",
+    "summary": "Create a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": true,
+        "description": "Jira space (project) key or ID"
+      },
+      {
+        "name": "--type",
+        "type": "string",
+        "required": false,
+        "default": "Task",
+        "description": "Issue type name or ID"
+      },
+      {
+        "name": "--summary",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "`-` reads stdin"
+      },
+      {
+        "name": "--description-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      },
+      {
+        "name": "--assignee",
+        "type": "string",
+        "required": false,
+        "description": "Account ID, \"me\", or a name/email"
+      },
+      {
+        "name": "--reporter",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--priority",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--labels",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated"
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "KEY=VALUE (value parsed as JSON when valid); repeatable"
+      },
+      {
+        "name": "--fields-json",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sprint",
+        "type": "string",
+        "required": false,
+        "description": "Sprint ID, ARI, URL or name (active and future sprints), or \"none\" for the backlog"
+      },
+      {
+        "name": "--story-points",
+        "type": "string",
+        "required": false,
+        "description": "Story points, or \"none\"; the field comes from the space's boards"
+      },
+      {
+        "name": "--original-estimate",
+        "type": "string",
+        "required": false,
+        "description": "Original estimate: a duration like \"1d 4h\", or seconds"
+      },
+      {
+        "name": "--remaining-estimate",
+        "type": "string",
+        "required": false,
+        "description": "Remaining estimate: a duration like 2h, or seconds"
+      },
+      {
+        "name": "--team",
+        "type": "string",
+        "required": false,
+        "description": "Team ID or ARI, or \"none\""
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Accepted for twg compatibility"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem update",
+    "summary": "Update fields, optionally transition and comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--summary",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "`-` reads stdin"
+      },
+      {
+        "name": "--description-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      },
+      {
+        "name": "--assignee",
+        "type": "string",
+        "required": false,
+        "description": "\"me\", \"none\", an account ID, or a name/email"
+      },
+      {
+        "name": "--type",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--priority",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--labels",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated; replaces existing"
+      },
+      {
+        "name": "--add-labels",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--remove-labels",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "Parent key, or \"none\""
+      },
+      {
+        "name": "--due-date",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD, or \"none\""
+      },
+      {
+        "name": "--fix-versions",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--add-fix-versions",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--remove-fix-versions",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--components",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--add-components",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--remove-components",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--resolution",
+        "type": "string",
+        "required": false,
+        "description": "Resolution name or ID, or \"none\""
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      },
+      {
+        "name": "--fields-json",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sprint",
+        "type": "string",
+        "required": false,
+        "description": "Sprint ID, ARI, URL or name (active and future sprints), or \"none\" for the backlog"
+      },
+      {
+        "name": "--story-points",
+        "type": "string",
+        "required": false,
+        "description": "Story points, or \"none\"; the field comes from the space's boards"
+      },
+      {
+        "name": "--original-estimate",
+        "type": "string",
+        "required": false,
+        "description": "Original estimate: a duration like \"1d 4h\", or seconds"
+      },
+      {
+        "name": "--remaining-estimate",
+        "type": "string",
+        "required": false,
+        "description": "Remaining estimate: a duration like 2h, or seconds"
+      },
+      {
+        "name": "--team",
+        "type": "string",
+        "required": false,
+        "description": "Team ID or ARI, or \"none\""
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "description": "Transition by target status or transition name"
+      },
+      {
+        "name": "--transition-comment",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--transition-comment-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "Add a comment after the update"
+      },
+      {
+        "name": "--comment-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem comment create",
+    "summary": "Add a comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": true,
+        "description": "`-` reads stdin"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      },
+      {
+        "name": "--internal",
+        "type": "boolean",
+        "required": false,
+        "description": "JSM internal comment"
+      },
+      {
+        "name": "--visibility-role",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--visibility-group",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--parent-id",
+        "type": "string",
+        "required": false,
+        "description": "Reply to this comment (ID) on the same work item"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem comment query",
+    "summary": "One page of a work item's comments",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Page size [default: 100]"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Cursor from the previous page's pageInfo.nextCursor"
+      },
+      {
+        "name": "--order-by",
+        "type": "string",
+        "required": false,
+        "description": "created (oldest first) or -created (newest first)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem comment update",
+    "summary": "Replace the body of a comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID"
+      },
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item the comment is on"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": true,
+        "description": "New body; `-` reads stdin"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem comment delete",
+    "summary": "Delete a comment",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID"
+      },
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item the comment is on"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem transition",
+    "summary": "Transition a work item; omit --transition-id to list transitions",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--transition-id",
+        "type": "string",
+        "required": false,
+        "description": "Transition ID, transition name, or target status name"
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      },
+      {
+        "name": "--fields-json",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--transition-comment",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--transition-comment-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem transitions query",
+    "summary": "List transitions and the fields they require",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem field create-metadata",
+    "summary": "Issue types of a space, or the fields needed to create one type",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": true,
+        "description": "Jira space (project) key or ID"
+      },
+      {
+        "name": "--type",
+        "type": "string",
+        "required": false,
+        "description": "Issue type name or ID; omit to list the space's issue types"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem field update-metadata",
+    "summary": "Fields that can be edited on a work item, with allowed values",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--include-system-fields",
+        "type": "boolean",
+        "required": false,
+        "description": "List editable built-in fields too, not only custom fields"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem link workitem",
+    "summary": "Link a work item to one or more others",
+    "description": "Link a work item to one or more others\n\nThe source reads with the link type's outward wording: `--id PROJ-1 --target-id PROJ-2 --link-type-id Blocks` means PROJ-1 blocks PROJ-2.",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Source work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--target-id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Target work item key, ID, ARI or URL; repeat for several"
+      },
+      {
+        "name": "--link-type-id",
+        "type": "string",
+        "required": true,
+        "description": "Link type ID or name (see `jira workitem link-types query`)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem link weblink",
+    "summary": "Add a remote web link to a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--url",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--global-id",
+        "type": "string",
+        "required": false,
+        "description": "Stable ID; a second link with the same ID updates the first"
+      },
+      {
+        "name": "--relationship",
+        "type": "string",
+        "required": false,
+        "description": "Relationship text, e.g. \"mentioned in\""
+      },
+      {
+        "name": "--application-name",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--application-type",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--summary",
+        "type": "string",
+        "required": false,
+        "description": "Short description shown with the link"
+      },
+      {
+        "name": "--icon-url",
+        "type": "string",
+        "required": false,
+        "description": "16x16 icon URL"
+      },
+      {
+        "name": "--resolved",
+        "type": "boolean",
+        "required": false,
+        "description": "Show the linked item as resolved"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem link query",
+    "summary": "The issue links of a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem link-types query",
+    "summary": "List the issue link types on the site",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem unlink workitem",
+    "summary": "Delete a link between two work items",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--link-id",
+        "type": "string",
+        "required": true,
+        "description": "Issue link ID (see `jira workitem link query`)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem unlink weblink",
+    "summary": "Delete a remote web link from a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--link-id",
+        "type": "string",
+        "required": false,
+        "description": "Remote link ID"
+      },
+      {
+        "name": "--global-id",
+        "type": "string",
+        "required": false,
+        "description": "The link's global ID"
+      },
+      {
+        "name": "--url",
+        "type": "string",
+        "required": false,
+        "description": "The linked URL; the one remote link pointing there is deleted"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem delete",
+    "summary": "Delete a work item",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id",
+        "type": "string",
+        "required": false,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Same as the positional argument"
+      },
+      {
+        "name": "--delete-subtasks",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Also delete the work item's subtasks (true or false; Jira refuses to delete a work item with subtasks otherwise)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem changelog query",
+    "summary": "One page of a work item's change history, oldest first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Page size [default: 100]"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Cursor from the previous page's pageInfo.nextCursor"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem types query",
+    "summary": "The issue types of a space (project)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--project",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or URL"
+      },
+      {
+        "name": "--issue",
+        "type": "string",
+        "required": false,
+        "description": "Use the space of this work item"
+      },
+      {
+        "name": "--project-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --project"
+      },
+      {
+        "name": "--project-key",
+        "type": "string",
+        "required": false,
+        "description": "Same as --project"
+      },
+      {
+        "name": "--level",
+        "type": "integer",
+        "required": false,
+        "description": "Hierarchy level: -1 subtask, 0 standard, 1 epic"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "description": "Maximum number of types [default: 50]"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Same as --limit"
+      },
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Look up these type IDs instead (prefer `types get`); repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem types get",
+    "summary": "Issue types by ID or ARI",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Issue type ID or ARI; repeat for several"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem statuses query",
+    "summary": "Every status on the site, or the given ones",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Status ID or ARI; repeat for several"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem priorities query",
+    "summary": "Every priority on the site, or the given ones",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Priority ID or ARI; repeat for several"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment query",
+    "summary": "The files attached to a work item",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment get",
+    "summary": "One attachment's metadata",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID or ARI"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment download",
+    "summary": "Save an attachment to a local file",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID or ARI"
+      },
+      {
+        "name": "--output-path",
+        "type": "path",
+        "required": false,
+        "description": "File to write (default: the attachment's name, in the current directory)"
+      },
+      {
+        "name": "--force",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace the file if it exists (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment thumbnail",
+    "summary": "Save an attachment's thumbnail to a local file",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID or ARI"
+      },
+      {
+        "name": "--output-path",
+        "type": "path",
+        "required": false,
+        "description": "File to write (default: the attachment's name, in the current directory)"
+      },
+      {
+        "name": "--force",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace the file if it exists (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment upload",
+    "summary": "Attach local files to a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--file",
+        "type": "path",
+        "required": true,
+        "repeatable": true,
+        "description": "File to attach; repeat for several"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem attachment delete",
+    "summary": "Delete an attachment",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID or ARI"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog add",
+    "summary": "Log time on a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--time-spent",
+        "type": "string",
+        "required": false,
+        "description": "Time spent, e.g. 2h or \"1d 4h\""
+      },
+      {
+        "name": "--time-spent-seconds",
+        "type": "integer",
+        "required": false,
+        "description": "Time spent, in seconds"
+      },
+      {
+        "name": "--started",
+        "type": "string",
+        "required": false,
+        "description": "When the work started: timestamp, date (UTC), epoch ms, or an age like 3h"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "What was done; `-` reads stdin"
+      },
+      {
+        "name": "--comment-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html",
+        "description": "Format of --comment"
+      },
+      {
+        "name": "--visibility-json",
+        "type": "string",
+        "required": false,
+        "description": "REST visibility object"
+      },
+      {
+        "name": "--properties-json",
+        "type": "string",
+        "required": false,
+        "description": "REST entity properties array"
+      },
+      {
+        "name": "--adjust-estimate",
+        "type": "enum",
+        "values": [
+          "auto",
+          "leave",
+          "new",
+          "manual"
+        ],
+        "required": false,
+        "description": "How the remaining estimate changes"
+      },
+      {
+        "name": "--new-estimate",
+        "type": "string",
+        "required": false,
+        "description": "The remaining estimate to set (with new adjustment)"
+      },
+      {
+        "name": "--notify-users",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Notify watchers (true or false)"
+      },
+      {
+        "name": "--override-editable",
+        "type": "boolean",
+        "required": false,
+        "description": "Write even if the work item isn't editable (needs admin rights)"
+      },
+      {
+        "name": "--reduce-by",
+        "type": "string",
+        "required": false,
+        "description": "Take this much off the estimate (with manual adjustment)"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog update",
+    "summary": "Change a worklog",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Worklog ID or ARI"
+      },
+      {
+        "name": "--time-spent",
+        "type": "string",
+        "required": false,
+        "description": "Time spent, e.g. 2h or \"1d 4h\""
+      },
+      {
+        "name": "--time-spent-seconds",
+        "type": "integer",
+        "required": false,
+        "description": "Time spent, in seconds"
+      },
+      {
+        "name": "--started",
+        "type": "string",
+        "required": false,
+        "description": "When the work started: timestamp, date (UTC), epoch ms, or an age like 3h"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "What was done; `-` reads stdin"
+      },
+      {
+        "name": "--comment-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "default": "html",
+        "description": "Format of --comment"
+      },
+      {
+        "name": "--visibility-json",
+        "type": "string",
+        "required": false,
+        "description": "REST visibility object"
+      },
+      {
+        "name": "--properties-json",
+        "type": "string",
+        "required": false,
+        "description": "REST entity properties array"
+      },
+      {
+        "name": "--adjust-estimate",
+        "type": "enum",
+        "values": [
+          "auto",
+          "leave",
+          "new",
+          "manual"
+        ],
+        "required": false,
+        "description": "How the remaining estimate changes"
+      },
+      {
+        "name": "--new-estimate",
+        "type": "string",
+        "required": false,
+        "description": "The remaining estimate to set (with new adjustment)"
+      },
+      {
+        "name": "--notify-users",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Notify watchers (true or false)"
+      },
+      {
+        "name": "--override-editable",
+        "type": "boolean",
+        "required": false,
+        "description": "Write even if the work item isn't editable (needs admin rights)"
+      },
+      {
+        "name": "--reduce-by",
+        "type": "string",
+        "required": false,
+        "description": "Take this much off the estimate (with manual adjustment)"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog query",
+    "summary": "One page of a work item's worklogs",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Page size [default: 100]"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Cursor from the previous page's pageInfo.nextCursor"
+      },
+      {
+        "name": "--started-after",
+        "type": "string",
+        "required": false,
+        "description": "Only work started after this (epoch ms, date, timestamp or 7d)"
+      },
+      {
+        "name": "--started-before",
+        "type": "string",
+        "required": false,
+        "description": "Only work started before this (same forms)"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog get",
+    "summary": "One worklog",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Worklog ID or ARI"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog delete",
+    "summary": "Delete a worklog",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Worklog ID or ARI"
+      },
+      {
+        "name": "--adjust-estimate",
+        "type": "enum",
+        "values": [
+          "auto",
+          "leave",
+          "new",
+          "manual"
+        ],
+        "required": false,
+        "description": "How the remaining estimate changes"
+      },
+      {
+        "name": "--new-estimate",
+        "type": "string",
+        "required": false,
+        "description": "The remaining estimate to set (with new adjustment)"
+      },
+      {
+        "name": "--notify-users",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Notify watchers (true or false)"
+      },
+      {
+        "name": "--override-editable",
+        "type": "boolean",
+        "required": false,
+        "description": "Write even if the work item isn't editable (needs admin rights)"
+      },
+      {
+        "name": "--increase-by",
+        "type": "string",
+        "required": false,
+        "description": "Put this much back on the estimate (with manual adjustment)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog changed",
+    "summary": "IDs of worklogs changed since a time, site-wide",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--since",
+        "type": "string",
+        "required": false,
+        "description": "Epoch ms, date, timestamp or an age like 7d"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem worklog deleted",
+    "summary": "IDs of worklogs deleted since a time, site-wide",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--since",
+        "type": "string",
+        "required": false,
+        "description": "Epoch ms, date, timestamp or an age like 7d"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem watcher query",
+    "summary": "Who watches a work item",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem watcher add",
+    "summary": "Add a watcher (you, by default)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--watcher-id",
+        "type": "string",
+        "required": false,
+        "default": "me",
+        "description": "User ARI, account ID, email, name or `me`"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem watcher remove",
+    "summary": "Remove a watcher (you, by default)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--watcher-id",
+        "type": "string",
+        "required": false,
+        "default": "me",
+        "description": "User ARI, account ID, email, name or `me`"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem vote query",
+    "summary": "The votes on a work item",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem vote add",
+    "summary": "Vote for a work item as yourself",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem vote remove",
+    "summary": "Take your vote back",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem bulk-get",
+    "summary": "Get many work items in one request",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "KEYS",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Work item keys, IDs, ARIs or URLs"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Another work item; repeatable"
+      },
+      {
+        "name": "--fields",
+        "type": "string",
+        "required": false,
+        "description": "Field IDs to read, comma-separated"
+      },
+      {
+        "name": "--field",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Another field ID; repeatable"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expands, comma-separated"
+      },
+      {
+        "name": "--properties",
+        "type": "string",
+        "required": false,
+        "description": "Entity property keys, comma-separated"
+      },
+      {
+        "name": "--full",
+        "type": "boolean",
+        "required": false,
+        "description": "Read every field"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Exit with an error unless every work item comes back"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem create-bulk",
+    "summary": "Create up to 50 work items in one request",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--input-json",
+        "type": "string",
+        "required": true,
+        "description": "REST body (`issueUpdates` object or array), or - for stdin"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem bulk-transition",
+    "summary": "Queue one transition for many work items",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Work item key, ID, ARI or URL; repeatable"
+      },
+      {
+        "name": "--ids",
+        "type": "string",
+        "required": false,
+        "description": "Several work items, comma-separated"
+      },
+      {
+        "name": "--transition-id",
+        "type": "string",
+        "required": true,
+        "description": "The transition's ID in the workflow these work items share"
+      },
+      {
+        "name": "--dry-run",
+        "type": "boolean",
+        "required": false,
+        "description": "Show the request and send nothing"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the transition (required)"
+      },
+      {
+        "name": "--send-notifications",
+        "type": "boolean",
+        "required": false,
+        "description": "Email watchers about the change"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem archive",
+    "summary": "Archive work items (admins, on Premium or Enterprise)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Work item key, ID, ARI or URL; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem unarchive",
+    "summary": "Bring archived work items back",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Work item key, ID, ARI or URL; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem property query",
+    "summary": "The property keys on a work item",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem property get",
+    "summary": "One property's value",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem property set",
+    "summary": "Create or replace a property",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      },
+      {
+        "name": "--value-json",
+        "type": "string",
+        "required": true,
+        "description": "The value as JSON, or - for stdin"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira workitem property delete",
+    "summary": "Delete a property",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--issue-id",
+        "type": "string",
+        "required": true,
+        "description": "Work item key, ID, ARI or URL"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard query",
+    "summary": "Search dashboards",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-name",
+        "type": "string",
+        "required": false,
+        "description": "Text in the name"
+      },
+      {
+        "name": "--account-id",
+        "type": "string",
+        "required": false,
+        "description": "The owner's account ID"
+      },
+      {
+        "name": "--owner",
+        "type": "string",
+        "required": false,
+        "description": "The owner's username (deprecated by Jira)"
+      },
+      {
+        "name": "--group-name",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this group (name)"
+      },
+      {
+        "name": "--group-id",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this group (ID)"
+      },
+      {
+        "name": "--project-id",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this space (ID)"
+      },
+      {
+        "name": "--order-by",
+        "type": "string",
+        "required": false,
+        "description": "Sort field, e.g. name or -id"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "default": "50",
+        "description": "Dashboards to return"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first dashboard"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard get",
+    "summary": "One dashboard",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard create",
+    "summary": "Create a dashboard, private unless shares are given",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Dashboard name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--share-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST share permissions array, or - for stdin"
+      },
+      {
+        "name": "--edit-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST edit permissions array, or - for stdin"
+      },
+      {
+        "name": "--extend-admin-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: act on dashboards you can't edit (true or false)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard update",
+    "summary": "Change a dashboard, keeping what isn't given",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Dashboard name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--share-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST share permissions array, or - for stdin"
+      },
+      {
+        "name": "--edit-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST edit permissions array, or - for stdin"
+      },
+      {
+        "name": "--extend-admin-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: act on dashboards you can't edit (true or false)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard copy",
+    "summary": "Copy a dashboard, private unless shares are given",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Dashboard name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--share-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST share permissions array, or - for stdin"
+      },
+      {
+        "name": "--edit-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST edit permissions array, or - for stdin"
+      },
+      {
+        "name": "--extend-admin-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: act on dashboards you can't edit (true or false)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard delete",
+    "summary": "Delete a dashboard",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard bulk-edit",
+    "summary": "Change the owner or permissions of several dashboards",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Dashboard ID, ARI or URL; repeatable"
+      },
+      {
+        "name": "--action",
+        "type": "enum",
+        "values": [
+          "changeOwner",
+          "changePermission",
+          "addPermission",
+          "removePermission"
+        ],
+        "required": true,
+        "description": "What to do"
+      },
+      {
+        "name": "--change-owner-details-json",
+        "type": "string",
+        "required": false,
+        "description": "REST changeOwnerDetails object"
+      },
+      {
+        "name": "--permission-details-json",
+        "type": "string",
+        "required": false,
+        "description": "REST permissionDetails object"
+      },
+      {
+        "name": "--extend-admin-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: act on dashboards you can't edit (true or false)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the change (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard gadget query",
+    "summary": "The gadgets on a dashboard",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--gadget-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only this gadget; repeatable"
+      },
+      {
+        "name": "--module-key",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only this module key; repeatable"
+      },
+      {
+        "name": "--uri",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only this URI; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard gadget catalog query",
+    "summary": "List them",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard gadget add",
+    "summary": "Add a gadget",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--module-key",
+        "type": "string",
+        "required": false,
+        "description": "The gadget's module key"
+      },
+      {
+        "name": "--uri",
+        "type": "string",
+        "required": false,
+        "description": "The gadget's URI"
+      },
+      {
+        "name": "--ignore-uri-and-module-key-validation",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Skip checking the key or URI (true or false)"
+      },
+      {
+        "name": "--gadget-json",
+        "type": "string",
+        "required": false,
+        "description": "REST gadget object; the flags win over it"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Title"
+      },
+      {
+        "name": "--color",
+        "type": "string",
+        "required": false,
+        "description": "blue, red, yellow, green, cyan, purple, gray or white"
+      },
+      {
+        "name": "--row",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based row, with --column"
+      },
+      {
+        "name": "--column",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based column, with --row"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard gadget update",
+    "summary": "Change a gadget's title, color or place",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--gadget-id",
+        "type": "string",
+        "required": true,
+        "description": "Gadget ID"
+      },
+      {
+        "name": "--gadget-json",
+        "type": "string",
+        "required": false,
+        "description": "REST gadget object; the flags win over it"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Title"
+      },
+      {
+        "name": "--color",
+        "type": "string",
+        "required": false,
+        "description": "blue, red, yellow, green, cyan, purple, gray or white"
+      },
+      {
+        "name": "--row",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based row, with --column"
+      },
+      {
+        "name": "--column",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based column, with --row"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard gadget delete",
+    "summary": "Remove a gadget",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--gadget-id",
+        "type": "string",
+        "required": true,
+        "description": "Gadget ID"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard item-property query",
+    "summary": "An item's property keys",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--item-id",
+        "type": "string",
+        "required": true,
+        "description": "Item ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard item-property get",
+    "summary": "One property's value",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--item-id",
+        "type": "string",
+        "required": true,
+        "description": "Item ID"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard item-property set",
+    "summary": "Create or replace a property",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--item-id",
+        "type": "string",
+        "required": true,
+        "description": "Item ID"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      },
+      {
+        "name": "--value-json",
+        "type": "string",
+        "required": true,
+        "description": "The value as JSON, or - for stdin"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira dashboard item-property delete",
+    "summary": "Delete a property",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dashboard-id",
+        "type": "string",
+        "required": true,
+        "description": "Dashboard ID, ARI or URL"
+      },
+      {
+        "name": "--item-id",
+        "type": "string",
+        "required": true,
+        "description": "Item ID"
+      },
+      {
+        "name": "--property-key",
+        "type": "string",
+        "required": true,
+        "description": "Property key"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter query",
+    "summary": "Search saved filters",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--filter-name",
+        "type": "string",
+        "required": false,
+        "description": "Name contains"
+      },
+      {
+        "name": "--owner",
+        "type": "string",
+        "required": false,
+        "description": "Owner: me, an email, a name or an account ID"
+      },
+      {
+        "name": "--owner-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Owner's account ID"
+      },
+      {
+        "name": "--group-name",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this group (name)"
+      },
+      {
+        "name": "--group-id",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this group (ID)"
+      },
+      {
+        "name": "--project-id",
+        "type": "string",
+        "required": false,
+        "description": "Shared with this space (ID)"
+      },
+      {
+        "name": "--filter-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "These filters; repeatable"
+      },
+      {
+        "name": "--order-by",
+        "type": "string",
+        "required": false,
+        "description": "Sort field, e.g. name or -id"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      },
+      {
+        "name": "--override-share-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: see filters not shared with you (true or false)"
+      },
+      {
+        "name": "--favourite",
+        "type": "boolean",
+        "required": false,
+        "description": "Only your favourites (atlx extra)"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based offset of the first filter"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter get",
+    "summary": "One filter",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter create",
+    "summary": "Save a new filter",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Name"
+      },
+      {
+        "name": "--jql",
+        "type": "string",
+        "required": false,
+        "description": "JQL"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--favourite",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      },
+      {
+        "name": "--share-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST share permissions array"
+      },
+      {
+        "name": "--edit-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "REST edit permissions array"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      },
+      {
+        "name": "--override-share-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: skip share permission checks (true or false)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter update",
+    "summary": "Change a filter; what you don't pass is kept",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "New name"
+      },
+      {
+        "name": "--jql",
+        "type": "string",
+        "required": false,
+        "description": "New JQL"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "New description"
+      },
+      {
+        "name": "--favourite",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      },
+      {
+        "name": "--share-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "Replaces the share permissions"
+      },
+      {
+        "name": "--edit-permissions-json",
+        "type": "string",
+        "required": false,
+        "description": "Replaces the edit permissions"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter delete",
+    "summary": "Delete a filter",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--override-share-permissions",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Admins: skip share permission checks (true or false)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter add-favourite",
+    "summary": "Make a filter a favourite",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter remove-favourite",
+    "summary": "Stop a filter being a favourite",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter change-owner",
+    "summary": "Give a filter another owner",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--account-id",
+        "type": "string",
+        "required": true,
+        "description": "New owner's account ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter columns get",
+    "summary": "Get the columns",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter columns set",
+    "summary": "Set the columns, in order",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--column",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Field ID; repeat in column order"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter reset-columns",
+    "summary": "Go back to the default columns",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the reset (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter share query",
+    "summary": "List share permissions",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter share add",
+    "summary": "Share a filter",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--permission-json",
+        "type": "string",
+        "required": true,
+        "description": "REST share permission, e.g. {\"type\":\"project\",\"projectId\":\"10000\"}"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter share remove",
+    "summary": "Stop a share",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--permission-id",
+        "type": "string",
+        "required": true,
+        "description": "Share permission ID"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the removal (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira filter subscription query",
+    "summary": "List subscriptions",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Filter ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira field list",
+    "summary": "List Jira fields (including custom fields)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Case-insensitive substring filter on field name or ID"
+      },
+      {
+        "name": "--custom-only",
+        "type": "boolean",
+        "required": false,
+        "description": "Only include custom fields"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space query",
+    "summary": "Find spaces by key, ID, name or type",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Text matched against space keys and names"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Space key; repeat for several"
+      },
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Space ID; repeat for several"
+      },
+      {
+        "name": "--type-key",
+        "type": "string",
+        "required": false,
+        "description": "Space type, e.g. software, business, service_desk"
+      },
+      {
+        "name": "--category-id",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--action",
+        "type": "string",
+        "required": false,
+        "description": "Permission filter: view, browse or edit"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated Jira expansions"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "description": "live, archived or deleted"
+      },
+      {
+        "name": "--property",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Space property to include; repeatable"
+      },
+      {
+        "name": "--property-query",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sort-by",
+        "type": "string",
+        "required": false,
+        "description": "Sort order, e.g. key, name, -lastIssueUpdatedDate"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "description": "Zero-based offset of the first space"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Offset to resume from (same as --start-at)"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "Maximum number of spaces [default: 50]"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "description": "Same as --limit"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space get",
+    "summary": "One space by key or ID",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space create",
+    "summary": "Create a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Key of the new space"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Name"
+      },
+      {
+        "name": "--project-type-key",
+        "type": "string",
+        "required": false,
+        "description": "business, service_desk or software"
+      },
+      {
+        "name": "--project-template-key",
+        "type": "string",
+        "required": false,
+        "description": "Project template key"
+      },
+      {
+        "name": "--lead-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Project lead's account ID"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--url",
+        "type": "string",
+        "required": false,
+        "description": "A link shown with the space"
+      },
+      {
+        "name": "--assignee-type",
+        "type": "string",
+        "required": false,
+        "description": "PROJECT_LEAD or UNASSIGNED"
+      },
+      {
+        "name": "--category-id",
+        "type": "string",
+        "required": false,
+        "description": "Category ID; -1 removes it"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space update",
+    "summary": "Change a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or /projects/ URL"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "New name"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "New key"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      },
+      {
+        "name": "--lead-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Project lead's account ID"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--url",
+        "type": "string",
+        "required": false,
+        "description": "A link shown with the space"
+      },
+      {
+        "name": "--assignee-type",
+        "type": "string",
+        "required": false,
+        "description": "PROJECT_LEAD or UNASSIGNED"
+      },
+      {
+        "name": "--category-id",
+        "type": "string",
+        "required": false,
+        "description": "Category ID; -1 removes it"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space delete",
+    "summary": "Move a space to the trash",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or /projects/ URL; names and work items are refused"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space archive",
+    "summary": "Archive a space",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or /projects/ URL; names and work items are refused"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space restore",
+    "summary": "Bring an archived or trashed space back",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or /projects/ URL; names and work items are refused"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space issue-types",
+    "summary": "The issue types of a space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      },
+      {
+        "name": "--first",
+        "type": "integer",
+        "required": false,
+        "default": "50",
+        "description": "Most issue types to return"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space status query",
+    "summary": "The statuses of each issue type in a space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id-or-key",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or /projects/ URL"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space types query",
+    "summary": "Space (project) types: all, or the given ones",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Type key or ARI; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space notification-scheme get",
+    "summary": "A space's notification scheme",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "REST expand value"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space versions query",
+    "summary": "One page of a space's versions",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--search-string",
+        "type": "string",
+        "required": false,
+        "description": "Name or description contains"
+      },
+      {
+        "name": "--filter",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated: released, unreleased, archived"
+      },
+      {
+        "name": "--sort-by",
+        "type": "string",
+        "required": false,
+        "description": "Sort field, e.g. name or -releaseDate"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Cursor from the previous page's pageInfo.nextCursor"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version create",
+    "summary": "Create a version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD"
+      },
+      {
+        "name": "--release-date",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD"
+      },
+      {
+        "name": "--released",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      },
+      {
+        "name": "--archived",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version get",
+    "summary": "One version",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Version ID"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version update",
+    "summary": "Change a version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Version ID"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "New name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD"
+      },
+      {
+        "name": "--release-date",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD"
+      },
+      {
+        "name": "--released",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      },
+      {
+        "name": "--archived",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "true or false"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version delete",
+    "summary": "Delete a version",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Version ID"
+      },
+      {
+        "name": "--move-fix-issues-to",
+        "type": "string",
+        "required": false,
+        "description": "Version to give its fix-version work items"
+      },
+      {
+        "name": "--move-affected-issues-to",
+        "type": "string",
+        "required": false,
+        "description": "Version to give its affected-version work items"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version merge",
+    "summary": "Delete a version, moving its work items to another",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Version to delete"
+      },
+      {
+        "name": "--move-issues-to",
+        "type": "string",
+        "required": true,
+        "description": "Version that receives the work items"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version move",
+    "summary": "Reorder a version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Version ID"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Put it after this version (URL or ID)"
+      },
+      {
+        "name": "--position",
+        "type": "enum",
+        "values": [
+          "First",
+          "Last",
+          "Earlier",
+          "Later"
+        ],
+        "required": false,
+        "description": "First, Last, Earlier or Later"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space version counts",
+    "summary": "How many work items use a version",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Version ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component query",
+    "summary": "A space's components",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component get",
+    "summary": "One component",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Component ID"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component create",
+    "summary": "Create a component",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--lead-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Lead's account ID"
+      },
+      {
+        "name": "--assignee-type",
+        "type": "string",
+        "required": false,
+        "description": "PROJECT_DEFAULT, COMPONENT_LEAD, PROJECT_LEAD or UNASSIGNED"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component update",
+    "summary": "Change a component",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Component ID"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "New name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--lead-account-id",
+        "type": "string",
+        "required": false,
+        "description": "Lead's account ID"
+      },
+      {
+        "name": "--assignee-type",
+        "type": "string",
+        "required": false,
+        "description": "PROJECT_DEFAULT, COMPONENT_LEAD, PROJECT_LEAD or UNASSIGNED"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component delete",
+    "summary": "Delete a component",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Component ID"
+      },
+      {
+        "name": "--move-issues-to",
+        "type": "string",
+        "required": false,
+        "description": "Component to give its work items"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira space component counts",
+    "summary": "How many work items use a component",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Component ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board query",
+    "summary": "Find Agile boards",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--project",
+        "type": "string",
+        "required": false,
+        "description": "Space (project) key or ID"
+      },
+      {
+        "name": "--project-ari",
+        "type": "string",
+        "required": false,
+        "description": "Same as --project; also takes a project ARI"
+      },
+      {
+        "name": "--issue",
+        "type": "string",
+        "required": false,
+        "description": "Use the space of this work item"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "scrum",
+          "kanban"
+        ],
+        "required": false,
+        "description": "Filter by board type"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Board name substring"
+      },
+      {
+        "name": "--filter-id",
+        "type": "string",
+        "required": false,
+        "description": "Boards built on this filter (ID or filter URL)"
+      },
+      {
+        "name": "--max-results",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first board"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board get",
+    "summary": "One board, with its columns and estimation",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Board ID, ARI, URL or exact name; repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board create",
+    "summary": "Create a board from a filter",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Board name"
+      },
+      {
+        "name": "--filter-id",
+        "type": "string",
+        "required": true,
+        "description": "The filter the board shows (ID or URL)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "scrum",
+          "kanban"
+        ],
+        "required": true,
+        "description": "Board type"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board delete",
+    "summary": "Delete a board",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board backlog query",
+    "summary": "The work items in a board's backlog",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--active-quick-filters",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated IDs of quick filters to apply"
+      },
+      {
+        "name": "--jql",
+        "type": "string",
+        "required": false,
+        "description": "Extra JQL (atlx extra)"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50",
+        "description": "Most work items to return (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board projects query",
+    "summary": "The spaces (projects) on a board",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--max-results",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first space"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board quick-filter query",
+    "summary": "A board's quick filters",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": true,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--max-results",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first filter"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board quick-filter get",
+    "summary": "One quick filter",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": true,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--quick-filter-id",
+        "type": "string",
+        "required": true,
+        "description": "Quick filter ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira board sprints query",
+    "summary": "List the sprints of a board",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Board ID, ARI, board URL or exact board name"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--project",
+        "type": "string",
+        "required": false,
+        "description": "Use the only board of this space (project)"
+      },
+      {
+        "name": "--project-ari",
+        "type": "string",
+        "required": false,
+        "description": "Same as --project; also takes a project ARI"
+      },
+      {
+        "name": "--issue",
+        "type": "string",
+        "required": false,
+        "description": "Use the only board of this work item's space"
+      },
+      {
+        "name": "--state",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated states: active, future, closed"
+      },
+      {
+        "name": "--current",
+        "type": "boolean",
+        "required": false,
+        "description": "Only the active sprint (same as --state active)"
+      },
+      {
+        "name": "--max-results",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first sprint"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint get",
+    "summary": "One sprint",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id",
+        "type": "string",
+        "required": false,
+        "description": "Sprint ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Same as the positional argument"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint create",
+    "summary": "Create a future sprint on a board",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": true,
+        "description": "Board ID, ARI, URL or exact name"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Sprint name"
+      },
+      {
+        "name": "--goal",
+        "type": "string",
+        "required": false,
+        "description": "Sprint goal"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "Start: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--end-date",
+        "type": "string",
+        "required": false,
+        "description": "End: date (UTC midnight), timestamp or epoch ms"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint update",
+    "summary": "Change some of a sprint's fields",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Sprint ID, ARI or URL, or its exact name with --board-id"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "The board to look a sprint name up on"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Sprint name"
+      },
+      {
+        "name": "--goal",
+        "type": "string",
+        "required": false,
+        "description": "Sprint goal"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "Start: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--end-date",
+        "type": "string",
+        "required": false,
+        "description": "End: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--state",
+        "type": "enum",
+        "values": [
+          "future",
+          "active",
+          "closed"
+        ],
+        "required": false,
+        "description": "future, active or closed"
+      },
+      {
+        "name": "--incomplete-issues-destination-id",
+        "type": "string",
+        "required": false,
+        "description": "When closing: a sprint ID, ARI or URL, or \"backlog\", for work that isn't done"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint start",
+    "summary": "Start a sprint; it needs --end-date or --duration unless it has an end",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Sprint ID, ARI or URL, or its exact name with --board-id"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "The board to look a sprint name up on"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Sprint name"
+      },
+      {
+        "name": "--goal",
+        "type": "string",
+        "required": false,
+        "description": "Sprint goal"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "Start: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--end-date",
+        "type": "string",
+        "required": false,
+        "description": "End: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--duration",
+        "type": "string",
+        "required": false,
+        "description": "Length in days or weeks, e.g. 10d or 2w (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint complete",
+    "summary": "Complete a sprint",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Sprint ID, ARI or URL, or its exact name with --board-id"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "The board to look a sprint name up on"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Sprint name"
+      },
+      {
+        "name": "--goal",
+        "type": "string",
+        "required": false,
+        "description": "Sprint goal"
+      },
+      {
+        "name": "--start-date",
+        "type": "string",
+        "required": false,
+        "description": "Start: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--end-date",
+        "type": "string",
+        "required": false,
+        "description": "End: date (UTC midnight), timestamp or epoch ms"
+      },
+      {
+        "name": "--incomplete-issues-destination-id",
+        "type": "string",
+        "required": false,
+        "description": "A sprint ID, ARI or URL, or \"backlog\", for work that isn't done [default: Jira decides]"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint delete",
+    "summary": "Delete a sprint",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Sprint ID, ARI or URL, or its exact name with --board-id"
+      },
+      {
+        "name": "--sprint-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--board-id",
+        "type": "string",
+        "required": false,
+        "description": "The board to look a sprint name up on"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "jira sprint workitems query",
+    "summary": "List the work items in a sprint",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Sprint ID, ARI or sprint URL"
+      },
+      {
+        "name": "--sprint-id",
+        "type": "string",
+        "required": false,
+        "description": "Same as --id"
+      },
+      {
+        "name": "--jql",
+        "type": "string",
+        "required": false,
+        "description": "Extra JQL filter"
+      },
+      {
+        "name": "--fields",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated extra fields to include"
+      },
+      {
+        "name": "--expand",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated Jira expansions"
+      },
+      {
+        "name": "--max-results",
+        "type": "integer",
+        "required": false,
+        "default": "50"
+      },
+      {
+        "name": "--start-at",
+        "type": "integer",
+        "required": false,
+        "default": "0",
+        "description": "Zero-based offset of the first work item"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "user search",
+    "summary": "Search Jira users by name or email",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Name or email text"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Full or partial display name"
+      },
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Same as --name"
+      },
+      {
+        "name": "--email",
+        "type": "string",
+        "required": false,
+        "description": "Full email address or its start"
+      },
+      {
+        "name": "--account-id",
+        "type": "string",
+        "required": false,
+        "description": "Look up one user by account ID or identity ARI"
+      },
+      {
+        "name": "--compact",
+        "type": "boolean",
+        "required": false,
+        "description": "One short line per user in text output; JSON is unchanged"
+      },
+      {
+        "name": "--limit",
+        "short": "-n",
+        "type": "integer",
+        "required": false,
+        "default": "20"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "user get",
+    "summary": "One user's profile (yours by default)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ACCOUNT",
+        "type": "string",
+        "required": false,
+        "description": "Account ID or identity ARI"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--account-id",
+        "type": "string",
+        "required": false,
+        "description": "Account ID or identity ARI"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "user bulk-lookup",
+    "summary": "Look up many users by account ID or email",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "IDENTIFIERS",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Account IDs, identity ARIs or emails"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--account-id",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "An account ID or ARI; repeatable"
+      },
+      {
+        "name": "--email",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "An exact email; repeatable"
+      },
+      {
+        "name": "--input-type",
+        "type": "enum",
+        "values": [
+          "auto",
+          "email",
+          "account-id"
+        ],
+        "required": false,
+        "default": "auto",
+        "description": "How to read the positional values"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Exit with an error unless every user is found"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  }
+]

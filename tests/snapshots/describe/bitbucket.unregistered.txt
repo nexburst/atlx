@@ -1,0 +1,78 @@
+# Commands without a CommandMeta yet. Package owners empty this list;
+# unregistered_commands_only_shrink fails if it grows.
+bitbucket repo query
+bitbucket repo get
+bitbucket repo file
+bitbucket repo create
+bitbucket repo list-files
+bitbucket repo url
+bitbucket repo contributors
+bitbucket pull-requests query
+bitbucket pull-requests get
+bitbucket pull-requests create
+bitbucket pull-requests comment create
+bitbucket pull-requests comment query
+bitbucket pull-requests comment get
+bitbucket pull-requests comment update
+bitbucket pull-requests comment delete
+bitbucket pull-requests comment resolve
+bitbucket pull-requests comment reopen
+bitbucket pull-requests diff
+bitbucket pull-requests diff-line
+bitbucket pull-requests diffstat
+bitbucket pull-requests commits
+bitbucket pull-requests patch
+bitbucket pull-requests activity
+bitbucket pull-requests task query
+bitbucket pull-requests task create
+bitbucket pull-requests task get
+bitbucket pull-requests task update
+bitbucket pull-requests task delete
+bitbucket pull-requests task resolve
+bitbucket pull-requests task reopen
+bitbucket pull-requests approve
+bitbucket pull-requests unapprove
+bitbucket pull-requests request-changes
+bitbucket pull-requests update
+bitbucket pull-requests remove-request-changes
+bitbucket pull-requests mergeability
+bitbucket pull-requests merge-status
+bitbucket pull-requests conflicts
+bitbucket pull-requests for-commit
+bitbucket pull-requests default-reviewer query
+bitbucket pull-requests default-reviewer get
+bitbucket pull-requests default-reviewer add
+bitbucket pull-requests default-reviewer remove
+bitbucket pull-requests effective-default-reviewer query
+bitbucket pull-requests merge
+bitbucket pull-requests decline
+bitbucket branch create
+bitbucket branch delete
+bitbucket branch query
+bitbucket pipeline query
+bitbucket pipeline get
+bitbucket pipeline run
+bitbucket pipeline trigger
+bitbucket pipeline latest-failure
+bitbucket pipeline tail
+bitbucket pipeline grep
+bitbucket pipeline rerun-failed
+bitbucket pipeline config get
+bitbucket pipeline config update
+bitbucket inbox
+bitbucket commit query
+bitbucket commit create
+bitbucket commit report create
+bitbucket commit report query
+bitbucket workspace get
+bitbucket workspace member query
+bitbucket workspace member get
+bitbucket deployment query
+bitbucket deployment get
+bitbucket deployment environments query
+bitbucket deployment environment variable query
+bitbucket deployment history query
+bitbucket deployment history get
+bitbucket deployment commits query
+bitbucket search prs
+bitbucket search code

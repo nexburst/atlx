@@ -1,0 +1,3496 @@
+[
+  {
+    "contract": 1,
+    "path": "confluence search query",
+    "summary": "Search with CQL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "CQL_ARG",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--cql",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--excerpt",
+        "type": "boolean",
+        "required": false,
+        "description": "Include matched text excerpts"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence search text",
+    "summary": "Search recent pages and blog posts with natural text",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEXT",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--updated-since",
+        "type": "string",
+        "required": false,
+        "description": "YYYY-MM-DD or a duration like 7d, 2w, 1m"
+      },
+      {
+        "name": "--created-since",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--excerpt",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content get",
+    "summary": "Read one or more pages/blog posts by ID or URL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "REFS",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "repeatable": true
+      },
+      {
+        "name": "--detail",
+        "type": "enum",
+        "values": [
+          "summary",
+          "outline",
+          "full"
+        ],
+        "required": false,
+        "description": "summary (excerpt), outline (headings) or full (body)"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md",
+          "url"
+        ],
+        "required": false,
+        "description": "Body format for --detail full: html (storage, the default), md, or adf (atlx extra); url prints only the web address"
+      },
+      {
+        "name": "--section",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only the section under this heading, subsections included; repeatable. Case-insensitive: an exact heading wins, else any heading containing the text. Defaults to Markdown"
+      },
+      {
+        "name": "--body-only",
+        "type": "boolean",
+        "required": false,
+        "description": "Print only the body"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Fetch the draft version"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for resolving non-ID/URL references by exact title"
+      },
+      {
+        "name": "--include-metadata",
+        "type": "boolean",
+        "required": false,
+        "description": "Accepted for twg compatibility (metadata is always included)"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the batch if any input fails"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content create",
+    "summary": "Create a page or blog post",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space-id",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--parent-id",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": true
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "Inline body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "description": "Format of the body (required)"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--private",
+        "type": "boolean",
+        "required": false,
+        "description": "Only you can see and edit it"
+      },
+      {
+        "name": "--content-width",
+        "type": "enum",
+        "values": [
+          "narrow",
+          "wide",
+          "max"
+        ],
+        "required": false,
+        "description": "narrow, wide or max"
+      },
+      {
+        "name": "--title-emoji",
+        "type": "string",
+        "required": false,
+        "description": "An emoji, or its hex code point such as 1f44d"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --parent-id by exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--ack-body-formats",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm you read `confluence content body-formats` (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content update",
+    "summary": "Update a page or blog post (new version)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "REFERENCE",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--snapshot-token",
+        "type": "string",
+        "required": false,
+        "description": "snapshotToken of the read you edited (required); rejects stale edits"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--version-message",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--minor-edit",
+        "type": "boolean",
+        "required": false,
+        "description": "Ask for a minor edit; undocumented in REST v2, so watchers may still be notified"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--edits",
+        "type": "string",
+        "required": false,
+        "description": "JSON array of targeted edit operations (`-` reads stdin)"
+      },
+      {
+        "name": "--edits-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the edit operations from a JSON file"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "description": "Format of --body or --body-file (required with them)"
+      },
+      {
+        "name": "--dry-run",
+        "type": "boolean",
+        "required": false,
+        "description": "Validate and show the request without writing; with --edits, also the resulting body and a diff"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required unless --dry-run)"
+      },
+      {
+        "name": "--ack-body-formats",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm you read `confluence content body-formats` (required to change the body)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content list",
+    "summary": "List content in a space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "default": "page"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "default": "current"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments list",
+    "summary": "List footer or inline comments",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "footer (default) or inline"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "description": "Comment body format: md (default) or html"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sort",
+        "type": "enum",
+        "values": [
+          "created-date",
+          "-created-date"
+        ],
+        "required": false,
+        "description": "Oldest (created-date) or newest (-created-date) first"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "draft"
+        ],
+        "required": false,
+        "description": "current or draft"
+      },
+      {
+        "name": "--resolution-status",
+        "type": "enum",
+        "values": [
+          "open",
+          "resolved",
+          "reopened",
+          "dangling"
+        ],
+        "required": false,
+        "description": "Inline comments only; open includes reopened and dangling ones"
+      },
+      {
+        "name": "--include-replies",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Nest each comment's replies under it (true or false; default false)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments get",
+    "summary": "One comment, with its replies",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "footer or inline [default: detected]"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "description": "Comment body format: md (default) or html"
+      },
+      {
+        "name": "--include-replies",
+        "type": "enum",
+        "values": [
+          "true",
+          "false"
+        ],
+        "required": false,
+        "description": "Nest the replies (true or false; default true)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments create",
+    "summary": "Add a footer comment, or an inline one on selected text",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "Comment body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the comment body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "description": "Body format: markdown/md (default), html or plain"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "footer, or inline (the default with --text-selection)"
+      },
+      {
+        "name": "--text-selection",
+        "type": "string",
+        "required": false,
+        "description": "The exact text an inline comment is anchored to"
+      },
+      {
+        "name": "--text-selection-match-count",
+        "type": "integer",
+        "required": false,
+        "description": "How often that text appears [default: counted]"
+      },
+      {
+        "name": "--text-selection-match-index",
+        "type": "integer",
+        "required": false,
+        "description": "Which appearance, from 0 [default: 0]"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments reply",
+    "summary": "Reply to a comment",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "Reply body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the reply from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "description": "Body format: markdown/md (default), html or plain"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments update",
+    "summary": "Replace a comment's body",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "footer or inline [default: detected]"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "New body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the new body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "html",
+          "markdown",
+          "plain"
+        ],
+        "required": false,
+        "description": "Body format: markdown/md (default), html or plain"
+      },
+      {
+        "name": "--expected-version",
+        "type": "integer",
+        "required": false,
+        "description": "Fail unless the comment is still at this version"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments delete",
+    "summary": "Delete a comment for good",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments resolve",
+    "summary": "Resolve an inline comment",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "inline; REST can't resolve footer comments"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content comments reopen",
+    "summary": "Reopen a resolved inline comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--comment-id",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      },
+      {
+        "name": "--comment-type",
+        "type": "enum",
+        "values": [
+          "footer",
+          "inline"
+        ],
+        "required": false,
+        "description": "inline; REST can't reopen footer comments"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content children",
+    "summary": "Child pages of a page",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "REFERENCE",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content labels list",
+    "summary": "List the labels on a piece of content",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost",
+          "whiteboard",
+          "database",
+          "folder",
+          "custom-content"
+        ],
+        "required": false,
+        "description": "Content type, which skips probing for it"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content labels add",
+    "summary": "Add labels to a page or blog post",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--label",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Label name; repeatable, and commas separate several"
+      },
+      {
+        "name": "--prefix",
+        "type": "string",
+        "required": false,
+        "default": "global",
+        "description": "Label prefix"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content labels remove",
+    "summary": "Remove labels from a page or blog post",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--label",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Label name; repeatable, and commas separate several"
+      },
+      {
+        "name": "--prefix",
+        "type": "string",
+        "required": false,
+        "default": "global",
+        "description": "Label prefix"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the removal (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content labels watch",
+    "summary": "Watch a label: get notified about content that gets it",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Label name"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content labels unwatch",
+    "summary": "Stop watching a label",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Label name"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content delete",
+    "summary": "Delete a page or blog post: to the trash, or for good with --purge",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "REFERENCE",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--purge",
+        "type": "boolean",
+        "required": false,
+        "description": "Permanently purge instead of moving to trash"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content tasks list",
+    "summary": "Tasks on a page or blog post, or everywhere you can see",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Page or blog post ID, ARI or URL, or a title with --reference-space"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "open",
+          "complete",
+          "all"
+        ],
+        "required": false,
+        "default": "all",
+        "description": "open, complete or all"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "50",
+        "description": "Tasks to return"
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost (found out if left out)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content tasks get",
+    "summary": "One task",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--task-id",
+        "type": "string",
+        "required": true,
+        "description": "Task ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content tasks complete",
+    "summary": "Tick a task off",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--task-id",
+        "type": "string",
+        "required": true,
+        "description": "Task ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content tasks reopen",
+    "summary": "Untick a task",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--task-id",
+        "type": "string",
+        "required": true,
+        "description": "Task ID"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content status get",
+    "summary": "The status shown on a page",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost",
+          "live_doc",
+          "whiteboard",
+          "database",
+          "folder"
+        ],
+        "required": false,
+        "description": "Accepted for twg; the ID is enough"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Use the draft"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content status set",
+    "summary": "Set the status, which publishes a new version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost",
+          "live_doc",
+          "whiteboard",
+          "database",
+          "folder"
+        ],
+        "required": false,
+        "description": "Accepted for twg; the ID is enough"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Use the draft"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--state-id",
+        "type": "integer",
+        "required": false,
+        "description": "An existing status's ID"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "Name of a status (20 characters at most)"
+      },
+      {
+        "name": "--color",
+        "type": "string",
+        "required": false,
+        "description": "Six-digit hex color, e.g. #2684ff"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content list-available-statuses",
+    "summary": "The statuses content can be given",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content watch",
+    "summary": "Watch content",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content unwatch",
+    "summary": "Stop watching content",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content move",
+    "summary": "Move content under or beside other content",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--parent-id",
+        "type": "string",
+        "required": false,
+        "description": "Make it the last child of this content"
+      },
+      {
+        "name": "--before",
+        "type": "string",
+        "required": false,
+        "description": "Put it before this sibling"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Put it after this sibling"
+      },
+      {
+        "name": "--target",
+        "type": "string",
+        "required": false,
+        "description": "What --position is relative to (atlx extra)"
+      },
+      {
+        "name": "--position",
+        "type": "enum",
+        "values": [
+          "append",
+          "before",
+          "after"
+        ],
+        "required": false,
+        "description": "append (default), before or after --target (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content copy",
+    "summary": "Copy content under a parent or to a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--parent-content-id",
+        "type": "string",
+        "required": false,
+        "description": "Copy under this content"
+      },
+      {
+        "name": "--space-key",
+        "type": "string",
+        "required": false,
+        "description": "Copy to the top of this space"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Title of the copy"
+      },
+      {
+        "name": "--copy-attachments",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the attachments too (atlx extra)"
+      },
+      {
+        "name": "--copy-labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the labels too (atlx extra)"
+      },
+      {
+        "name": "--copy-permissions",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the restrictions too (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content trash",
+    "summary": "Move content to the trash",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content untrash",
+    "summary": "Bring content back from the trash",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content purge",
+    "summary": "Delete trashed content for good",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content archive",
+    "summary": "Archive a page",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--wait",
+        "type": "boolean",
+        "required": false,
+        "description": "Wait until it is archived (atlx extra)"
+      },
+      {
+        "name": "--wait-timeout",
+        "type": "integer",
+        "required": false,
+        "default": "120",
+        "description": "Seconds --wait may take (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content publish",
+    "summary": "Publish a draft",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Publish under this title"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content delete-draft",
+    "summary": "Delete a draft that was never published",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Content ID, ARI or URL, or an exact title with --reference-space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up an exact title"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content versions list",
+    "summary": "List versions, newest first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Versions per page, newest first (1-250)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content versions get",
+    "summary": "One version's details, and its body with --format",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--at-version",
+        "type": "integer",
+        "required": true,
+        "description": "Version number"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "description": "Also return that version's body: md (markdown) or html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content versions diff",
+    "summary": "Unified diff between two versions' bodies",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--from",
+        "type": "integer",
+        "required": true,
+        "description": "Older version number"
+      },
+      {
+        "name": "--to",
+        "type": "integer",
+        "required": true,
+        "description": "Newer version number"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "default": "md",
+        "description": "Compare the bodies as md (markdown, default) or html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content versions restore",
+    "summary": "Make an old version the latest again (adds a new version)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--at-version",
+        "type": "integer",
+        "required": true,
+        "description": "Version number to bring back"
+      },
+      {
+        "name": "--message",
+        "type": "string",
+        "required": false,
+        "description": "Message for the new version"
+      },
+      {
+        "name": "--restore-title",
+        "type": "boolean",
+        "required": false,
+        "description": "Bring back that version's title too"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the restore (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content history list",
+    "summary": "List versions, newest first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Versions per page, newest first (1-250)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content history get",
+    "summary": "One version's details, and its body with --format",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--at-version",
+        "type": "integer",
+        "required": true,
+        "description": "Version number"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "description": "Also return that version's body: md (markdown) or html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content history diff",
+    "summary": "Unified diff between two versions' bodies",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--from",
+        "type": "integer",
+        "required": true,
+        "description": "Older version number"
+      },
+      {
+        "name": "--to",
+        "type": "integer",
+        "required": true,
+        "description": "Newer version number"
+      },
+      {
+        "name": "--format",
+        "type": "enum",
+        "values": [
+          "html",
+          "md"
+        ],
+        "required": false,
+        "default": "md",
+        "description": "Compare the bodies as md (markdown, default) or html"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content attachments list",
+    "summary": "List attachments",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--sort",
+        "type": "string",
+        "required": false,
+        "description": "created-date or modified-date; prefix - for descending"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "default": "current",
+        "description": "current (default), archived or trashed"
+      },
+      {
+        "name": "--media-type",
+        "type": "string",
+        "required": false,
+        "description": "Only attachments of this media type, e.g. image/png"
+      },
+      {
+        "name": "--filename",
+        "type": "string",
+        "required": false,
+        "description": "Only attachments with this file name"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content attachments get",
+    "summary": "One attachment's metadata",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID (att12345) or URL"
+      },
+      {
+        "name": "--at-version",
+        "type": "integer",
+        "required": false,
+        "description": "Attachment version (default: latest)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content attachments download",
+    "summary": "Save an attachment to a local file",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID (att12345) or URL"
+      },
+      {
+        "name": "--out",
+        "type": "path",
+        "required": false,
+        "description": "File to write (default: the attachment's name, in the current directory)"
+      },
+      {
+        "name": "--at-version",
+        "type": "integer",
+        "required": false,
+        "description": "Attachment version (default: latest)"
+      },
+      {
+        "name": "--force",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace the file if it exists"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content attachments upload",
+    "summary": "Attach a local file; a file with the same name gets a new version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title (with --reference-space)"
+      },
+      {
+        "name": "--reference-space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking up --id by exact title"
+      },
+      {
+        "name": "--file",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "File to upload; repeat for several (atlx extra)"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "Comment for this attachment version"
+      },
+      {
+        "name": "--minor-edit",
+        "type": "boolean",
+        "required": false,
+        "description": "Don't notify watchers of the new version (atlx extra)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the upload (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content attachments delete",
+    "summary": "Delete an attachment (moves it to the trash)",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--attachment-id",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID (att12345) or URL"
+      },
+      {
+        "name": "--purge",
+        "type": "boolean",
+        "required": false,
+        "description": "Delete for good; it must be in the trash already (atlx extra)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the delete (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence content body-formats",
+    "summary": "Explain the body formats atlx reads and writes (offline)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "FORMAT",
+        "type": "string",
+        "required": false,
+        "description": "One format to explain: html, md (markdown), plain or adf"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--content-type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost",
+          "live_doc",
+          "whiteboard",
+          "database"
+        ],
+        "required": false,
+        "description": "Show the formats one content type supports"
+      },
+      {
+        "name": "--reference",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Accepted for twg compatibility; atlx's guide has no linked pages"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space list",
+    "summary": "List spaces",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--type",
+        "type": "string",
+        "required": false,
+        "description": "global or personal"
+      },
+      {
+        "name": "--status",
+        "type": "string",
+        "required": false,
+        "description": "current or archived"
+      },
+      {
+        "name": "--keys",
+        "type": "string",
+        "required": false,
+        "description": "Comma-separated space keys"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Include each space's labels"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space get",
+    "summary": "Get a space by key or ID",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "IDENTIFIER",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Include the space's labels"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space me",
+    "summary": "Current user's personal space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space create",
+    "summary": "Create a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Key: letters and digits"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true,
+        "description": "Name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Description"
+      },
+      {
+        "name": "--private",
+        "type": "boolean",
+        "required": false,
+        "description": "Only you can see it"
+      },
+      {
+        "name": "--dry-run",
+        "type": "boolean",
+        "required": false,
+        "description": "Print the request without sending it"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required, except with --dry-run)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space update",
+    "summary": "Change a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id-or-key",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or space URL; names and content URLs are refused"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "New name"
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "New description"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "global",
+          "personal"
+        ],
+        "required": false,
+        "description": "global or personal"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "archived"
+        ],
+        "required": false,
+        "description": "current or archived"
+      },
+      {
+        "name": "--homepage",
+        "type": "string",
+        "required": false,
+        "description": "Homepage ID or URL (atlx extra)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space archive",
+    "summary": "Archive a space",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id-or-key",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or space URL; names and content URLs are refused"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space unarchive",
+    "summary": "Bring an archived space back",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id-or-key",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or space URL; names and content URLs are refused"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space delete",
+    "summary": "Delete a space and everything in it, for good",
+    "effect": "destructive",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "id-or-key",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or space URL; names and content URLs are refused"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space watch",
+    "summary": "Watch a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--space-id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space unwatch",
+    "summary": "Stop watching a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "description": "Space key"
+      },
+      {
+        "name": "--space-id",
+        "type": "string",
+        "required": false,
+        "description": "Space ID, key, ARI or URL"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm (required)"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space permission list",
+    "summary": "Who may do what in a space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Results per page (1-250)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence space permission available",
+    "summary": "Every space permission there is",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Results per page (1-250)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence templates list",
+    "summary": "Page and blueprint templates",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space-id",
+        "type": "string",
+        "required": false,
+        "description": "Space key, ID, ARI or URL"
+      },
+      {
+        "name": "--scope",
+        "type": "enum",
+        "values": [
+          "global",
+          "space",
+          "available"
+        ],
+        "required": false,
+        "description": "Defaults to space with --space-id, else global"
+      },
+      {
+        "name": "--template-type",
+        "type": "enum",
+        "values": [
+          "all",
+          "page",
+          "blueprint"
+        ],
+        "required": false,
+        "default": "all",
+        "description": "all, page or blueprint"
+      },
+      {
+        "name": "--query",
+        "type": "string",
+        "required": false,
+        "description": "Text in the ID, name or description"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "`nextCursor` from the page before"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "25",
+        "description": "Templates per page"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence templates get",
+    "summary": "One template, with its body",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEMPLATE_ID",
+        "type": "string",
+        "required": true,
+        "description": "Template ID"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  },
+  {
+    "contract": 1,
+    "path": "confluence tree",
+    "summary": "Page ancestors and descendant tree",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ref",
+        "type": "string",
+        "required": false,
+        "description": "Page or space (same as --target)"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--target",
+        "type": "string",
+        "required": false,
+        "description": "Page ID or URL, or space key, ID or URL"
+      },
+      {
+        "name": "--depth",
+        "type": "integer",
+        "required": false,
+        "default": "2",
+        "description": "Max descendant depth (default 2, capped at 10); at most 500 nodes"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "whiteboard",
+          "database"
+        ],
+        "required": false,
+        "description": "Only this type, with whatever contains it"
+      }
+    ],
+    "record": null,
+    "examples": [],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ],
+    "registered": false
+  }
+]

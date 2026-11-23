@@ -1,0 +1,764 @@
+[
+  {
+    "contract": 1,
+    "path": "auth login",
+    "summary": "Save credentials (site, email, API token) into a profile",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--token",
+        "type": "string",
+        "required": false,
+        "description": "API token (https://id.atlassian.com/manage-profile/security/api-tokens); `-` reads stdin"
+      },
+      {
+        "name": "--token-cmd",
+        "type": "string",
+        "required": false,
+        "description": "Save a shell command that prints the API token, instead of the token itself"
+      },
+      {
+        "name": "--no-verify",
+        "type": "boolean",
+        "required": false,
+        "description": "Skip credential verification"
+      },
+      {
+        "name": "--force",
+        "short": "-f",
+        "type": "boolean",
+        "required": false,
+        "description": "Re-prompt for everything, ignoring saved values"
+      },
+      {
+        "name": "--new-profile",
+        "type": "string",
+        "required": false,
+        "description": "Save into a new profile; without a name, one is derived from the site"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx auth login --new-profile work -s acme -u me@acme.com --token-cmd 'pass show atlassian'",
+      "atlx auth login -p work --force"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth logout",
+    "summary": "Remove the selected profile and its saved credentials",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx auth logout -p work"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth status",
+    "summary": "Who is signed in, on which site, with which token source; which products answer; whether read-only mode is on. Run this first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": {
+      "name": "auth.status",
+      "description": "the signed-in account, its site and what it can reach",
+      "primary": "profile",
+      "fields": [
+        {
+          "name": "profile",
+          "type": "string",
+          "description": "selected profile",
+          "default": true
+        },
+        {
+          "name": "site",
+          "type": "string",
+          "description": "Atlassian site",
+          "default": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "description": "account email",
+          "default": true
+        },
+        {
+          "name": "user",
+          "type": "user",
+          "description": "the Jira account ({id, name})",
+          "default": true
+        },
+        {
+          "name": "tokenSource",
+          "type": "string",
+          "description": "where the token comes from: env, config, token_cmd",
+          "default": true
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "description": "whether mutating requests are refused",
+          "default": true
+        },
+        {
+          "name": "products",
+          "type": "object",
+          "description": "per product: ok, not_configured, or the error code it answered with",
+          "default": true
+        },
+        {
+          "name": "bitbucketWorkspace",
+          "type": "string",
+          "description": "default Bitbucket workspace",
+          "default": true
+        },
+        {
+          "name": "defaults",
+          "type": "object",
+          "description": "repo-local defaults (.atlx.toml and the git remote)",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx auth status",
+      "atlx auth status -p work --fields user,products"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth bitbucket",
+    "summary": "Save the Bitbucket workspace and token for the profile",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--workspace",
+        "type": "string",
+        "required": false,
+        "description": "Default workspace slug"
+      },
+      {
+        "name": "--token",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket-scoped API token; `-` reads stdin"
+      },
+      {
+        "name": "--token-cmd",
+        "type": "string",
+        "required": false,
+        "description": "Save a shell command that prints the Bitbucket token"
+      },
+      {
+        "name": "--email",
+        "type": "string",
+        "required": false,
+        "description": "Bitbucket account email, if different from the Atlassian one"
+      },
+      {
+        "name": "--force",
+        "short": "-f",
+        "type": "boolean",
+        "required": false,
+        "description": "Prompt even when a Bitbucket token is already configured"
+      },
+      {
+        "name": "--no-verify",
+        "type": "boolean",
+        "required": false,
+        "description": "Skip the check that the token can list the workspace's repositories"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx auth bitbucket --workspace acme --token-cmd 'pass show bitbucket'"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth profile list",
+    "summary": "Show each profile's site, email, workspace and token source (never the token)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": {
+      "name": "auth.profile",
+      "description": "a saved login profile (never the token)",
+      "primary": "name",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "profile name",
+          "default": true
+        },
+        {
+          "name": "default",
+          "type": "boolean",
+          "description": "used when none is selected",
+          "default": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "description": "selected for this run",
+          "default": true
+        },
+        {
+          "name": "site",
+          "type": "string",
+          "description": "Atlassian site",
+          "default": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "description": "account email",
+          "default": true
+        },
+        {
+          "name": "workspace",
+          "type": "string",
+          "description": "default Bitbucket workspace",
+          "default": true
+        },
+        {
+          "name": "tokenSource",
+          "type": "string",
+          "description": "config, token_cmd or none",
+          "default": true
+        },
+        {
+          "name": "bitbucketTokenSource",
+          "type": "string",
+          "description": "where the Bitbucket token comes from",
+          "default": false
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "description": "read-only profile",
+          "default": true
+        }
+      ]
+    },
+    "examples": [
+      "atlx auth profile list",
+      "atlx auth profile list -o ids"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth profile update",
+    "summary": "Save `-s/--site` as the selected profile's site, without logging in again",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx auth profile update -p work -s acme.atlassian.net"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth profile migrate",
+    "summary": "Move the top-level (v1) credentials into a named profile",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm the move"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx auth profile migrate --dry-run",
+      "atlx auth profile migrate --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth profile rename",
+    "summary": "Rename a profile (renaming `default` moves the top-level keys)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "NAME",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "NEW_NAME",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx auth profile rename default work"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "auth profile default",
+    "summary": "Make a profile the one used when -p and ATLX_PROFILE are not set",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "NAME",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx auth profile default work"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "doctor",
+    "summary": "Check config, permissions, and service connectivity in depth",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail on warnings or unconfigured checks"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx doctor",
+      "atlx doctor --strict"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "search",
+    "summary": "Search Jira, Confluence and Bitbucket at once",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "QUERY",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "default": "10",
+        "description": "Max results per product"
+      },
+      {
+        "name": "--only",
+        "type": "enum",
+        "values": [
+          "jira",
+          "confluence",
+          "bitbucket"
+        ],
+        "required": false,
+        "repeatable": true,
+        "description": "Only search these products (comma-separated)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx search 'login timeout' --limit 5",
+      "atlx search deploy --only jira,confluence"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "api",
+    "summary": "Call any REST endpoint directly",
+    "description": "Call any REST endpoint directly\n\nPaths are relative to https://SITE (jira), https://SITE/wiki (confluence) or https://api.bitbucket.org/2.0 (bitbucket, where `{workspace}` is replaced with your default workspace). The response goes in `data` untouched. Read-only mode and --dry-run apply to it like to every other command.",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "PRODUCT",
+        "type": "enum",
+        "values": [
+          "jira",
+          "confluence",
+          "bitbucket"
+        ],
+        "required": true
+      },
+      {
+        "name": "PATH",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "flags": [
+      {
+        "name": "--method",
+        "short": "-X",
+        "type": "string",
+        "required": false,
+        "default": "GET"
+      },
+      {
+        "name": "--data",
+        "short": "-d",
+        "type": "string",
+        "required": false,
+        "description": "JSON body; `-` reads stdin, `@file` reads a file"
+      },
+      {
+        "name": "--query",
+        "short": "-q",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Query parameter, repeatable"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx api jira /rest/api/3/myself",
+      "atlx api confluence /api/v2/pages -q limit=5",
+      "atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "describe",
+    "summary": "Describe commands, record types and error codes as JSON",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "PATH",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "A command path (`jira issue get`) or a group (`jira`); none for the whole index"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--records",
+        "type": "boolean",
+        "required": false,
+        "description": "List the record types commands return, with their fields"
+      },
+      {
+        "name": "--errors",
+        "type": "boolean",
+        "required": false,
+        "description": "List error codes and exit codes"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Print the full contract of every command under the path"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx describe",
+      "atlx describe auth status",
+      "atlx describe --errors"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "cache path",
+    "summary": "Show where the metadata cache lives, whether it is on, and which tables it may hold",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx cache path"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "cache clear",
+    "summary": "Delete every cached table (they are fetched again when needed)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx cache clear"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "completion script",
+    "summary": "Print a completion script for a shell to stdout",
+    "description": "Print a completion script for a shell to stdout\n\nBash: `atlx completion script bash > ~/.local/share/bash-completion/completions/atlx`. Zsh: write `_atlx` into a directory on your `fpath`. Fish: `atlx completion script fish > ~/.config/fish/completions/atlx.fish`. PowerShell: add `atlx completion script powershell | Out-String | Invoke-Expression` to your profile.",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SHELL",
+        "type": "enum",
+        "values": [
+          "bash",
+          "elvish",
+          "fish",
+          "powershell",
+          "zsh"
+        ],
+        "required": true,
+        "description": "Shell to generate the script for"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx completion script bash"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "skill install",
+    "summary": "Write the skill where an agent finds it",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--dir",
+        "type": "path",
+        "required": false,
+        "description": "Install into this directory instead"
+      },
+      {
+        "name": "--target",
+        "type": "enum",
+        "values": [
+          "claude",
+          "agents"
+        ],
+        "required": false,
+        "default": "claude",
+        "description": "Which agent's skill directory"
+      },
+      {
+        "name": "--force",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace files that differ"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx skill install"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "skill print",
+    "summary": "Print SKILL.md (all files with -o json)",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx skill print"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  }
+]
