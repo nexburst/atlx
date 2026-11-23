@@ -1,11 +1,15 @@
-//! `content comments`: footer and inline comment threads on REST v2.
+//! `page comment`: footer and inline comment threads on REST v2.
+//!
+//! Bodies are read as ADF and shown in the requested format; new bodies
+//! are sent as ADF (or checked storage). Replacing a body that holds
+//! content Markdown cannot express is refused unless `allow_lossy`.
 
 use super::{
-    ContentType, ReadFormat, adf_body, content_id, enc, format_comment, listing, next_cursor,
-    optional_content_url, resolve_id, try_content,
+    ContentType, adf_body, body_param, body_value, content_id, enc, listing, lossy_replace,
+    next_cursor, optional_content_url, rendered_body, resolve_id, try_content, with_kind,
 };
 use crate::client::{ApiError, Client, ErrorKind};
-use crate::markup::{TextFormat, to_storage};
+use crate::markup::{Body, BodyFormat, unrepresentable};
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use serde_json::{Value, json};
@@ -13,7 +17,7 @@ use serde_json::{Value, json};
 /// The most replies one command fetches.
 pub const MAX_REPLIES: usize = 500;
 
-/// `--comment-type`.
+/// Footer or inline: `--inline` on the commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Surface {
     Footer,
@@ -97,9 +101,15 @@ fn path(surface: Surface, id: &str) -> String {
     format!("/api/v2/{}/{}", surface.collection(), enc(id))
 }
 
-/// A comment and its surface, trying footer then inline when none is given.
-fn find(c: &Client, id: &str, surface: Option<Surface>) -> Result<(Surface, Value)> {
-    let read = |s: Surface| c.get(&path(s, id), &[("body-format", "storage")]);
+/// A comment and its surface, trying footer then inline when none is
+/// given; its body is in `body_format` (a v2 `body-format` value).
+fn find(
+    c: &Client,
+    id: &str,
+    surface: Option<Surface>,
+    body_format: &str,
+) -> Result<(Surface, Value)> {
+    let read = |s: Surface| c.get(&path(s, id), &[("body-format", body_format)]);
     if let Some(s) = surface {
         return Ok((s, read(s)?));
     }
@@ -112,11 +122,17 @@ fn find(c: &Client, id: &str, surface: Option<Surface>) -> Result<(Surface, Valu
     }
 }
 
-/// A formatted comment with its `commentType`.
-fn shown(c: &Client, surface: Surface, v: &Value, format: ReadFormat) -> Value {
-    let mut v = format_comment(c, v, format);
-    v["commentType"] = surface.name().into();
-    v
+/// A comment with its body rendered in `format`, its `commentType` and
+/// `externalUrl`.
+fn shown(c: &Client, surface: Surface, v: &Value, format: BodyFormat) -> Value {
+    let id = v["id"].as_str().unwrap_or_default();
+    let mut o = v.clone();
+    if o.is_object() {
+        o["body"] = rendered_body(v, format, &format!("comment {id}"));
+        o["commentType"] = surface.name().into();
+        o["externalUrl"] = optional_content_url(c, v);
+    }
+    o
 }
 
 /// The replies under a comment, nested. Draws on `budget`; `repliesTruncated`
@@ -125,7 +141,7 @@ fn add_replies(
     c: &Client,
     surface: Surface,
     comment: &mut Value,
-    format: ReadFormat,
+    format: BodyFormat,
     budget: &mut usize,
 ) -> Result<()> {
     let Some(id) = comment["id"].as_str().map(String::from) else {
@@ -140,7 +156,7 @@ fn add_replies(
             cut = true;
             break;
         }
-        let mut q = vec![("body-format", "storage"), ("limit", "100")];
+        let mut q = vec![("body-format", body_param(format)), ("limit", "100")];
         if let Some(cur) = &cursor {
             q.push(("cursor", cur));
         }
@@ -169,7 +185,7 @@ fn add_replies(
 
 pub struct ListOpts<'a> {
     pub surface: Surface,
-    pub format: ReadFormat,
+    pub format: BodyFormat,
     pub limit: usize,
     pub cursor: Option<&'a str>,
     pub sort: Option<Sort>,
@@ -179,7 +195,7 @@ pub struct ListOpts<'a> {
     pub replies: bool,
 }
 
-/// `content comments list`: one page of top-level comments.
+/// `page comment list`: one page of top-level comments.
 pub fn list(
     c: &Client,
     reference: &str,
@@ -188,7 +204,7 @@ pub fn list(
 ) -> Result<Value> {
     if o.resolution.is_some() && o.surface == Surface::Footer {
         return Err(usage(
-            "Confluence's REST API only tracks resolution on inline comments; add --comment-type inline",
+            "Confluence's REST API only tracks resolution on inline comments; add --inline",
         ));
     }
     let id = match reference_space {
@@ -196,7 +212,10 @@ pub fn list(
         None => content_id(reference)?,
     };
     let limit = o.limit.clamp(1, 250).to_string();
-    let mut q = vec![("body-format", "storage"), ("limit", limit.as_str())];
+    let mut q = vec![
+        ("body-format", body_param(o.format)),
+        ("limit", limit.as_str()),
+    ];
     if let Some(cur) = o.cursor {
         q.push(("cursor", cur));
     }
@@ -229,10 +248,7 @@ pub fn list(
             &q,
         )
     };
-    let v = match o.content_type {
-        Some(k) => read(k)?,
-        None => try_content(read)?.1,
-    };
+    let (_, v) = with_kind(o.content_type, read)?;
     let mut out = listing(&v, |cm| shown(c, o.surface, cm, o.format));
     if o.replies
         && let Some(list) = out["results"].as_array_mut()
@@ -245,16 +261,16 @@ pub fn list(
     Ok(out)
 }
 
-/// `content comments get`.
+/// `page comment get`.
 pub fn get(
     c: &Client,
     comment: &str,
     surface: Option<Surface>,
-    format: ReadFormat,
+    format: BodyFormat,
     replies: bool,
 ) -> Result<Value> {
     let id = comment_id(comment)?;
-    let (surface, v) = find(c, &id, surface)?;
+    let (surface, v) = find(c, &id, surface, body_param(format))?;
     let mut out = shown(c, surface, &v, format);
     if replies {
         let mut budget = MAX_REPLIES;
@@ -281,13 +297,12 @@ fn written(c: &Client, surface: Surface, mut v: Value) -> Value {
     v
 }
 
-/// `content comments create`: inline when there is a selection, else footer.
+/// `page comment create`: inline when there is a selection, else footer.
 pub fn create(
     c: &Client,
     reference: &str,
     reference_space: Option<&str>,
-    body: &str,
-    format: TextFormat,
+    body: &Body,
     selection: Option<Selection>,
 ) -> Result<Value> {
     let index = selection.and_then(|s| s.index).unwrap_or(0);
@@ -322,7 +337,7 @@ pub fn create(
     };
     let mut req = json!({
         id_field: id,
-        "body": {"representation": "storage", "value": to_storage(body, format)},
+        "body": body_value(body)?,
     });
     let mut surface = Surface::Footer;
     if let Some(s) = selection {
@@ -377,15 +392,15 @@ fn visible_text(doc: &Value) -> String {
     out
 }
 
-/// `content comments reply`: on the same surface as the comment.
-pub fn reply(c: &Client, comment: &str, body: &str, format: TextFormat) -> Result<Value> {
+/// `page comment create --comment`: on the same surface as the comment.
+pub fn reply(c: &Client, comment: &str, body: &Body) -> Result<Value> {
     let id = comment_id(comment)?;
-    let (surface, _) = find(c, &id, None)?;
+    let (surface, _) = find(c, &id, None, "storage")?;
     let v = c.post(
         &format!("/api/v2/{}", surface.collection()),
         &json!({
             "parentCommentId": id,
-            "body": {"representation": "storage", "value": to_storage(body, format)},
+            "body": body_value(body)?,
         }),
     )?;
     Ok(written(c, surface, v))
@@ -397,46 +412,66 @@ fn version(v: &Value, id: &str) -> Result<u64> {
         .ok_or_else(|| anyhow!("comment {id} has no version number"))
 }
 
-/// `content comments update`.
+/// How `page comment update` replaces a body.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Replace {
+    /// The comment version the caller read (`--if-version`), if given.
+    pub if_version: Option<u64>,
+    /// The new body is Markdown or plain text: refuse when the current body
+    /// holds content those cannot express...
+    pub check_loss: bool,
+    /// ...unless this is set (`--allow-lossy`).
+    pub allow_lossy: bool,
+}
+
+/// `page comment update` with a new body.
 pub fn update(
     c: &Client,
     comment: &str,
     surface: Option<Surface>,
-    body: &str,
-    format: TextFormat,
-    expected_version: Option<u64>,
+    body: &Body,
+    r: Replace,
 ) -> Result<Value> {
     let id = comment_id(comment)?;
-    let (surface, current) = find(c, &id, surface)?;
+    let (surface, current) = find(c, &id, surface, "atlas_doc_format")?;
     let n = version(&current, &id)?;
-    if let Some(expected) = expected_version
+    if let Some(expected) = r.if_version
         && expected != n
     {
         return Err(ApiError::new(
             ErrorKind::Conflict,
-            format!("comment {id} is at version {n}, not {expected}; re-read it and retry"),
+            format!("comment {id} is at version {n}, you edited version {expected}"),
         )
+        .with_hint(format!(
+            "re-read it (`atlx confluence page comment get {id}`), re-apply your change, pass --if-version {n}"
+        ))
         .into());
+    }
+    if r.check_loss && !r.allow_lossy {
+        let losses = unrepresentable(&adf_body(&current));
+        if !losses.is_empty() {
+            return Err(lossy_replace("comment", &id, n, losses));
+        }
     }
     let v = c.put(
         &path(surface, &id),
         &json!({
             "version": {"number": n + 1},
-            "body": {"representation": "storage", "value": to_storage(body, format)},
+            "body": body_value(body)?,
         }),
     )?;
     Ok(written(c, surface, v))
 }
 
-/// `content comments delete`. Confluence deletes comments for good.
+/// `page comment delete`. Confluence deletes comments for good.
 pub fn delete(c: &Client, comment: &str) -> Result<Value> {
     let id = comment_id(comment)?;
-    let (surface, _) = find(c, &id, None)?;
+    let (surface, _) = find(c, &id, None, "storage")?;
     c.delete(&path(surface, &id), &[])?;
     Ok(json!({"id": id, "commentType": surface.name(), "deleted": true}))
 }
 
-/// `content comments resolve|reopen`.
+/// `page comment update --resolve|--reopen`.
 pub fn set_resolved(
     c: &Client,
     comment: &str,
@@ -449,11 +484,12 @@ pub fn set_resolved(
     if surface == Some(Surface::Footer) {
         return Err(usage(FOOTER));
     }
-    let (surface, current) = find(c, &id, surface)?;
+    // The update replaces the body, so it is read as storage and sent back
+    // exactly as it was.
+    let (surface, current) = find(c, &id, surface, "storage")?;
     if surface == Surface::Footer {
         return Err(usage(FOOTER));
     }
-    // The update replaces the body, so it has to be sent back unchanged.
     let body = current["body"]["storage"]["value"]
         .as_str()
         .ok_or_else(|| anyhow!("comment {id} came back without its body; not changing it"))?;

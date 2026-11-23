@@ -1,10 +1,8 @@
 //! Pipelines: run, rerun, latest failure, tail, grep, test reports, config.
 
-use super::{
-    PipelineGet, PipelineQuery, enc, full_name, paginate, pipeline_get, pipeline_query,
-    pipeline_ref,
-};
+use super::{Listed, Paging, PipelineQuery, enc, not_found, pipeline_ref, scan_all, state_of};
 use crate::client::{ApiError, Client, ErrorKind};
+use crate::paging::{self, Cursor, Position};
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -22,7 +20,7 @@ fn status_of(e: &anyhow::Error) -> Option<u16> {
     ApiError::find(e).and_then(|a| a.status)
 }
 
-fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+fn text_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or_default()
 }
 
@@ -30,8 +28,8 @@ fn text<'a>(v: &'a Value, key: &str) -> &'a str {
 /// index, a UUID with or without braces, or the exact name.
 pub fn step_matches(selector: &str, index: usize, step: &Value) -> bool {
     let sel = selector.trim();
-    let uuid = text(step, "uuid");
-    sel == text(step, "name")
+    let uuid = text_of(step, "uuid");
+    sel == text_of(step, "name")
         || (!uuid.is_empty() && sel.trim_matches(['{', '}']) == uuid.trim_matches(['{', '}']))
         || sel.parse::<usize>().is_ok_and(|n| n == index + 1)
 }
@@ -53,7 +51,7 @@ pub(super) fn select<'a>(
     let names: Vec<String> = steps
         .iter()
         .enumerate()
-        .map(|(i, s)| format!("{} {}", i + 1, text(s, "name")))
+        .map(|(i, s)| format!("{} {}", i + 1, text_of(s, "name")))
         .collect();
     Err(usage(format!(
         "--step '{sel}' matches {} steps; use an index or UUID. The steps are: {}",
@@ -72,7 +70,7 @@ fn pipeline(c: &Client, path: &str, r: &str) -> Result<(Value, String)> {
 }
 
 fn steps(c: &Client, path: &str, uuid: &str) -> Result<Vec<Value>> {
-    paginate(
+    scan_all(
         c,
         &format!("{path}/pipelines/{}/steps", enc(uuid)),
         &[],
@@ -84,7 +82,7 @@ fn step_path(path: &str, pipeline: &str, step: &Value) -> String {
     format!(
         "{path}/pipelines/{}/steps/{}",
         enc(pipeline),
-        enc(text(step, "uuid"))
+        enc(text_of(step, "uuid"))
     )
 }
 
@@ -101,7 +99,7 @@ pub struct Run<'a> {
     pub variables: Vec<(String, String, bool)>,
 }
 
-/// `pipeline run|trigger`. Secured values are never echoed.
+/// Start a run. Secured values are never echoed.
 pub fn run(c: &Client, path: &str, r: &Run) -> Result<Value> {
     let named = match (r.branch, r.tag) {
         (Some(_), Some(_)) => return Err(usage("pass --branch or --tag, not both")),
@@ -149,24 +147,10 @@ pub(super) fn hide_secured(list: &mut Value) {
     }
 }
 
-/// The result page of a run.
-pub fn web_url(path: &str, pipeline: &Value) -> Option<String> {
-    let n = pipeline["build_number"].as_u64()?;
-    let repo = full_name(path);
-    Some(format!(
-        "https://bitbucket.org/{repo}/pipelines/results/{n}"
-    ))
-}
-
-/// `pipeline rerun-failed`. REST can't rerun only the failed steps, so this
-/// starts a new run of the same target, which repeats every step, deploys
-/// included. That needs `whole` to be asked for.
-pub fn rerun(c: &Client, path: &str, r: &str, whole: bool) -> Result<Value> {
-    if !whole {
-        return Err(usage(
-            "Bitbucket's REST API can't rerun only the failed steps. Pass --whole-pipeline to start a new run of the same target; it repeats every step, deployments included",
-        ));
-    }
+/// Start a failed run again. REST can't rerun only the failed steps, so
+/// this starts a new run of the same target and commit, which repeats every
+/// step, deployments included.
+pub fn rerun(c: &Client, path: &str, r: &str) -> Result<Value> {
     let (p, _) = pipeline(c, path, r)?;
     let result = p["state"]["result"]["name"].as_str().unwrap_or_default();
     if !matches!(result, "FAILED" | "ERROR" | "STOPPED") {
@@ -211,7 +195,7 @@ pub fn rerun(c: &Client, path: &str, r: &str, whole: bool) -> Result<Value> {
     if let Some(vars) = p["variables"].as_array().filter(|v| !v.is_empty()) {
         if vars.iter().any(|v| v["secured"] == true) {
             return Err(usage(
-                "that run had secured variables, whose values can't be read back; use pipeline run with --secured-variable",
+                "that run had secured variables, whose values can't be read back; start it with `pipeline run --secured-variable`",
             ));
         }
         req["variables"] = vars
@@ -229,85 +213,224 @@ pub fn rerun(c: &Client, path: &str, r: &str, whole: bool) -> Result<Value> {
 
 // --- reads -------------------------------------------------------------------
 
-/// What `pipeline get` adds to each selected step.
+/// Steps of a run, each with its 1-based `index`, from `--cursor` on.
+pub fn step_list(c: &Client, path: &str, r: &str, p: &Paging) -> Result<Listed> {
+    let (_, uuid) = pipeline(c, path, r)?;
+    let all: Vec<Value> = steps(c, path, &uuid)?
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| indexed(s, i))
+        .collect();
+    let start = match p.cursor.as_deref() {
+        None => 0,
+        Some(s) => match Cursor::decode(s)?.position {
+            Position::Offset(o) => usize::try_from(o).unwrap_or(usize::MAX),
+            Position::Start => 0,
+            _ => return Err(usage("--cursor is not a cursor from a step list")),
+        },
+    };
+    let limit = p.limit.clamp(1, paging::HARD_CAP);
+    let end = start.saturating_add(limit).min(all.len());
+    let page: Vec<Value> = all
+        .get(start..end)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let next = (end < all.len()).then(|| Cursor::at(Position::Offset(end as u64)).encode());
+    Ok((page, next))
+}
+
+fn indexed(mut step: Value, i: usize) -> Value {
+    if step.is_object() {
+        step["index"] = (i + 1).into();
+    }
+    step
+}
+
+/// What `pipeline step get` adds to a step.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Tests {
-    pub reports: bool,
+    /// Add the test cases, not just the report summary.
     pub cases: bool,
     /// 0 means all, up to [`CASE_CAP`].
     pub case_limit: usize,
 }
 
-/// `pipeline get`, with test reports and cases.
-pub fn get(c: &Client, path: &str, r: &str, o: &PipelineGet, t: &Tests) -> Result<Value> {
-    let mut out = pipeline_get(c, path, r, o)?;
-    if !t.reports && !t.cases {
-        return Ok(out);
-    }
-    let uuid = text(&out, "uuid").to_string();
-    let limit = match t.case_limit {
-        0 => CASE_CAP,
-        n => n.min(CASE_CAP),
-    };
-    for (i, step) in out["steps"]
-        .as_array_mut()
+/// One step with its test report (`test_report`, `null` when the step
+/// published none) and, if asked, its test cases.
+pub fn step_get(c: &Client, path: &str, r: &str, selector: &str, t: &Tests) -> Result<Value> {
+    let (_, uuid) = pipeline(c, path, r)?;
+    let all = steps(c, path, &uuid)?;
+    let (index, step) = select(&all, Some(selector))?
         .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        if o.step.is_some_and(|s| !step_matches(s, i, step)) {
-            continue;
-        }
-        let base = format!("{}/test_reports", step_path(path, &uuid, step));
-        // 404 means the step published no reports.
-        if t.reports {
-            step["test_report"] = match c.get(&base, &[]) {
-                Ok(v) => v,
-                Err(e) if status_of(&e) == Some(404) => Value::Null,
-                Err(e) => return Err(e),
-            };
-        }
-        if t.cases {
-            step["test_cases"] = match paginate(c, &format!("{base}/test_cases"), &[], limit) {
-                Ok(v) => v.into(),
-                Err(e) if status_of(&e) == Some(404) => json!([]),
-                Err(e) => return Err(e),
-            };
-        }
+        .next()
+        .ok_or_else(|| usage(format!("no step '{selector}'")))?;
+    let mut step = indexed(step.clone(), index);
+    let base = format!("{}/test_reports", step_path(path, &uuid, &step));
+    // 404 means the step published no reports.
+    step["test_report"] = match c.get(&base, &[]) {
+        Ok(v) => v,
+        Err(e) if status_of(&e) == Some(404) => Value::Null,
+        Err(e) => return Err(e),
+    };
+    if t.cases {
+        let limit = match t.case_limit {
+            0 => CASE_CAP,
+            n => n.min(CASE_CAP),
+        };
+        step["test_cases"] = match scan_all(c, &format!("{base}/test_cases"), &[], limit) {
+            Ok(v) => v.into(),
+            Err(e) if status_of(&e) == Some(404) => json!([]),
+            Err(e) => return Err(e),
+        };
     }
-    Ok(out)
+    Ok(step)
 }
 
-/// `pipeline latest-failure`: the newest matching failure, as `get --logs`.
-pub fn latest_failure(
-    c: &Client,
-    path: &str,
-    q: &PipelineQuery,
-    all_steps: bool,
-    lines: usize,
-) -> Result<Value> {
-    let status = q.status.unwrap_or("FAILED");
-    let query = PipelineQuery {
-        status: Some(status),
-        limit: 1,
-        ..*q
+/// What `pipeline log` reads.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LogOpts<'a> {
+    /// One step: 1-based index, UUID or name.
+    pub step: Option<&'a str>,
+    /// Only failed steps; without a pipeline, the newest failed run.
+    pub failed: bool,
+    /// Without a pipeline: the newest run on this branch.
+    pub branch: Option<&'a str>,
+    /// Only the lines containing this.
+    pub grep: Option<Grep<'a>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Grep<'a> {
+    pub pattern: &'a str,
+    pub ignore_case: bool,
+    pub context: usize,
+    pub max_matches: usize,
+}
+
+/// The run `pipeline log` reads: the one named, else the newest (failed,
+/// with `failed`) one, on `branch` if given.
+pub fn pick(c: &Client, path: &str, r: Option<&str>, o: &LogOpts) -> Result<(Value, String)> {
+    if let Some(r) = r {
+        return pipeline(c, path, r);
+    }
+    let q = PipelineQuery {
+        branch: o.branch,
+        ..Default::default()
     };
-    let found = pipeline_query(c, path, &query)?;
-    let Some(uuid) = found[0]["uuid"].as_str() else {
-        return Err(ApiError::new(
-            ErrorKind::NotFound,
-            format!("no {status} pipeline among the 100 most recent that match"),
-        )
-        .into());
+    let failed = |v: &Value| matches!(state_of(v).1.as_deref(), Some("FAILED" | "ERROR"));
+    let mut qs = vec![("sort", "-created_on")];
+    if let Some(b) = q.branch {
+        qs.push(("target.branch", b));
+    }
+    let (found, _) =
+        super::list_where(c, &format!("{path}/pipelines"), &qs, &Paging::new(1), |v| {
+            Ok(!o.failed || failed(v))
+        })?;
+    let Some(p) = found.into_iter().next() else {
+        let what = if o.failed {
+            "failed pipeline"
+        } else {
+            "pipeline"
+        };
+        let on = o.branch.map_or(String::new(), |b| format!(" on {b}"));
+        return Err(not_found(format!(
+            "no {what}{on} among the most recent runs"
+        )));
     };
-    let o = PipelineGet {
-        logs: true,
-        // A stopped run has no failed step to narrow to.
-        failed_steps: !all_steps && !status.eq_ignore_ascii_case("STOPPED"),
-        lines,
-        step: None,
+    let uuid = p["uuid"]
+        .as_str()
+        .ok_or_else(|| anyhow!("pipeline has no uuid"))?
+        .to_string();
+    Ok((p, uuid))
+}
+
+/// One record per selected step: `{pipeline, step, stepIndex, stepUuid,
+/// state, result, log, matches}`. `log` is the whole log (the command
+/// layer cuts it); with `grep`, `log` is null and `matches` lists the
+/// matching lines.
+pub fn logs(c: &Client, path: &str, r: Option<&str>, o: &LogOpts) -> Result<Value> {
+    if o.grep.is_some_and(|g| g.pattern.is_empty()) {
+        return Err(usage("--grep can't be empty"));
+    }
+    let (p, uuid) = pick(c, path, r, o)?;
+    let all = steps(c, path, &uuid)?;
+    let mut out = Vec::new();
+    let mut matches = 0usize;
+    for (index, step) in select(&all, o.step)? {
+        let (state, result) = state_of(step);
+        if o.failed && !matches!(result.as_deref(), Some("FAILED" | "ERROR")) {
+            continue;
+        }
+        let text = match log_from(c, &step_path(path, &uuid, step), 0)? {
+            Some(b) => String::from_utf8_lossy(&b).into_owned(),
+            None => String::new(),
+        };
+        let mut rec = json!({
+            "pipeline": p["build_number"],
+            "pipelineUuid": uuid,
+            "step": text_of(step, "name"),
+            "stepIndex": index + 1,
+            "stepUuid": text_of(step, "uuid"),
+            "state": state,
+            "result": result,
+            "log": null,
+            "matches": null,
+        });
+        match &o.grep {
+            None => rec["log"] = text.into(),
+            Some(g) => {
+                let left = g.max_matches.saturating_sub(matches);
+                let (found, more) = grep_lines(&text, g, left);
+                matches += found.len();
+                if more {
+                    crate::output::notes::warn(
+                        "more_matches",
+                        format!(
+                            "stopped after {} matches; raise --max-matches",
+                            g.max_matches
+                        ),
+                    );
+                }
+                rec["matches"] = found.into();
+            }
+        }
+        out.push(rec);
+        if o.grep.is_some_and(|g| matches >= g.max_matches) {
+            break;
+        }
+    }
+    Ok(out.into())
+}
+
+/// Matching lines of a log, numbered from 1, and whether more were left
+/// out at `max`.
+fn grep_lines(log: &str, g: &Grep, max: usize) -> (Vec<Value>, bool) {
+    let fold = |s: &str| {
+        if g.ignore_case {
+            s.to_lowercase()
+        } else {
+            s.to_string()
+        }
     };
-    pipeline_get(c, path, uuid, &o)
+    let needle = fold(g.pattern);
+    let lines: Vec<&str> = log.lines().collect();
+    let mut found = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if !fold(line).contains(&needle) {
+            continue;
+        }
+        if found.len() >= max {
+            return (found, true);
+        }
+        let mut hit = json!({"line": i + 1, "text": line});
+        if g.context > 0 {
+            let end = (i + 1).saturating_add(g.context).min(lines.len());
+            hit["before"] = json!(lines[i.saturating_sub(g.context)..i]);
+            hit["after"] = json!(lines[i + 1..end]);
+        }
+        found.push(hit);
+    }
+    (found, false)
 }
 
 /// A step's log from byte `from`, or `None` while it has none.
@@ -325,69 +448,6 @@ fn log_from(c: &Client, step_path: &str, from: usize) -> Result<Option<Vec<u8>>>
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Grep<'a> {
-    pub pattern: &'a str,
-    pub ignore_case: bool,
-    pub context: usize,
-    pub max_matches: usize,
-    pub step: Option<&'a str>,
-}
-
-/// `pipeline grep`: plain substring search through the step logs.
-pub fn grep(c: &Client, path: &str, r: &str, o: &Grep) -> Result<Value> {
-    if o.pattern.is_empty() {
-        return Err(usage("the pattern can't be empty"));
-    }
-    let (p, uuid) = pipeline(c, path, r)?;
-    let all = steps(c, path, &uuid)?;
-    let fold = |s: &str| {
-        if o.ignore_case {
-            s.to_lowercase()
-        } else {
-            s.to_string()
-        }
-    };
-    let needle = fold(o.pattern);
-    let mut found = Vec::new();
-    let mut truncated = false;
-    'steps: for (index, step) in select(&all, o.step)? {
-        let Some(log) = log_from(c, &step_path(path, &uuid, step), 0)? else {
-            continue;
-        };
-        let log = String::from_utf8_lossy(&log);
-        let lines: Vec<&str> = log.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            if !fold(line).contains(&needle) {
-                continue;
-            }
-            if found.len() >= o.max_matches {
-                truncated = true;
-                break 'steps;
-            }
-            let mut hit = json!({
-                "step": text(step, "name"),
-                "step_index": index + 1,
-                "step_uuid": text(step, "uuid"),
-                "line": i + 1,
-                "text": line,
-            });
-            if o.context > 0 {
-                let end = (i + 1).saturating_add(o.context).min(lines.len());
-                hit["before"] = json!(lines[i.saturating_sub(o.context)..i]);
-                hit["after"] = json!(lines[i + 1..end]);
-            }
-            found.push(hit);
-        }
-    }
-    Ok(json!({
-        "pipeline": p["build_number"],
-        "pattern": o.pattern,
-        "matches": found,
-        "truncated": truncated,
-    }))
-}
-
 // --- tail --------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug)]
@@ -400,7 +460,7 @@ pub struct Tail<'a> {
     pub timeout: Duration,
 }
 
-struct Cursor {
+struct LogCursor {
     offset: usize,
     /// An unfinished last line.
     partial: Vec<u8>,
@@ -422,7 +482,7 @@ pub fn tail(
     emit: &mut dyn FnMut(&Value) -> Result<()>,
 ) -> Result<bool> {
     let begun = Instant::now();
-    let mut cursors: HashMap<String, Cursor> = HashMap::new();
+    let mut cursors: HashMap<String, LogCursor> = HashMap::new();
     let (mut p, uuid) = pipeline(c, path, r)?;
     let mut first = true;
     loop {
@@ -436,9 +496,9 @@ pub fn tail(
         // Steps can appear after the pipeline starts; a named one must exist.
         let selected = select(&all, o.step)?;
         for (index, step) in &selected {
-            let id = text(step, "uuid").to_string();
+            let id = text_of(step, "uuid").to_string();
             let is_new = !cursors.contains_key(&id);
-            let cur = cursors.entry(id.clone()).or_insert(Cursor {
+            let cur = cursors.entry(id.clone()).or_insert(LogCursor {
                 offset: 0,
                 partial: Vec::new(),
                 complete: false,
@@ -470,7 +530,7 @@ pub fn tail(
             for line in lines {
                 emit(&json!({
                     "event": "line",
-                    "step": text(step, "name"),
+                    "step": text_of(step, "name"),
                     "step_index": index + 1,
                     "step_uuid": id,
                     "text": line,
@@ -486,7 +546,7 @@ pub fn tail(
             None => pipeline_done,
         };
         if !o.follow || subject_done || paused {
-            let result = super::state_of(subject).1;
+            let result = state_of(subject).1;
             emit(&json!({
                 "event": "done",
                 "pipeline": p["build_number"],

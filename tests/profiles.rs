@@ -66,10 +66,10 @@ impl Drop for Sandbox {
     }
 }
 
-/// The `data` of a successful command's twg envelope.
+/// The `data` of a successful command's envelope.
 fn ok_json(o: &Output) -> Value {
     let v = ok_envelope(o);
-    assert_eq!(v["apiVersion"], "v2", "{v}");
+    assert_eq!(v["ok"], true, "{v}");
     v["data"].clone()
 }
 
@@ -93,6 +93,7 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
     let sb = Sandbox::new("manage");
     // A named profile with a credential helper; it becomes the default.
     let out = ok_json(&sb.run(&[
+        "auth",
         "login",
         "--new-profile",
         "work",
@@ -107,7 +108,7 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
         "json",
     ]));
     assert_eq!(out["profile"], "work");
-    assert_eq!(out["token_source"], "token_cmd");
+    assert_eq!(out["tokenSource"], "token_cmd");
     assert_eq!(out["default"], true);
     let text = sb.read();
     assert!(text.contains("default_profile = \"work\""), "{text}");
@@ -117,6 +118,7 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
     // A second profile from a literal token on stdin, name derived from the site.
     let mut child = sb
         .cmd(&[
+            "auth",
             "login",
             "--new-profile",
             "-s",
@@ -146,6 +148,7 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
 
     // Creating an existing profile again is refused.
     let dup = sb.run(&[
+        "auth",
         "login",
         "--new-profile",
         "work",
@@ -167,9 +170,9 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
     let rows = rows.as_array().unwrap();
     assert_eq!(rows.len(), 2, "{rows:?}");
     assert_eq!(rows[0]["name"], "sandbox");
-    assert_eq!(rows[0]["token_source"], "config");
+    assert_eq!(rows[0]["tokenSource"], "config");
     assert_eq!(rows[1]["name"], "work");
-    assert_eq!(rows[1]["token_source"], "token_cmd");
+    assert_eq!(rows[1]["tokenSource"], "token_cmd");
     assert_eq!(rows[1]["default"], true);
     assert_eq!(rows[1]["active"], true);
 
@@ -186,17 +189,11 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
 
     // Per-profile setup.
     ok_json(&sb.run(&[
-        "setup",
-        "default-site",
-        "sb2",
-        "-p",
-        "sandbox",
-        "-o",
-        "json",
+        "auth", "profile", "update", "-s", "sb2", "-p", "sandbox", "-o", "json",
     ]));
     assert!(sb.read().contains("site = \"sb2.atlassian.net\""));
     let out = ok_json(&sb.run(&[
-        "setup",
+        "auth",
         "bitbucket",
         "--workspace",
         "acme",
@@ -209,7 +206,7 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
         "json",
     ]));
     assert_eq!(out["profile"], "sandbox");
-    assert_eq!(out["token_source"], "token_cmd");
+    assert_eq!(out["tokenSource"], "token_cmd");
 
     // default / rename / logout.
     ok_json(&sb.run(&["auth", "profile", "default", "sandbox", "-o", "json"]));
@@ -223,12 +220,12 @@ fn login_creates_profiles_and_auth_profile_commands_manage_them() {
             .success()
     );
 
-    let out = ok_json(&sb.run(&["logout", "-p", "work", "-o", "json"]));
+    let out = ok_json(&sb.run(&["auth", "logout", "-p", "work", "-o", "json"]));
     assert_eq!(out["removed"], true);
     let text = sb.read();
     assert!(!text.contains("[profiles.work]"), "{text}");
     assert!(text.contains("[profiles.sb]"), "{text}");
-    ok_json(&sb.run(&["logout", "-o", "json"]));
+    ok_json(&sb.run(&["auth", "logout", "-o", "json"]));
     assert!(!sb.config().exists(), "empty config file is removed");
 }
 
@@ -253,9 +250,10 @@ fn legacy_config_migrates_into_a_named_profile() {
 fn unknown_profile_is_a_config_error() {
     let sb = Sandbox::new("unknown");
     sb.write("site = \"acme.atlassian.net\"\n");
-    let o = sb.run(&["-p", "nope", "jira", "workitem", "get", "X-1"]);
-    assert_eq!(o.status.code(), Some(1));
-    let err = String::from_utf8_lossy(&o.stderr);
+    let o = sb.run(&["-p", "nope", "jira", "issue", "get", "X-1", "-o", "json"]);
+    assert_eq!(o.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&o.stdout);
+    assert!(err.contains("\"code\":\"config\""), "{err}");
     assert!(err.contains("nope"), "{err}");
 }
 
@@ -273,7 +271,7 @@ fn token_cmd_runs_only_when_a_client_is_built() {
 }
 
 #[test]
-fn whoami_uses_the_profile_token_cmd_and_reports_its_source() {
+fn auth_status_uses_the_profile_token_cmd_and_reports_its_source() {
     let srv = MockServer::with_handler(|_| {
         MockResponse::json(
             200,
@@ -286,20 +284,22 @@ fn whoami_uses_the_profile_token_cmd_and_reports_its_source() {
          [profiles.work]\nsite = \"work\"\nemail = \"me@work.com\"\ntoken_cmd = \"echo cmd-token\"\n",
     );
     let out = ok_envelope(
-        &sb.cmd(&["-p", "work", "whoami", "-o", "json"])
+        &sb.cmd(&["-p", "work", "auth", "status", "-o", "json"])
             .env("ATLX_SITE", srv.base_url())
             .output()
             .unwrap(),
     );
-    assert_eq!(out["command"], "user.get");
-    assert_eq!(out["meta"]["profile"], "work");
-    assert_eq!(out["meta"]["tokenSource"], "token_cmd");
+    assert_eq!(out["data"]["profile"], "work");
+    assert_eq!(out["data"]["tokenSource"], "token_cmd");
+    assert_eq!(out["data"]["user"], json!({"id": "a1", "name": "Me"}));
     let raw = serde_json::to_string(&out).unwrap();
     assert!(!raw.contains("cmd-token"), "{raw}");
-    let auth = srv.requests()[0]
-        .header("authorization")
-        .unwrap()
-        .to_string();
+    let myself = srv
+        .requests()
+        .into_iter()
+        .find(|r| r.path.ends_with("/myself"))
+        .unwrap();
+    let auth = myself.header("authorization").unwrap().to_string();
     let expected = base64::engine::general_purpose::STANDARD.encode("me@work.com:cmd-token");
     assert_eq!(auth, format!("Basic {expected}"));
 
@@ -308,11 +308,11 @@ fn whoami_uses_the_profile_token_cmd_and_reports_its_source() {
         "site = \"acme\"\nemail = \"me@acme.com\"\ntoken_cmd = \"echo leaked-value && exit 4\"\n",
     );
     let o = sb
-        .cmd(&["whoami", "-o", "json"])
+        .cmd(&["auth", "status", "-o", "json"])
         .env("ATLX_SITE", srv.base_url())
         .output()
         .unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(4));
     let all = format!(
         "{}{}",
         String::from_utf8_lossy(&o.stdout),

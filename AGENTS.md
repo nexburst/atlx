@@ -10,34 +10,43 @@ export CARGO_TARGET_DIR=...        # one per worktree when running in parallel
 cargo check --all-targets          # fast loop
 cargo test --test jira             # one test binary
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test   # before pushing
-UPDATE_SNAPSHOTS=1 cargo test --test cli_tree   # after any CLI change
+UPDATE_SNAPSHOTS=1 cargo test --test describe   # after any CLI or record change
+UPDATE_SKILL=1 cargo test --test skill          # regenerate the skill's command references
 ```
 
 ## Where code goes
 
-- API calls: `src/<product>.rs`. They return the command's `data` as a `serde_json::Value`;
-  dispatch wraps it with `output::envelope::envelope` (not for Bitbucket).
-- Clap definitions and dispatch: `src/cli/<product>.rs`. Shared helpers are in
-  `src/cli/util.rs`, global flags and top-level dispatch in `src/cli/mod.rs`.
-- Mock-HTTP tests: `tests/<product>.rs`, using `tests/common/mod.rs`.
-- Parse tests: the `tests` module of `src/cli/<product>.rs`.
+- API calls: `src/<product>.rs` and `src/<product>/`. They return REST
+  payloads as `serde_json::Value`; records in `src/<product>/records.rs` turn
+  them into output.
+- Clap definitions, dispatch and the `META` registry table:
+  `src/cli/<product>.rs` (and its submodules). Global flags and top-level
+  dispatch are in `src/cli/mod.rs`; shared helpers in `src/cli/util.rs`.
+- Mock-HTTP tests: `tests/<product>*.rs`, using `tests/common/mod.rs`.
+- Parse tests: the product's CLI test module.
 
 ## Definition of done
 
-- Commands and flags use the names in `compat/twg-1.4.4.txt` or Atlassian's
-  public twg commands catalog when they are listed there.
-- New API functions have a mock-HTTP test; new commands have a parse test.
-- `tests/snapshots/cli-tree.txt` is regenerated and the diff is intended.
-- README command table and `COMPAT.md` row updated; matching `gap` lines in
-  `compat/corpus.txt` flipped to `ok` (`cargo test --test twg_compat`).
+- The command follows the grammar `<product> <resource> [<sub-resource>]
+  <verb>`: REST nouns, singular; verb last; target positional; parents as
+  named flags (`--issue`, `--page`, `--pr`, `--repo`, ...); shared flag names
+  (`--limit`, `--cursor`, `--body*`, `--yes`, `--if-version`).
+- It has a `CommandMeta` with its `effect` (`read`, `write`,
+  `destructive`), its `record`, and at least one example that parses.
+- It returns a registered record with a short default view; lists carry no
+  bodies; big text fields have a truncation budget.
+- Writes need nothing per command: dry-run and read-only mode are in the
+  client. A POST that reads uses `Client::post_read`. Destructive commands
+  get `--yes` from the registry; never call a confirmation helper by hand and
+  never prompt.
+- Tests are offline: a mock-HTTP test of the request and the record, a parse
+  test, and the product's write-guard tests still pass (destructive refuses
+  without `--yes` and sends nothing; writes stop under `--dry-run`).
+- `describe` snapshots and skill references are regenerated and the diffs
+  are intended.
+- Errors are `client::ApiError` with the right kind; `main` prints them.
 - fmt, clippy with `-D warnings`, and tests all pass.
 - No new dependency without a stated reason. Sync `ureq` 2, no async.
-- Confirmation follows the command family's existing policy: require `--yes`
-  (`util::require_yes`) where the family does; elsewhere accept it as a
-  hidden no-op and never prompt. Return
-  errors as `client::ApiError` where the class matters; `main` prints them.
-- Renamed commands and flags stay as hidden aliases that call
-  `util::deprecated(old, new)`; the note only shows in text mode on a terminal.
 
 ## Independence from twg
 
@@ -46,4 +55,4 @@ UPDATE_SNAPSHOTS=1 cargo test --test cli_tree   # after any CLI change
 - Never publish comparisons, benchmarks or assessments of twg, in issues, PRs,
   docs or commit messages.
 - Never copy twg help text, descriptions, docs or skill files into the repo.
-  Command paths and flag names are fine; all prose must be original.
+  All prose must be original.

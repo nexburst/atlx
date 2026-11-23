@@ -65,9 +65,8 @@ fn search_fans_out_in_parallel_and_isolates_product_failures() {
     assert_eq!(partial["jira"][0]["key"], "J-2");
     assert_eq!(partial["bitbucket"][0]["full_name"], "acme/infra");
     let conf_err = &partial["confluence"]["error"];
-    assert_eq!(conf_err["statusCode"], 500, "{conf_err}");
-    assert_eq!(conf_err["category"], "server", "{conf_err}");
-    assert_eq!(conf_err["code"], "TWG_UPSTREAM_FAILURE", "{conf_err}");
+    assert_eq!(conf_err["status"], 500, "{conf_err}");
+    assert_eq!(conf_err["code"], "server", "{conf_err}");
     assert_eq!(conf_err["message"], "Confluence unavailable", "{conf_err}");
 
     // 3. Direct search::run with unconfigured Config isolates credential error & skips unconfigured Bitbucket
@@ -85,7 +84,7 @@ fn search_fans_out_in_parallel_and_isolates_product_failures() {
             .unwrap()
             .contains("no email configured")
     );
-    assert_eq!(cfg_err["jira"]["error"]["category"], "config");
+    assert_eq!(cfg_err["jira"]["error"]["code"], "config");
     assert!(cfg_err.get("bitbucket").is_none());
 
     // Explicit `--only bitbucket` includes bitbucket error even when unconfigured

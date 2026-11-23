@@ -1,10 +1,19 @@
-//! Confluence Cloud (v1 CQL search, v2 content/spaces), shaped after twg's
-//! `confluence search|content|space` commands.
+//! Confluence Cloud: REST v2 for content and spaces, v1 where v2 has no
+//! endpoint (CQL search, labels on content, watches, templates, restore).
+//!
+//! Bodies are read and written as ADF (`atlas_doc_format`) and shown as
+//! Markdown through [`crate::markup`]. Storage format is only ever sent
+//! unchanged: either a body the caller passed as `--body-format storage`,
+//! after [`crate::markup::storage::check`], or the server's own storage
+//! body sent back as it was read (title changes, restores, publishing a
+//! draft). Nothing is converted to storage.
 
-use crate::client::Client;
+use crate::client::{ApiError, Client, ErrorKind};
 use crate::markup::{
-    TextFormat, adf_to_storage, quote, storage_to_text, strip_highlight, to_storage,
+    Body, BodyFormat, Loss, decode_entities, quote, render_markdown, strip_highlight,
+    unrepresentable,
 };
+use crate::output::notes;
 use crate::time;
 use anyhow::{Result, anyhow, bail};
 use clap::ValueEnum;
@@ -14,14 +23,14 @@ pub mod attachments;
 pub mod comments;
 pub mod edits;
 pub mod extras;
-pub mod formats;
 pub mod history;
 pub mod labels;
 pub mod lifecycle;
+pub mod records;
 pub mod sections;
 pub mod tree;
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
 }
 
@@ -33,56 +42,32 @@ pub enum ContentType {
 }
 
 impl ContentType {
-    fn collection(self) -> &'static str {
+    pub(crate) fn collection(self) -> &'static str {
         match self {
             ContentType::Page => "pages",
             ContentType::Blogpost => "blogposts",
         }
     }
-}
 
-/// `--detail` for `content get` (twg: summary by default, full for editing).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
-pub enum Detail {
-    #[default]
-    Summary,
-    /// Headings only, with their ADF `localId`s and word counts
-    Outline,
-    Full,
-}
-
-/// `--format` for reading bodies: raw storage HTML, or markdown-ish text.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
-pub enum ReadFormat {
-    #[default]
-    Html,
-    #[value(alias = "markdown")]
-    Md,
-    /// The ADF document as JSON, with node `localId`s for `--edits`
-    /// (atlx extra; hidden from the value list because only page and blog
-    /// post reads have it)
-    #[value(hide = true)]
-    Adf,
-}
-
-/// The `body-format` a read asks Confluence v2 for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BodyFormat {
-    Storage,
-    Adf,
-}
-
-impl BodyFormat {
-    fn param(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
-            BodyFormat::Storage => "storage",
-            BodyFormat::Adf => "atlas_doc_format",
+            ContentType::Page => "page",
+            ContentType::Blogpost => "blogpost",
         }
     }
 }
 
+/// The `body-format` query value a read in `format` asks for: storage for
+/// storage, ADF for everything else.
+pub(crate) fn body_param(format: BodyFormat) -> &'static str {
+    match format {
+        BodyFormat::Storage => "storage",
+        _ => "atlas_doc_format",
+    }
+}
+
 /// The ADF document in a v2 response fetched with `atlas_doc_format`.
-fn adf_body(v: &Value) -> Value {
+pub(crate) fn adf_body(v: &Value) -> Value {
     let raw = &v["body"]["atlas_doc_format"]["value"];
     let doc = match raw {
         Value::String(s) => serde_json::from_str(s).ok(),
@@ -91,6 +76,59 @@ fn adf_body(v: &Value) -> Value {
     };
     doc.filter(Value::is_object)
         .unwrap_or_else(|| json!({"type": "doc", "version": 1, "content": []}))
+}
+
+/// Plain text of an ADF document: one line per top-level block.
+fn adf_text(doc: &Value) -> String {
+    doc["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(sections::adf_plain)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Render an ADF document in a read format. Markdown that cannot show a
+/// node marks it and adds a `lossy_body` warning naming `what`.
+pub(crate) fn render_adf(doc: &Value, format: BodyFormat, what: &str) -> Value {
+    match format {
+        BodyFormat::Adf => doc.clone(),
+        BodyFormat::Plain => adf_text(doc).into(),
+        BodyFormat::Markdown | BodyFormat::Storage => {
+            let r = render_markdown(doc);
+            warn_lossy(&r.lossy, what);
+            r.text.into()
+        }
+    }
+}
+
+/// The `lossy_body` warning for `what` (e.g. `page 123`).
+pub(crate) fn warn_lossy(lossy: &[Loss], what: &str) {
+    if let Some(mut w) = crate::markup::lossy_warning(lossy) {
+        w["input"] = what.into();
+        notes::warn_value(w);
+    }
+}
+
+/// The body of a v2 object read with [`body_param`]`(format)`, rendered.
+pub(crate) fn rendered_body(v: &Value, format: BodyFormat, what: &str) -> Value {
+    match format {
+        BodyFormat::Storage => v["body"]["storage"]["value"].clone(),
+        _ => render_adf(&adf_body(v), format, what),
+    }
+}
+
+/// The `body` object a v2 write sends for `b`.
+pub(crate) fn body_value(b: &Body) -> Result<Value> {
+    Ok(match b {
+        Body::Adf(doc) => json!({
+            "representation": "atlas_doc_format",
+            "value": serde_json::to_string(doc)?,
+        }),
+        Body::Storage(s) => json!({"representation": "storage", "value": s}),
+    })
 }
 
 /// A content ID, or a Confluence URL containing one.
@@ -117,10 +155,14 @@ pub fn content_id(r: &str) -> Result<String> {
     {
         return Ok(id.to_string());
     }
-    bail!("'{r}' is not a Confluence content ID or URL (title lookup isn't supported yet)")
+    Err(ApiError::usage(format!(
+        "'{r}' is not a Confluence content ID or URL (pass --space to look it up by exact title)"
+    ))
+    .into())
 }
 
-fn next_cursor(v: &Value) -> Value {
+/// The `cursor` parameter of a v2 `_links.next` link.
+pub(crate) fn next_cursor(v: &Value) -> Value {
     v["_links"]["next"]
         .as_str()
         .and_then(|n| n.split(['?', '&']).find_map(|p| p.strip_prefix("cursor=")))
@@ -132,9 +174,14 @@ fn next_cursor(v: &Value) -> Value {
         .map_or(Value::Null, Value::from)
 }
 
+fn is_not_found(e: &anyhow::Error) -> bool {
+    ApiError::find(e).is_some_and(|a| a.kind == ErrorKind::NotFound)
+}
+
 // --- search ------------------------------------------------------------------
 
-/// `confluence search query --cql`
+/// One page of a CQL search (v1 `/rest/api/search`): `{results,
+/// nextCursor}`, highlight markers removed from titles and excerpts.
 pub fn search_query(
     c: &Client,
     cql: &str,
@@ -148,14 +195,17 @@ pub fn search_query(
         q.push(("cursor", cur));
     }
     let mut v = c.get("/rest/api/search", &q)?;
-    // twg passes REST's search results through; highlight markers are
-    // removed so titles and excerpts read as plain text.
+    let base = v["_links"]["base"].as_str().unwrap_or(c.base()).to_string();
     if let Some(results) = v["results"].as_array_mut() {
         for r in results {
             for k in ["title", "excerpt"] {
+                // Search returns them HTML-escaped, with highlight markers.
                 if let Some(t) = r[k].as_str() {
-                    r[k] = strip_highlight(t).trim().into();
+                    r[k] = decode_entities(&strip_highlight(t)).trim().into();
                 }
+            }
+            if let Some(u) = r["url"].as_str().filter(|u| !u.is_empty()) {
+                r["externalUrl"] = format!("{base}{u}").into();
             }
             if !excerpt && let Some(m) = r.as_object_mut() {
                 m.shift_remove("excerpt");
@@ -170,7 +220,8 @@ pub fn search_query(
     Ok(v)
 }
 
-/// The CQL that `confluence search text` runs: recent pages and blog posts.
+/// The CQL that a free-text `confluence search` runs: pages and blog posts,
+/// most recently changed first.
 pub fn text_cql(
     text: &str,
     updated_since: Option<&str>,
@@ -189,30 +240,52 @@ pub fn text_cql(
 
 // --- content -----------------------------------------------------------------
 
-/// Try a Confluence v2 operation on a page, falling back to a blog post on 404.
-fn try_content<T>(mut f: impl FnMut(ContentType) -> Result<T>) -> Result<(ContentType, T)> {
+/// Run a v2 operation on a page, falling back to a blog post on 404.
+pub(crate) fn try_content<T>(
+    mut f: impl FnMut(ContentType) -> Result<T>,
+) -> Result<(ContentType, T)> {
     match f(ContentType::Page) {
         Ok(v) => Ok((ContentType::Page, v)),
-        Err(e) if e.to_string().contains("HTTP 404") => {
-            Ok((ContentType::Blogpost, f(ContentType::Blogpost)?))
-        }
+        Err(e) if is_not_found(&e) => Ok((ContentType::Blogpost, f(ContentType::Blogpost)?)),
         Err(e) => Err(e),
     }
 }
 
-/// Fetch a page, falling back to blog posts. Returns the content type too.
-fn fetch(c: &Client, id: &str, draft: bool, bf: BodyFormat) -> Result<(ContentType, Value)> {
-    let mut q = vec![("body-format", bf.param())];
+/// [`try_content`], or straight to `kind` when the caller named it.
+pub(crate) fn with_kind<T>(
+    kind: Option<ContentType>,
+    mut f: impl FnMut(ContentType) -> Result<T>,
+) -> Result<(ContentType, T)> {
+    match kind {
+        Some(k) => Ok((k, f(k)?)),
+        None => try_content(f),
+    }
+}
+
+/// Fetch a page or blog post with its body in `body_format` (a v2
+/// `body-format` value).
+fn fetch(
+    c: &Client,
+    id: &str,
+    kind: Option<ContentType>,
+    draft: bool,
+    body_format: &str,
+) -> Result<(ContentType, Value)> {
+    let mut q = vec![("body-format", body_format)];
     if draft {
         q.push(("get-draft", "true"));
     }
-    try_content(|kind| c.get(&format!("/api/v2/{}/{}", kind.collection(), enc(id)), &q))
+    with_kind(kind, |k| {
+        c.get(&format!("/api/v2/{}/{}", k.collection(), enc(id)), &q)
+    })
 }
 
-/// `snapshotToken` and `externalUrl` added to a REST v2 content object.
-fn with_links(c: &Client, mut v: Value) -> Value {
+/// `type` and `externalUrl` added to a REST v2 content object.
+pub(crate) fn with_links(c: &Client, mut v: Value, kind: ContentType) -> Value {
     if v.is_object() {
-        v["snapshotToken"] = snapshot(&v);
+        if v.get("type").is_none_or(Value::is_null) {
+            v["type"] = kind.name().into();
+        }
         v["externalUrl"] = optional_content_url(c, &v);
     }
     v
@@ -220,7 +293,7 @@ fn with_links(c: &Client, mut v: Value) -> Value {
 
 /// `{results, nextCursor}` from a REST v2 list response, each result passed
 /// through `f`.
-fn listing(v: &Value, f: impl Fn(&Value) -> Value) -> Value {
+pub(crate) fn listing(v: &Value, f: impl Fn(&Value) -> Value) -> Value {
     let results: Vec<Value> = v["results"]
         .as_array()
         .into_iter()
@@ -230,7 +303,7 @@ fn listing(v: &Value, f: impl Fn(&Value) -> Value) -> Value {
     json!({"results": results, "nextCursor": next_cursor(v)})
 }
 
-fn content_url(c: &Client, v: &Value) -> String {
+pub(crate) fn content_url(c: &Client, v: &Value) -> String {
     let base = v["_links"]["base"].as_str().unwrap_or(c.base());
     format!(
         "{base}{}",
@@ -238,7 +311,7 @@ fn content_url(c: &Client, v: &Value) -> String {
     )
 }
 
-fn optional_content_url(c: &Client, v: &Value) -> Value {
+pub(crate) fn optional_content_url(c: &Client, v: &Value) -> Value {
     match v["_links"]["webui"].as_str().filter(|s| !s.is_empty()) {
         Some(webui) => format!(
             "{}{webui}",
@@ -249,194 +322,112 @@ fn optional_content_url(c: &Client, v: &Value) -> Value {
     }
 }
 
-fn format_body(storage: &str, format: ReadFormat) -> Value {
-    match format {
-        // Storage-only bodies (comments) have no ADF; `adf` gives the HTML.
-        ReadFormat::Html | ReadFormat::Adf => storage.into(),
-        ReadFormat::Md => storage_to_text(storage).into(),
-    }
-}
-
-/// The version number doubles as atlx's snapshot token for optimistic updates.
-fn snapshot(v: &Value) -> Value {
-    v["version"]["number"]
-        .as_u64()
-        .map_or(Value::Null, |n| n.to_string().into())
-}
-
-pub struct GetOpts<'a> {
-    pub detail: Detail,
-    pub format: ReadFormat,
-    pub draft: bool,
-    pub reference_space: Option<&'a str>,
-    /// `--section` headings; when non-empty only those sections are returned.
-    pub sections: &'a [String],
-}
-
-impl GetOpts<'_> {
-    fn body_format(&self) -> BodyFormat {
-        match (self.detail, self.format) {
-            (Detail::Outline, _) => BodyFormat::Adf,
-            (Detail::Full, ReadFormat::Adf) if self.sections.is_empty() => BodyFormat::Adf,
-            _ => BodyFormat::Storage,
-        }
-    }
-}
-
-fn resolve_and_fetch(c: &Client, reference: &str, o: &GetOpts) -> Result<(ContentType, Value)> {
-    let bf = o.body_format();
+/// Fetch by ID or URL, or by exact title in `space`.
+fn resolve_and_fetch(
+    c: &Client,
+    reference: &str,
+    space: Option<&str>,
+    kind: Option<ContentType>,
+    draft: bool,
+    body_format: &str,
+) -> Result<(ContentType, Value)> {
     if let Ok(id) = content_id(reference) {
-        return fetch(c, &id, o.draft, bf);
+        return fetch(c, &id, kind, draft, body_format);
     }
-    let Some(ref_space) = o.reference_space else {
-        bail!(
-            "'{reference}' is not a Confluence content ID or URL (pass --reference-space to look up by title)"
-        );
+    let Some(space) = space else {
+        return Err(content_id(reference).unwrap_err());
     };
-    let sid = space_id(c, ref_space)?;
+    let sid = space_id(c, space)?;
     let mut q = vec![
         ("space-id", sid.as_str()),
         ("title", reference),
-        ("body-format", bf.param()),
+        ("body-format", body_format),
     ];
-    if o.draft {
+    if draft {
         q.push(("status", "draft"));
     }
-    for kind in [ContentType::Page, ContentType::Blogpost] {
-        let v = c.get(&format!("/api/v2/{}", kind.collection()), &q)?;
+    let kinds = match kind {
+        Some(k) => vec![k],
+        None => vec![ContentType::Page, ContentType::Blogpost],
+    };
+    for k in kinds {
+        let v = c.get(&format!("/api/v2/{}", k.collection()), &q)?;
         if let Some(item) = v["results"].as_array().and_then(|a| a.first()) {
-            return Ok((kind, item.clone()));
+            return Ok((k, item.clone()));
         }
     }
-    bail!("no Confluence page or blogpost titled '{reference}' in space '{ref_space}'")
+    Err(ApiError::new(
+        ErrorKind::NotFound,
+        format!("no page or blog post titled '{reference}' in space '{space}'"),
+    )
+    .into())
 }
 
 /// The content ID for a reference: an ID or URL as is, otherwise an exact
-/// title looked up in `reference_space`.
-pub fn resolve_id(c: &Client, reference: &str, reference_space: Option<&str>) -> Result<String> {
+/// title looked up in `space`.
+pub fn resolve_id(c: &Client, reference: &str, space: Option<&str>) -> Result<String> {
     if let Ok(id) = content_id(reference) {
         return Ok(id);
     }
-    let o = GetOpts {
-        detail: Detail::Summary,
-        format: ReadFormat::Html,
-        draft: false,
-        reference_space,
-        sections: &[],
-    };
-    let (_, v) = resolve_and_fetch(c, reference, &o)?;
+    let (_, v) = resolve_and_fetch(c, reference, space, None, false, "storage")?;
     v["id"]
         .as_str()
         .map(String::from)
         .ok_or_else(|| anyhow!("Confluence returned no ID for '{reference}'"))
 }
 
-/// `confluence content get --format url`: the content's web address.
-pub fn get_url(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
-    let (kind, v) = resolve_and_fetch(c, reference, o)?;
-    Ok(json!({
-        "id": v["id"],
-        "type": format!("{kind:?}").to_lowercase(),
-        "title": v["title"],
-        "url": content_url(c, &v),
-    }))
+/// What `page get` reads.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GetOpts<'a> {
+    pub format: BodyFormat,
+    pub draft: bool,
+    /// Space key or ID for looking a reference up by exact title.
+    pub space: Option<&'a str>,
+    /// Skip probing page vs blog post.
+    pub kind: Option<ContentType>,
+    /// `--section` headings; when non-empty only those sections are returned.
+    pub sections: &'a [String],
+    /// Return the heading outline instead of the body.
+    pub outline: bool,
 }
 
-/// `confluence content get`
+/// `page get`: the REST v2 object with `type`, `externalUrl`, and `body`
+/// replaced by the body in `o.format` (or `outline` with `o.outline`).
 pub fn get(c: &Client, reference: &str, o: &GetOpts) -> Result<Value> {
-    let (kind, v) = resolve_and_fetch(c, reference, o)?;
-    let storage = v["body"]["storage"]["value"].as_str().unwrap_or_default();
-    let mut out = json!({
-        "id": v["id"],
-        "type": format!("{kind:?}").to_lowercase(),
-        "title": v["title"],
-        "status": v["status"],
-        "spaceId": v["spaceId"],
-        "parentId": v["parentId"],
-        "externalUrl": content_url(c, &v),
-        "detail": format!("{:?}", o.detail).to_lowercase(),
-        "snapshotToken": snapshot(&v),
-        "version": {"number": v["version"]["number"], "createdAt": v["version"]["createdAt"]},
-    });
-    match o.detail {
-        Detail::Summary => {
-            let text = storage_to_text(storage);
-            let excerpt: String = text.chars().take(400).collect();
-            let excerpt = if excerpt.len() < text.len() {
-                format!("{excerpt}…")
-            } else {
-                excerpt
-            };
-            out["summary"] = json!({
-                "excerpt": excerpt,
-                "wordCount": text.split_whitespace().count(),
-                "sectionCount": section_count(storage),
-            });
-        }
-        Detail::Outline => {
-            out["outline"] = sections::outline(&adf_body(&v)).into();
-        }
-        Detail::Full if !o.sections.is_empty() => {
-            let picked = sections::select_storage(storage, o.sections)?;
-            let (format, value) = match o.format {
-                ReadFormat::Md => (
-                    "md",
-                    picked
-                        .iter()
-                        .map(|s| storage_to_text(&storage[s.start..s.end]))
-                        .collect::<Vec<_>>()
-                        .join("\n\n"),
-                ),
-                _ => (
-                    "html",
-                    picked.iter().map(|s| &storage[s.start..s.end]).collect(),
-                ),
-            };
-            let picked: Vec<Value> = picked
-                .iter()
-                .map(|s| {
-                    json!({
-                        "level": s.heading.level,
-                        "text": s.heading.text,
-                        "anchor": sections::anchor(&s.heading.text),
-                    })
-                })
-                .collect();
-            out["body"] = json!({"format": format, "value": value, "sections": picked});
-        }
-        Detail::Full if o.format == ReadFormat::Adf => {
-            let doc = adf_body(&v);
-            out["body"] = json!({
-                "format": "adf",
-                "value": serde_json::to_string_pretty(&doc).unwrap_or_default(),
-            });
-        }
-        Detail::Full => {
-            out["body"] = json!({
-                "format": format!("{:?}", o.format).to_lowercase(),
-                "value": format_body(storage, o.format),
-            });
-        }
+    let storage = o.format == BodyFormat::Storage;
+    if storage && (o.outline || !o.sections.is_empty()) {
+        return Err(ApiError::usage(
+            "--outline and --section read the ADF body; drop --body-format storage",
+        )
+        .into());
     }
+    let bf = body_param(o.format);
+    let (kind, v) = resolve_and_fetch(c, reference, o.space, o.kind, o.draft, bf)?;
+    let id = v["id"].as_str().unwrap_or(reference).to_string();
+    let mut out = with_links(c, v, kind);
+    let body = if o.outline {
+        out["outline"] = sections::outline(&adf_body(&out)).into();
+        Value::Null
+    } else if storage {
+        out["body"]["storage"]["value"].clone()
+    } else {
+        let mut doc = adf_body(&out);
+        if !o.sections.is_empty() {
+            doc = sections::select(&doc, o.sections)?;
+        }
+        render_adf(&doc, o.format, &format!("{} {id}", kind.name()))
+    };
+    out["body"] = body;
+    out["bodyFormat"] = if o.outline {
+        Value::Null
+    } else {
+        format!("{:?}", o.format).to_lowercase().into()
+    };
     Ok(out)
 }
 
-/// Number of headings (`<h1>` to `<h6>`) in a storage body.
-fn section_count(storage: &str) -> usize {
-    let lower = storage.to_ascii_lowercase();
-    (1..=6)
-        .map(|n| {
-            let tag = format!("<h{n}");
-            lower
-                .match_indices(&tag)
-                .filter(|(i, _)| matches!(lower.as_bytes().get(i + tag.len()), Some(b'>' | b' ')))
-                .count()
-        })
-        .sum()
-}
-
 /// Space key or numeric ID -> numeric ID.
-fn space_id(c: &Client, space: &str) -> Result<String> {
+pub(crate) fn space_id(c: &Client, space: &str) -> Result<String> {
     if !space.is_empty() && space.bytes().all(|b| b.is_ascii_digit()) {
         return Ok(space.to_string());
     }
@@ -454,33 +445,38 @@ fn space_id(c: &Client, space: &str) -> Result<String> {
         })
         .and_then(|s| s["id"].as_str())
         .map(String::from)
-        .ok_or_else(|| anyhow!("no Confluence space with key '{space}'"))
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorKind::NotFound,
+                format!("no Confluence space with key '{space}'"),
+            )
+            .into()
+        })
 }
 
 pub struct NewContent<'a> {
     pub space: &'a str,
     pub content_type: ContentType,
     pub title: &'a str,
-    pub body: &'a str,
-    pub format: TextFormat,
+    pub body: &'a Body,
     pub parent: Option<&'a str>,
     pub draft: bool,
     /// Only the creator can see and edit it.
     pub private: bool,
 }
 
-/// `confluence content create`
+/// `page create`
 pub fn create(c: &Client, n: NewContent) -> Result<Value> {
+    if n.parent.is_some() && n.content_type == ContentType::Blogpost {
+        return Err(ApiError::usage("blog posts can't have a parent").into());
+    }
     let mut req = json!({
         "spaceId": space_id(c, n.space)?,
         "status": if n.draft { "draft" } else { "current" },
         "title": n.title,
-        "body": {"representation": "storage", "value": to_storage(n.body, n.format)},
+        "body": body_value(n.body)?,
     });
     if let Some(p) = n.parent {
-        if n.content_type == ContentType::Blogpost {
-            bail!("blog posts can't have a parent");
-        }
         req["parentId"] = content_id(p)?.into();
     }
     let q: &[(&str, &str)] = if n.private {
@@ -490,91 +486,240 @@ pub fn create(c: &Client, n: NewContent) -> Result<Value> {
     };
     let path = format!("/api/v2/{}", n.content_type.collection());
     let v = c.request("POST", &path, q, Some(&req))?;
-    Ok(with_links(c, v))
+    Ok(with_links(c, v, n.content_type))
 }
 
-pub struct Edit<'a> {
-    pub title: Option<&'a str>,
-    pub body: Option<(&'a str, TextFormat)>,
-    pub version_message: Option<&'a str>,
+/// What a version write changes besides the body.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VersionOpts<'a> {
+    /// The version the caller read and edited (`--if-version`).
+    pub if_version: u64,
+    pub message: Option<&'a str>,
     pub minor_edit: bool,
-    pub snapshot_token: Option<&'a str>,
-    pub dry_run: bool,
     pub draft: bool,
-    /// `--edits`/`--edits-file` operations, applied to the page's ADF body.
-    pub edits: Option<&'a [edits::Op]>,
+    pub kind: Option<ContentType>,
 }
 
-/// `confluence content update`: bumps the version, keeping whatever isn't given.
-/// A `--snapshot-token` that doesn't match the current version is rejected.
-pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
-    if e.title.is_none() && e.body.is_none() && e.edits.is_none() {
-        bail!("nothing to update; pass --title, --body/--body-file or --edits/--edits-file");
-    }
-    if e.body.is_some() && e.edits.is_some() {
-        bail!("pass either a full body or --edits, not both");
-    }
-    let id = content_id(reference)?;
-    let bf = if e.edits.is_some() {
-        BodyFormat::Adf
+/// `page update`: what changes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Update<'a> {
+    pub title: Option<&'a str>,
+    pub body: Option<&'a Body>,
+    /// The body was written in Markdown or plain text, so the current body
+    /// must not hold anything those cannot express.
+    pub check_loss: bool,
+    /// Replace it anyway (`--allow-lossy`, which also needs `--yes`).
+    pub allow_lossy: bool,
+}
+
+/// A checked write, ready to send with [`send`].
+#[derive(Clone, Debug)]
+pub struct Prepared {
+    pub kind: ContentType,
+    pub id: String,
+    /// The version the write replaces.
+    pub version: u64,
+    pub request: Value,
+    /// The ADF bodies before and after, when both are ADF (for the
+    /// dry-run diff).
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+    pub title_before: Value,
+}
+
+/// The `conflict` error for a stale `--if-version`.
+fn stale(kind: ContentType, id: &str, current: u64, edited: u64) -> anyhow::Error {
+    ApiError::new(
+        ErrorKind::Conflict,
+        format!(
+            "{} {id} is at version {current}, you edited version {edited}",
+            kind.name()
+        ),
+    )
+    .with_hint(format!(
+        "re-read it (`atlx confluence page get {id}`), re-apply your change, pass --if-version {current}"
+    ))
+    .into()
+}
+
+/// The refusal for a Markdown replace that would destroy `losses`.
+pub(crate) fn lossy_replace(
+    what: &str,
+    id: &str,
+    version: u64,
+    losses: Vec<Loss>,
+) -> anyhow::Error {
+    let nodes = crate::markup::loss_nodes(&losses);
+    let mut e = ApiError::refused(format!(
+        "{what} {id} has content Markdown cannot express ({}); replacing its body with Markdown would destroy it",
+        nodes.join(", ")
+    ))
+    .with_hint(if what == "comment" {
+        format!(
+            "read it with `atlx confluence page comment get {id} --body-format adf` and pass the whole body with --body-format adf; --allow-lossy --yes replaces it anyway"
+        )
     } else {
-        BodyFormat::Storage
-    };
-    let (kind, cur) = fetch(c, &id, e.draft, bf)?;
+        format!(
+            "change only what you mean to with `atlx confluence page edit {id} --if-version {version} --edits ...`, or pass the whole body with --body-format adf; --allow-lossy --yes replaces it anyway"
+        )
+    });
+    e.losses = serde_json::to_value(&losses).ok();
+    e.into()
+}
+
+fn current_version(kind: ContentType, id: &str, cur: &Value, edited: u64) -> Result<u64> {
     let version = cur["version"]["number"]
         .as_u64()
-        .ok_or_else(|| anyhow!("content {id} has no version"))?;
-    if let Some(tok) = e.snapshot_token
-        && tok != version.to_string()
-    {
-        bail!(
-            "content {id} changed since your snapshot (token {tok}, current {version}); re-read it and retry"
-        );
+        .ok_or_else(|| anyhow!("{} {id} came back without its version", kind.name()))?;
+    if version != edited {
+        return Err(stale(kind, id, version, edited));
     }
-    // Targeted edits: apply them to the current ADF, all or nothing.
-    let mut preview = None;
-    let body = match (e.body, e.edits) {
-        (Some((b, f)), _) => json!({"representation": "storage", "value": to_storage(b, f)}),
-        (None, Some(ops)) => {
-            let before = adf_body(&cur);
-            let after = edits::apply(&before, ops)?;
-            preview = Some((before, after.clone()));
-            json!({
-                "representation": "atlas_doc_format",
-                "value": serde_json::to_string(&after)?,
-            })
-        }
-        (None, None) => json!({
-            "representation": "storage",
-            "value": cur["body"]["storage"]["value"].as_str().unwrap_or_default(),
-        }),
-    };
-    let req = json!({
-        "id": id,
-        "status": if e.draft { "draft" } else { "current" },
-        "title": e.title.unwrap_or(cur["title"].as_str().unwrap_or_default()),
-        "body": body,
-        "version": {"number": version + 1, "message": e.version_message.unwrap_or(""), "minorEdit": e.minor_edit},
-    });
-    if e.dry_run {
-        let mut out = json!({"dryRun": true, "id": id, "fromVersion": version, "request": req});
-        if let Some((before, after)) = preview {
-            out["body"] = json!({"format": "html", "value": adf_to_storage(&after)});
-            out["diff"] = edits::unified_diff(
-                &edits::render_lines(&before),
-                &edits::render_lines(&after),
-                &format!("{id} version {version}"),
-                &format!("{id} after edits"),
-            )
-            .into();
-        }
-        return Ok(out);
-    }
-    let v = c.put(&format!("/api/v2/{}/{}", kind.collection(), enc(&id)), &req)?;
-    Ok(with_links(c, v))
+    Ok(version)
 }
 
-/// `confluence content list --space`
+fn version_request(id: &str, title: &str, body: Value, version: u64, o: &VersionOpts) -> Value {
+    json!({
+        "id": id,
+        "status": if o.draft { "draft" } else { "current" },
+        "title": title,
+        "body": body,
+        "version": {
+            "number": version + 1,
+            "message": o.message.unwrap_or(""),
+            "minorEdit": o.minor_edit,
+        },
+    })
+}
+
+/// Check and build a `page update`. Nothing is sent: a stale version is a
+/// `conflict`, a lossy Markdown replace is `refused`.
+pub fn prepare_update(
+    c: &Client,
+    reference: &str,
+    u: &Update,
+    o: &VersionOpts,
+) -> Result<Prepared> {
+    if u.title.is_none() && u.body.is_none() {
+        return Err(
+            ApiError::usage("nothing to update; pass --title or --body/--body-file").into(),
+        );
+    }
+    let id = content_id(reference)?;
+    // A new body is checked against the current ADF; a title change sends
+    // the current storage body back exactly as it was read.
+    let bf = if u.body.is_some() {
+        "atlas_doc_format"
+    } else {
+        "storage"
+    };
+    let (kind, cur) = fetch(c, &id, o.kind, o.draft, bf)?;
+    let version = current_version(kind, &id, &cur, o.if_version)?;
+    let (body, before, after) = match u.body {
+        Some(b) => {
+            let before = adf_body(&cur);
+            if u.check_loss && !u.allow_lossy {
+                let losses = unrepresentable(&before);
+                if !losses.is_empty() {
+                    return Err(lossy_replace(kind.name(), &id, version, losses));
+                }
+            }
+            let after = match b {
+                Body::Adf(doc) => Some(doc.clone()),
+                Body::Storage(_) => None,
+            };
+            (body_value(b)?, Some(before), after)
+        }
+        None => {
+            let storage = cur["body"]["storage"]["value"].as_str().ok_or_else(|| {
+                anyhow!(
+                    "{} {id} came back without its body; not changing it",
+                    kind.name()
+                )
+            })?;
+            (
+                json!({"representation": "storage", "value": storage}),
+                None,
+                None,
+            )
+        }
+    };
+    let title = u.title.or(cur["title"].as_str()).unwrap_or_default();
+    Ok(Prepared {
+        kind,
+        id: id.clone(),
+        version,
+        request: version_request(&id, title, body, version, o),
+        before,
+        after,
+        title_before: cur["title"].clone(),
+    })
+}
+
+/// Check and build a `page edit`: the operations applied to the current
+/// ADF body. Nodes the operations do not target are sent back unchanged.
+pub fn prepare_edit(
+    c: &Client,
+    reference: &str,
+    ops: &[edits::Op],
+    title: Option<&str>,
+    o: &VersionOpts,
+) -> Result<Prepared> {
+    let id = content_id(reference)?;
+    let (kind, cur) = fetch(c, &id, o.kind, o.draft, "atlas_doc_format")?;
+    let version = current_version(kind, &id, &cur, o.if_version)?;
+    let before = adf_body(&cur);
+    let after = edits::apply(&before, ops)?;
+    let body = json!({
+        "representation": "atlas_doc_format",
+        "value": serde_json::to_string(&after)?,
+    });
+    let title = title.or(cur["title"].as_str()).unwrap_or_default();
+    Ok(Prepared {
+        kind,
+        id: id.clone(),
+        version,
+        request: version_request(&id, title, body, version, o),
+        before: Some(before),
+        after: Some(after),
+        title_before: cur["title"].clone(),
+    })
+}
+
+/// Send a prepared write.
+pub fn send(c: &Client, p: &Prepared) -> Result<Value> {
+    let v = c.put(
+        &format!("/api/v2/{}/{}", p.kind.collection(), enc(&p.id)),
+        &p.request,
+    )?;
+    Ok(with_links(c, v, p.kind))
+}
+
+/// `page update`: [`prepare_update`] then [`send`].
+pub fn update(c: &Client, reference: &str, u: &Update, o: &VersionOpts) -> Result<Value> {
+    send(c, &prepare_update(c, reference, u, o)?)
+}
+
+/// A unified diff of a prepared write's body, as Markdown, when both sides
+/// are ADF; the title change is a header line.
+pub fn diff(p: &Prepared) -> Option<String> {
+    let (Some(a), Some(b)) = (&p.before, &p.after) else {
+        return None;
+    };
+    let lines =
+        |d: &Value| -> Vec<String> { render_markdown(d).text.lines().map(String::from).collect() };
+    let mut out = edits::unified_diff(
+        &lines(a),
+        &lines(b),
+        &format!("{} version {}", p.id, p.version),
+        &format!("{} version {}", p.id, p.version + 1),
+    );
+    if p.request["title"] != p.title_before {
+        out = format!("title: {} -> {}\n{out}", p.title_before, p.request["title"]);
+    }
+    Some(out)
+}
+
+/// One page of `page list --space`.
 pub fn list(
     c: &Client,
     space: &str,
@@ -600,23 +745,10 @@ pub fn list(
         ),
         &q,
     )?;
-    Ok(listing(&v, |p| with_links(c, p.clone())))
+    Ok(listing(&v, |p| with_links(c, p.clone(), kind)))
 }
 
-/// A REST v2 comment with its body in the requested format as
-/// `body: {format, value}` and its `externalUrl`.
-fn format_comment(c: &Client, cm: &Value, format: ReadFormat) -> Value {
-    let storage = cm["body"]["storage"]["value"].as_str().unwrap_or_default();
-    let mut o = cm.clone();
-    o["body"] = json!({
-        "format": format!("{format:?}").to_lowercase(),
-        "value": format_body(storage, format),
-    });
-    o["externalUrl"] = optional_content_url(c, cm);
-    o
-}
-
-/// `confluence content children`
+/// One page of `page list --parent`: the page's child pages.
 pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>) -> Result<Value> {
     let id = content_id(reference)?;
     let limit = limit.clamp(1, 250).to_string();
@@ -625,45 +757,24 @@ pub fn children(c: &Client, reference: &str, limit: usize, cursor: Option<&str>)
         q.push(("cursor", cur));
     }
     let mut v = c.get(&format!("/api/v2/pages/{}/direct-children", enc(&id)), &q)?;
-    // The list is mixed; this command lists pages, so a page of results can
-    // come back shorter than the limit and still have a cursor.
+    // The list is mixed (whiteboards, folders, ...); this one lists pages,
+    // so a page of results can be shorter than the limit and still go on.
     if let Some(items) = v["results"].as_array_mut() {
         items.retain(|i| i["type"] == "page");
     }
     Ok(listing(&v, |p| {
-        let mut p = p.clone();
-        p["externalUrl"] = optional_content_url(c, &p);
+        let mut p = with_links(c, p.clone(), ContentType::Page);
+        if p["parentId"].is_null() {
+            p["parentId"] = id.clone().into();
+        }
         p
-    }))
-}
-
-/// `confluence content labels` (old atlx form; see [`labels::list`]).
-pub fn labels(c: &Client, reference: &str, limit: usize) -> Result<Value> {
-    labels::list(c, reference, None, None, limit)
-}
-
-/// `confluence content delete`
-pub fn delete(c: &Client, reference: &str, purge: bool) -> Result<Value> {
-    let id = content_id(reference)?;
-    let q: Vec<(&str, &str)> = if purge {
-        vec![("purge", "true")]
-    } else {
-        Vec::new()
-    };
-    let (kind, _) =
-        try_content(|k| c.delete(&format!("/api/v2/{}/{}", k.collection(), enc(&id)), &q))?;
-    Ok(json!({
-        "id": id,
-        "type": format!("{kind:?}").to_lowercase(),
-        "deleted": true,
-        "purged": purge,
     }))
 }
 
 // --- spaces ------------------------------------------------------------------
 
-/// A REST v2 space with its `externalUrl`.
-fn space_summary(c: &Client, s: &Value) -> Value {
+/// A REST space with its `externalUrl`.
+pub(crate) fn space_summary(c: &Client, s: &Value) -> Value {
     let mut o = s.clone();
     if o.is_object() {
         o["externalUrl"] = format!(
@@ -676,7 +787,7 @@ fn space_summary(c: &Client, s: &Value) -> Value {
     o
 }
 
-/// `confluence space list`
+/// One page of `space list`.
 pub fn spaces(
     c: &Client,
     kind: Option<&str>,
@@ -701,10 +812,13 @@ pub fn spaces(
     Ok(listing(&v, |s| space_summary(c, s)))
 }
 
-/// `confluence space get <key-or-id>`
+/// `space get <key-or-id>`
 pub fn space(c: &Client, identifier: &str) -> Result<Value> {
     let v = c.get(
-        &format!("/api/v2/spaces/{}", enc(&space_id(c, identifier)?)),
+        &format!(
+            "/api/v2/spaces/{}",
+            enc(&space_id(c, &lifecycle::exact_space(identifier)?)?)
+        ),
         &[("description-format", "plain")],
     )?;
     Ok(space_summary(c, &v))
@@ -724,11 +838,16 @@ pub fn space_labels(c: &Client, space_id: &str) -> Result<Value> {
         .collect())
 }
 
-/// `--labels` on `space get` / `space list`: add a `labels` array to one
-/// space summary, or to each space in a list's `results`.
+/// `--labels`: add a `labels` array to one space, or to each space in an
+/// array or a list's `results`.
 pub fn add_space_labels(c: &Client, v: &mut Value) -> Result<()> {
-    if let Some(results) = v["results"].as_array_mut() {
-        for s in results {
+    let items = match v {
+        Value::Array(a) => Some(a),
+        Value::Object(_) => v["results"].as_array_mut(),
+        _ => None,
+    };
+    if let Some(items) = items {
+        for s in items {
             add_space_labels(c, s)?;
         }
         return Ok(());
@@ -768,7 +887,7 @@ fn match_personal_space<'a>(user: &Value, spaces: &'a [Value]) -> Option<&'a Val
     None
 }
 
-/// `confluence space me`
+/// `space get --personal`: the signed-in user's personal space.
 pub fn space_me(c: &Client) -> Result<Value> {
     let user = c.get("/rest/api/user/current", &[])?;
     let mut cursor: Option<String> = None;
@@ -786,7 +905,7 @@ pub fn space_me(c: &Client) -> Result<Value> {
             return Ok(space_summary(c, matched));
         }
         match next_cursor(&v) {
-            Value::String(next) => cursor = Some(next),
+            Value::String(next) if Some(&next) != cursor.as_ref() => cursor = Some(next),
             _ => break,
         }
     }
@@ -800,82 +919,6 @@ pub fn space_me(c: &Client) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::{Arc, Mutex};
-
-    type MockReply = (u16, Value);
-    type RecordedReq = (String, String, String);
-
-    fn mock_client(
-        handler: impl Fn(&str, &str, &str) -> MockReply + Send + 'static,
-    ) -> (Client, Arc<Mutex<Vec<RecordedReq>>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let log_bg = Arc::clone(&log);
-        std::thread::spawn(move || {
-            for mut stream in listener.incoming().flatten() {
-                let mut buf = Vec::new();
-                let mut tmp = [0u8; 4096];
-                let mut header_end = None;
-                let mut content_len = 0usize;
-                loop {
-                    let n = stream.read(&mut tmp).unwrap_or(0);
-                    if n == 0 {
-                        break;
-                    }
-                    buf.extend_from_slice(&tmp[..n]);
-                    if header_end.is_none()
-                        && let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n")
-                    {
-                        header_end = Some(pos + 4);
-                        let hdrs = String::from_utf8_lossy(&buf[..pos]);
-                        content_len = hdrs
-                            .lines()
-                            .find_map(|l| {
-                                let (k, v) = l.split_once(':')?;
-                                k.eq_ignore_ascii_case("content-length")
-                                    .then(|| v.trim().parse().ok())
-                                    .flatten()
-                            })
-                            .unwrap_or(0);
-                    }
-                    if let Some(end) = header_end
-                        && buf.len() >= end + content_len
-                    {
-                        break;
-                    }
-                }
-                let end = header_end.unwrap_or(buf.len());
-                let head = String::from_utf8_lossy(&buf[..end]);
-                let mut first = head.lines().next().unwrap_or_default().split_whitespace();
-                let method = first.next().unwrap_or_default().to_string();
-                let target = first.next().unwrap_or_default().to_string();
-                let body = String::from_utf8_lossy(&buf[end..buf.len().min(end + content_len)])
-                    .to_string();
-                log_bg
-                    .lock()
-                    .unwrap()
-                    .push((method.clone(), target.clone(), body.clone()));
-                let (status, payload) = handler(&method, &target, &body);
-                let json = if payload.is_null() {
-                    String::new()
-                } else {
-                    payload.to_string()
-                };
-                let resp = format!(
-                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
-                    json.len()
-                );
-                let _ = stream.write_all(resp.as_bytes());
-            }
-        });
-        (
-            Client::new(format!("http://{addr}"), "u@x.com", "tok", Some(2000)),
-            log,
-        )
-    }
 
     #[test]
     fn content_ids_from_urls() {
@@ -897,7 +940,8 @@ mod tests {
             content_id("https://a.atlassian.net/wiki/pages/viewpage.action?pageId=4242").unwrap(),
             "4242"
         );
-        assert!(content_id("Some title").is_err());
+        let err = content_id("Some title").unwrap_err();
+        assert_eq!(ApiError::find(&err).unwrap().kind, ErrorKind::Usage);
     }
 
     #[test]
@@ -912,62 +956,6 @@ mod tests {
     }
 
     #[test]
-    fn spaces_supports_cursor_pagination() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buf = [0u8; 2048];
-            let n = stream.read(&mut buf).unwrap();
-            let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            let body = json!({
-                "results": [{
-                    "id": "101",
-                    "key": "ENG",
-                    "name": "Engineering",
-                    "type": "global",
-                    "status": "current",
-                    "homepageId": "202",
-                    "_links": {"webui": "/spaces/ENG"}
-                }],
-                "_links": {"next": "/wiki/api/v2/spaces?limit=10&cursor=page2%3D"}
-            })
-            .to_string();
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(resp.as_bytes()).unwrap();
-            req
-        });
-
-        let c = Client::new(format!("http://{addr}/wiki"), "a@b.c", "tok", None);
-        let out = spaces(
-            &c,
-            Some("global"),
-            Some("current"),
-            None,
-            10,
-            Some("page1="),
-        )
-        .unwrap();
-        let req = handle.join().unwrap();
-        let request_line = req.lines().next().unwrap_or_default();
-        assert!(
-            request_line.contains("/wiki/api/v2/spaces?"),
-            "{request_line}"
-        );
-        assert!(request_line.contains("limit=10"), "{request_line}");
-        assert!(request_line.contains("cursor=page1%3D"), "{request_line}");
-        assert_eq!(out["results"][0]["key"], "ENG");
-        assert_eq!(out["nextCursor"], "page2=");
-    }
-
-    #[test]
     fn personal_space_matching() {
         let user = json!({"accountId": "557058:abc-def", "personalSpace": {"key": "~legacy"}});
         let spaces = vec![
@@ -975,232 +963,30 @@ mod tests {
             json!({"id": "2", "key": "~nick", "authorId": "557058:abc-def"}),
         ];
         assert_eq!(match_personal_space(&user, &spaces).unwrap()["id"], "2");
-
         let spaces_by_key = vec![json!({"id": "3", "key": "~557058abc-def"})];
         assert_eq!(
             match_personal_space(&user, &spaces_by_key).unwrap()["id"],
             "3"
         );
-
         let spaces_legacy = vec![json!({"id": "4", "key": "~legacy"})];
         assert_eq!(
             match_personal_space(&user, &spaces_legacy).unwrap()["id"],
             "4"
         );
-
         let unrelated = vec![json!({"id": "5", "key": "~someone-else", "authorId": "999"})];
         assert!(match_personal_space(&user, &unrelated).is_none());
     }
 
     #[test]
-    fn comments_list_and_create_endpoints() {
-        let (c, log) = mock_client(|method, target, _| match (method, target) {
-            ("GET", "/api/v2/pages/101/footer-comments?body-format=storage&limit=10") => (
-                200,
-                json!({
-                    "results": [{
-                        "id": "c1",
-                        "version": {"authorId": "u1", "createdAt": "2026-01-01T00:00:00Z"},
-                        "body": {"storage": {"value": "<p>Hello <strong>world</strong></p>"}},
-                        "_links": {"webui": "/spaces/ENG/pages/101?focusedCommentId=c1"}
-                    }],
-                    "_links": {"next": "/wiki/api/v2/pages/101/footer-comments?cursor=c2"}
-                }),
-            ),
-            ("GET", "/api/v2/pages/202/inline-comments?body-format=storage&limit=25") => {
-                (404, json!({"message": "not found"}))
-            }
-            ("GET", "/api/v2/blogposts/202/inline-comments?body-format=storage&limit=25") => (
-                200,
-                json!({
-                    "results": [{
-                        "id": "ic1",
-                        "resolutionStatus": "open",
-                        "version": {"authorId": "u2", "createdAt": "2026-01-02T00:00:00Z"},
-                        "body": {"storage": {"value": "<p>Fix typo</p>"}}
-                    }]
-                }),
-            ),
-            ("GET", "/api/v2/pages/202") => (404, json!({"message": "not found"})),
-            ("GET", "/api/v2/blogposts/202") => (200, json!({"id": "202"})),
-            ("POST", "/api/v2/footer-comments") => (
-                201,
-                json!({
-                    "id": "fc9",
-                    "status": "current",
-                    "version": {"number": 1, "createdAt": "2026-01-03T00:00:00Z"},
-                    "_links": {"webui": "/spaces/ENG/blog/202?focusedCommentId=fc9"}
-                }),
-            ),
-            _ => (
-                404,
-                json!({"message": format!("unexpected {method} {target}")}),
-            ),
-        });
-
-        let list = |id: &str, surface, format, limit| {
-            let o = comments::ListOpts {
-                surface,
-                format,
-                limit,
-                cursor: None,
-                sort: None,
-                status: None,
-                resolution: None,
-                content_type: None,
-                replies: false,
-            };
-            comments::list(&c, id, None, &o)
-        };
-        let md = list("101", comments::Surface::Footer, ReadFormat::Md, 10).unwrap();
+    fn bodies_are_sent_as_adf_or_unchanged_storage() {
+        let adf = json!({"type": "doc", "version": 1, "content": []});
+        let v = body_value(&Body::Adf(adf.clone())).unwrap();
+        assert_eq!(v["representation"], "atlas_doc_format");
         assert_eq!(
-            md["results"][0]["body"],
-            json!({"format": "md", "value": "Hello **world**"})
+            serde_json::from_str::<Value>(v["value"].as_str().unwrap()).unwrap(),
+            adf
         );
-        assert_eq!(md["nextCursor"], "c2");
-
-        let html = list("101", comments::Surface::Footer, ReadFormat::Html, 10).unwrap();
-        assert_eq!(
-            html["results"][0]["body"]["value"],
-            "<p>Hello <strong>world</strong></p>"
-        );
-
-        let inline = list("202", comments::Surface::Inline, ReadFormat::Md, 25).unwrap();
-        assert_eq!(inline["results"][0]["id"], "ic1");
-        assert_eq!(inline["results"][0]["resolutionStatus"], "open");
-
-        let created =
-            comments::create(&c, "202", None, "Nice **post**", TextFormat::Markdown, None).unwrap();
-        assert_eq!(created["id"], "fc9");
-        let reqs = log.lock().unwrap();
-        let post_body: Value = serde_json::from_str(&reqs.last().unwrap().2).unwrap();
-        assert_eq!(post_body["blogPostId"], "202");
-        assert_eq!(
-            post_body["body"]["value"],
-            "<p>Nice <strong>post</strong></p>"
-        );
-    }
-
-    #[test]
-    fn children_and_tree_hierarchy() {
-        let (c, _) = mock_client(|_, target, _| match target {
-            "/api/v2/pages/10/direct-children?limit=5&cursor=cur1" => (
-                200,
-                json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current", "spaceId": "1", "childPosition": 1}]}),
-            ),
-            "/api/v2/pages/10" => (
-                200,
-                json!({"id": "10", "title": "Root", "status": "current", "spaceId": "1", "_links": {"webui": "/spaces/S/pages/10"}}),
-            ),
-            "/api/v2/pages/10/ancestors?limit=250" => (
-                200,
-                json!({"results": [{"id": "1", "type": "page", "title": "Home"}]}),
-            ),
-            "/api/v2/pages/10/direct-children?limit=250" => (
-                200,
-                json!({"results": [{"id": "11", "type": "page", "title": "Child 1", "status": "current"}]}),
-            ),
-            "/api/v2/pages/11/direct-children?limit=250" => (
-                200,
-                json!({"results": [{"id": "12", "type": "page", "title": "Grandchild", "status": "current"}]}),
-            ),
-            "/api/v2/pages/12/direct-children?limit=250" => (
-                200,
-                json!({"results": [{"id": "13", "type": "page", "title": "Too Deep", "status": "current"}]}),
-            ),
-            _ => (404, json!({"message": format!("unexpected {target}")})),
-        });
-
-        let ch = children(&c, "10", 5, Some("cur1")).unwrap();
-        assert_eq!(ch["results"][0]["id"], "11");
-        assert_eq!(ch["results"][0]["childPosition"], 1);
-
-        let tr = tree::tree(&c, "10", 2, None).unwrap();
-        assert_eq!(tr["depth"], 2);
-        assert_eq!(tr["ancestors"][0]["id"], "1");
-        assert_eq!(tr["children"][0]["id"], "11");
-        assert_eq!(tr["children"][0]["children"][0]["id"], "12");
-        assert_eq!(tr["children"][0]["children"][0]["children"], json!([]));
-
-        let capped = tree::tree(&c, "10", 99, None).unwrap();
-        assert_eq!(capped["depth"], tree::MAX_DEPTH);
-    }
-
-    #[test]
-    fn space_me_title_lookup_labels_and_delete() {
-        let (c, log) = mock_client(|method, target, _| match (method, target) {
-            ("GET", "/rest/api/user/current") => {
-                (200, json!({"accountId": "acc-42", "displayName": "Ada"}))
-            }
-            ("GET", "/api/v2/spaces?type=personal&limit=250") => (
-                200,
-                json!({"results": [{"id": "77", "key": "~acc-42", "name": "Ada", "type": "personal", "status": "current", "authorId": "acc-42"}]}),
-            ),
-            ("GET", "/api/v2/spaces/77?description-format=plain") => (
-                200,
-                json!({"id": "77", "key": "~acc-42", "name": "Ada", "type": "personal", "status": "current", "homepageId": "78", "_links": {"webui": "/spaces/~acc-42"}, "description": {"plain": {"value": "My space"}}, "createdAt": "2026-01-01T00:00:00Z"}),
-            ),
-            ("GET", "/api/v2/spaces?keys=ENG") => {
-                (200, json!({"results": [{"id": "55", "key": "ENG"}]}))
-            }
-            ("GET", "/api/v2/pages?space-id=55&title=Runbook&body-format=storage") => {
-                (200, json!({"results": []}))
-            }
-            ("GET", "/api/v2/blogposts?space-id=55&title=Runbook&body-format=storage") => (
-                200,
-                json!({"results": [{"id": "901", "title": "Runbook", "status": "current", "spaceId": "55", "version": {"number": 2, "createdAt": "2026-01-01T00:00:00Z"}, "body": {"storage": {"value": "<p>Post</p>"}}, "_links": {"webui": "/spaces/ENG/blog/901"}}]}),
-            ),
-            ("GET", "/api/v2/pages/901/labels?limit=25") => (404, json!({})),
-            ("GET", "/api/v2/blogposts/901/labels?limit=25") => (
-                200,
-                json!({"results": [{"id": "l1", "name": "ops", "prefix": "global"}]}),
-            ),
-            ("DELETE", "/api/v2/pages/901?purge=true") => (404, json!({})),
-            ("DELETE", "/api/v2/blogposts/901?purge=true") => (204, Value::Null),
-            _ => (
-                404,
-                json!({"message": format!("unexpected {method} {target}")}),
-            ),
-        });
-
-        let me = space_me(&c).unwrap();
-        assert_eq!(me["id"], "77");
-        assert_eq!(me["description"]["plain"]["value"], "My space");
-
-        let got = get(
-            &c,
-            "Runbook",
-            &GetOpts {
-                detail: Detail::Full,
-                format: ReadFormat::Md,
-                draft: false,
-                reference_space: Some("ENG"),
-                sections: &[],
-            },
-        )
-        .unwrap();
-        assert_eq!(got["id"], "901");
-        assert_eq!(got["type"], "blogpost");
-        assert_eq!(got["body"], json!({"format": "md", "value": "Post"}));
-        assert_eq!(got["detail"], "full");
-        assert_eq!(got["spaceId"], "55");
-
-        let lbls = labels(&c, "901", 25).unwrap();
-        assert_eq!(
-            lbls["results"],
-            json!([{"id": "l1", "name": "ops", "prefix": "global"}])
-        );
-
-        let del = delete(&c, "901", true).unwrap();
-        assert_eq!(
-            del,
-            json!({"id": "901", "type": "blogpost", "deleted": true, "purged": true})
-        );
-        assert!(
-            log.lock()
-                .unwrap()
-                .iter()
-                .any(|(m, t, _)| m == "DELETE" && t == "/api/v2/blogposts/901?purge=true")
-        );
+        let s = body_value(&Body::Storage("<p>x</p>".into())).unwrap();
+        assert_eq!(s, json!({"representation": "storage", "value": "<p>x</p>"}));
     }
 }

@@ -20,6 +20,9 @@ pub(crate) struct ApiArgs {
     /// Query parameter, repeatable
     #[arg(short, long = "query", value_name = "KEY=VALUE")]
     query: Vec<String>,
+    /// Confirm a DELETE (other methods don't need it)
+    #[arg(short = 'y', long)]
+    yes: bool,
 }
 
 pub(crate) fn run(cfg: &Config, a: ApiArgs) -> Result<Value> {

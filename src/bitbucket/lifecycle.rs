@@ -1,16 +1,22 @@
 //! Pull request lifecycle: update and reviewers, merge with `--wait`,
 //! mergeability, merge-time and cross-repository queries, inbox, for-commit.
 
-use super::{PrMerge, PrQuery, and, enc, paginate, paginate_more, pr_filter, pr_merge_body};
+use super::{
+    Listed, Paging, PrMerge, PrQuery, and, enc, list, list_where_capped, pr_filter, pr_merge_body,
+    scan, scan_all, states,
+};
 use crate::client::{ApiError, Client, ErrorKind};
 use crate::markup::quote;
+use crate::paging::{self, Page};
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
-/// How many merged pull requests a merge-date filter checks at most. Each
-/// costs at least one activity request.
-pub const MERGED_SCAN: usize = 200;
+/// How many pull requests one repository scan of `pr list --mine` reads.
+pub const MINE_SCAN: usize = 200;
+/// REST pages a merge-date filter reads per call. Each candidate costs at
+/// least one activity request.
+pub const MERGED_PAGES: usize = 4;
 /// How many workspace members are read to resolve a name.
 const MEMBER_SCAN: usize = 5000;
 
@@ -37,7 +43,7 @@ pub enum User<'a> {
     AccountId(&'a str),
 }
 
-fn is_account_id(s: &str) -> bool {
+pub(crate) fn is_account_id(s: &str) -> bool {
     !s.contains(' ')
         && (s.contains(':') || (s.len() == 24 && s.bytes().all(|b| b.is_ascii_hexdigit())))
 }
@@ -95,7 +101,7 @@ pub fn resolve_user(c: &Client, path: &str, who: User) -> Result<Value> {
         User::Any(s) => {
             // The workspace segment of a repository path is already encoded.
             let members = format!("/workspaces/{}/members", workspace(path));
-            let found: Vec<Value> = paginate(c, &members, &[], MEMBER_SCAN)?
+            let found: Vec<Value> = scan_all(c, &members, &[], MEMBER_SCAN)?
                 .into_iter()
                 .map(|m| m["user"].clone())
                 .filter(|u| named(u, s))
@@ -141,7 +147,7 @@ pub fn new_reviewers(
     if defaults {
         let me = my_uuid(c)?;
         let path = format!("{path}/effective-default-reviewers");
-        for d in paginate(c, &path, &[], MEMBER_SCAN)? {
+        for d in scan_all(c, &path, &[], MEMBER_SCAN)? {
             let u = &d["user"];
             let Some(id) = u["uuid"].as_str() else {
                 continue;
@@ -276,9 +282,36 @@ pub fn pr_update(c: &Client, path: &str, id: u64, u: &PrUpdate) -> Result<Value>
     c.put(&path_pr, &req)
 }
 
+/// Withdraw a request for changes (204).
 pub fn remove_request_changes(c: &Client, path: &str, id: u64) -> Result<Value> {
     c.delete(&format!("{}/request-changes", pr_path(path, id)), &[])?;
-    Ok(json!({"id": id, "changes_requested": false}))
+    Ok(json!({"pr": id, "approved": false, "state": null}))
+}
+
+/// The reviewers of a pull request with their review state.
+pub fn reviewers(c: &Client, path: &str, id: u64) -> Result<Value> {
+    Ok(reviewers_of(&c.get(&pr_path(path, id), &[])?))
+}
+
+/// The reviewers of a REST pull request with their review state.
+pub fn reviewers_of(pr: &Value) -> Value {
+    let people: Vec<&Value> = pr["participants"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    pr["reviewers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            let p = people.iter().find(|p| p["user"]["uuid"] == r["uuid"]);
+            let mut u = r.clone();
+            u["approved"] = p.map_or(false.into(), |p| p["approved"].clone());
+            u["state"] = p.map_or(Value::Null, |p| p["state"].clone());
+            u
+        })
+        .collect()
 }
 
 // --- merge -------------------------------------------------------------------
@@ -299,9 +332,49 @@ impl Default for Wait {
     }
 }
 
-/// `pull-requests merge`. A synchronous merge that times out on Bitbucket
-/// (555) is retried as an asynchronous one, unless it went through anyway.
+/// Whether two commit hashes name the same commit (Bitbucket shortens the
+/// hashes in pull requests to 12 characters).
+fn same_commit(a: &str, b: &str) -> bool {
+    let (a, b) = (a.trim().to_ascii_lowercase(), b.trim().to_ascii_lowercase());
+    a.len().min(b.len()) >= 7 && (a.starts_with(&b) || b.starts_with(&a))
+}
+
+/// Refuse to merge when the source branch moved past `want`.
+fn check_head(c: &Client, path: &str, id: u64, want: &str) -> Result<()> {
+    if want.trim().len() < 7 {
+        return Err(usage(
+            "--if-head needs at least 7 characters of the commit hash",
+        ));
+    }
+    let pr = c.get(&pr_path(path, id), &[])?;
+    let head = pr["source"]["commit"]["hash"].as_str().unwrap_or_default();
+    if same_commit(head, want) {
+        return Ok(());
+    }
+    let shown = if head.is_empty() {
+        "an unknown commit"
+    } else {
+        head
+    };
+    Err(ApiError::new(
+        ErrorKind::Conflict,
+        format!("pull request {id}'s source is at {shown}, not {want}; nothing was merged"),
+    )
+    .with_hint(format!(
+        "re-read it with `atlx bitbucket pr get {id}`, review the new commits, then pass its `head` to --if-head"
+    ))
+    .into())
+}
+
+/// Merge a pull request. With `if_head`, the source head is checked first
+/// (check, then act: Bitbucket has no conditional merge). A synchronous
+/// merge that times out on Bitbucket (555) is retried as an asynchronous
+/// one, unless it went through anyway. With `wait`, an asynchronous merge
+/// is followed until it ends.
 pub fn merge(c: &Client, path: &str, id: u64, o: &PrMerge, wait: Option<Wait>) -> Result<Value> {
+    if let Some(want) = o.if_head {
+        check_head(c, path, id, want)?;
+    }
     let url = format!("{}/merge", pr_path(path, id));
     let body = pr_merge_body(o);
     let send = |asynchronous: bool| {
@@ -332,15 +405,23 @@ pub fn merge(c: &Client, path: &str, id: u64, o: &PrMerge, wait: Option<Wait>) -
         .and_then(|l| l.trim_end_matches('/').rsplit('/').next())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| {
-            anyhow!("Bitbucket started merging pull request {id} but gave no task to follow; check its state before retrying")
+            anyhow!(
+                "Bitbucket started merging pull request {id} but gave no task to follow; check its state with `atlx bitbucket pr get {id}` before retrying"
+            )
         })?;
     match wait {
         Some(w) => wait_for_merge(c, path, id, task, w),
-        None => Ok(json!({"task_status": "PENDING", "task_id": task, "pull_request": id})),
+        None => {
+            crate::output::notes::warn(
+                "merge_pending",
+                format!("Bitbucket is still merging; check `atlx bitbucket pr get {id}`"),
+            );
+            Ok(json!({"id": id, "state": "MERGING"}))
+        }
     }
 }
 
-pub fn merge_status(c: &Client, path: &str, id: u64, task: &str) -> Result<Value> {
+fn merge_status(c: &Client, path: &str, id: u64, task: &str) -> Result<Value> {
     c.get(
         &format!("{}/merge/task-status/{}", pr_path(path, id), enc(task)),
         &[],
@@ -371,23 +452,23 @@ fn wait_for_merge(c: &Client, path: &str, id: u64, task: &str, w: Wait) -> Resul
             return Err(ApiError::new(
                 ErrorKind::Timeout,
                 format!(
-                    "pull request {id} was still merging after {}s; don't merge again, check \
-                     `atlx bb pull-requests merge-status --pull-request {id} --task {task}`",
+                    "pull request {id} was still merging after {}s; don't merge again",
                     w.timeout.as_secs()
                 ),
             )
+            .with_hint(format!("check its state with `atlx bitbucket pr get {id}`"))
             .into());
         }
         std::thread::sleep(w.interval.min(left));
     }
 }
 
-// --- mergeability ------------------------------------------------------------
+// --- checks ------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Exclude {
-    pub git_mergeability: bool,
-    pub commits_behind: bool,
+    /// Skip the merge conflict check (a diffstat scan).
+    pub conflicts: bool,
 }
 
 /// `*` matches any run of characters, as in branch restriction patterns.
@@ -417,9 +498,10 @@ fn is_conflict(file: &Value) -> bool {
     )
 }
 
-/// A best-effort answer computed from public endpoints. Checks that couldn't
-/// be made are listed under `unchecked` and don't count as blockers.
-pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value> {
+/// What gates a merge: build statuses, and the blockers atlx can compute
+/// from public endpoints. Checks that couldn't be made are listed under
+/// `unchecked` and don't count as blockers.
+pub fn checks(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value> {
     let base = pr_path(path, id);
     let pr = c.get(&base, &[])?;
     let mut blockers = Vec::new();
@@ -454,7 +536,7 @@ pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value
         .filter(|p| p["approved"] == true && p["user"]["uuid"] != pr["author"]["uuid"])
         .count();
 
-    let open_tasks = paginate(c, &format!("{base}/tasks"), &[], usize::MAX)?
+    let open_tasks = scan_all(c, &format!("{base}/tasks"), &[], usize::MAX)?
         .iter()
         .filter(|t| t["state"] == "UNRESOLVED")
         .count();
@@ -464,7 +546,8 @@ pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value
             format!("{open_tasks} unresolved task(s)"),
         );
     }
-    for s in paginate(c, &format!("{base}/statuses"), &[], usize::MAX)? {
+    let statuses = scan_all(c, &format!("{base}/statuses"), &[], usize::MAX)?;
+    for s in &statuses {
         if let Some(st @ ("FAILED" | "STOPPED")) = s["state"].as_str() {
             let name = s["name"]
                 .as_str()
@@ -473,8 +556,8 @@ pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value
             block("failing_status", format!("{name} is {st}"));
         }
     }
-    if !x.git_mergeability {
-        let conflicts = paginate(c, &format!("{base}/diffstat"), &[], usize::MAX)?
+    if !x.conflicts {
+        let conflicts = scan_all(c, &format!("{base}/diffstat"), &[], usize::MAX)?
             .iter()
             .filter(|f| is_conflict(f))
             .count();
@@ -488,7 +571,7 @@ pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value
         .unwrap_or_default();
     let restrictions = format!("{path}/branch-restrictions");
     let q = [("kind", "require_approvals_to_merge")];
-    match paginate(c, &restrictions, &q, usize::MAX) {
+    match scan_all(c, &restrictions, &q, usize::MAX) {
         Ok(rules) => {
             let mut needed = 0;
             for r in rules {
@@ -518,97 +601,76 @@ pub fn mergeability(c: &Client, path: &str, id: u64, x: Exclude) -> Result<Value
         })),
         Err(e) => return Err(e),
     }
-    if !x.commits_behind {
-        unchecked.push(json!({
-            "kind": "maximum_commits_behind",
-            "reason": "atlx doesn't count how far the source branch is behind",
-        }));
+    unchecked.push(json!({
+        "kind": "maximum_commits_behind",
+        "reason": "atlx doesn't count how far the source branch is behind",
+    }));
+    if x.conflicts {
+        unchecked.push(json!({"kind": "merge_conflict", "reason": "skipped with --no-conflicts"}));
     }
     Ok(json!({
-        "id": id,
+        "pr": id,
+        "head": pr["source"]["commit"]["hash"],
         "mergeable": blockers.is_empty(),
         "approvals": approvals,
         "blockers": blockers,
         "unchecked": unchecked,
+        "statuses": statuses,
     }))
-}
-
-/// The diffstat entries that conflict.
-pub fn conflicts(c: &Client, path: &str, id: u64, limit: usize) -> Result<Value> {
-    let files = paginate(
-        c,
-        &format!("{}/diffstat", pr_path(path, id)),
-        &[],
-        usize::MAX,
-    )?;
-    Ok(files.into_iter().filter(is_conflict).take(limit).collect())
 }
 
 // --- queries -----------------------------------------------------------------
 
-pub fn for_commit(c: &Client, path: &str, commit: &str, limit: usize) -> Result<Value> {
+/// Pull requests that contain a commit.
+pub fn for_commit(c: &Client, path: &str, commit: &str, p: &Paging) -> Result<Listed> {
     let url = format!("{path}/commit/{}/pullrequests", enc(commit.trim()));
-    let size = limit.clamp(1, 50).to_string();
-    let first = c.request_response("GET", &url, &[("pagelen", size.as_str())], None)?;
-    if first.status == 202 {
-        let mut e = ApiError::new(
-            ErrorKind::Other,
-            "Bitbucket is still indexing pull requests for this repository's commits; try again in a few minutes",
-        );
-        e.status = Some(202);
-        return Err(e.into());
-    }
-    let mut v = first.body;
-    let mut out: Vec<Value> = Vec::new();
-    loop {
-        out.extend(v["values"].as_array().into_iter().flatten().cloned());
-        match v["next"].as_str() {
-            Some(next) if out.len() < limit => v = c.get(next, &[])?,
-            _ => break,
+    paging::collect(p.limit, p.cursor.as_deref(), |pos, wanted| {
+        let (len, page) = super::at(pos, wanted)?;
+        let len_s = len.to_string();
+        let mut q = vec![("pagelen", len_s.as_str())];
+        if let Some(pg) = &page {
+            q.push(("page", pg));
         }
-    }
-    out.truncate(limit);
-    Ok(out.into())
+        let r = c.request_response("GET", &url, &q, None)?;
+        if r.status == 202 {
+            let mut e = ApiError::new(
+                ErrorKind::Other,
+                "Bitbucket is still indexing pull requests for this repository's commits; try again in a few minutes",
+            );
+            e.status = Some(202);
+            return Err(e.into());
+        }
+        let items = r.body["values"].as_array().cloned().unwrap_or_default();
+        let next = super::next_page(&r.body).map(|pg| super::token(len, &pg));
+        Ok(Page { items, next })
+    })
 }
 
 fn merged_at(c: &Client, path: &str, id: u64) -> Result<Option<String>> {
-    let mut v = c.get(
-        &format!("{}/activity", pr_path(path, id)),
-        &[("pagelen", "50")],
-    )?;
-    loop {
-        for item in v["values"].as_array().into_iter().flatten() {
-            if item["update"]["state"] == "MERGED"
-                && let Some(date) = item["update"]["date"].as_str()
-            {
-                return Ok(Some(date.to_string()));
-            }
-        }
-        match v["next"].as_str() {
-            Some(next) => v = c.get(next, &[])?,
-            None => return Ok(None),
+    for item in scan_all(c, &format!("{}/activity", pr_path(path, id)), &[], 1000)? {
+        if item["update"]["state"] == "MERGED"
+            && let Some(date) = item["update"]["date"].as_str()
+        {
+            return Ok(Some(date.to_string()));
         }
     }
+    Ok(None)
 }
 
 /// Merged pull requests by merge day (UTC). The REST object has no merge
 /// time, so candidates are narrowed by `updated_on` and `created_on`, then
-/// each one's activity is read, up to [`MERGED_SCAN`] of them.
+/// each one's activity is read; each gets `merged_on`.
 pub fn merged(
     c: &Client,
     path: &str,
     o: &PrQuery,
     since: Option<&str>,
     before: Option<&str>,
-) -> Result<Value> {
+    p: &Paging,
+) -> Result<Listed> {
     if o.state.is_some_and(|s| !s.eq_ignore_ascii_case("MERGED")) {
         return Err(usage(
             "--merged-since and --merged-before only go with --state MERGED",
-        ));
-    }
-    if o.page.is_some() {
-        return Err(usage(
-            "--page can't be combined with the merge date filters",
         ));
     }
     let since = since.map(crate::time::to_date).transpose()?;
@@ -625,38 +687,29 @@ pub fn merged(
     if let Some(f) = &filter {
         q.push(("q", f));
     }
-    let (candidates, unseen) = paginate_more(c, &format!("{path}/pullrequests"), &q, MERGED_SCAN)?;
-    let mut out = Vec::new();
-    let mut scanned = 0;
-    for pr in &candidates {
-        if out.len() >= o.limit {
-            break;
-        }
-        scanned += 1;
-        let Some(id) = pr["id"].as_u64() else {
-            continue;
-        };
-        let Some(at) = merged_at(c, path, id)? else {
-            continue;
-        };
-        let day = at.get(..10).unwrap_or_default();
-        if since.as_deref().is_none_or(|d| day >= d) && before.as_deref().is_none_or(|d| day < d) {
-            let mut pr = pr.clone();
+    list_where_capped(
+        c,
+        &format!("{path}/pullrequests"),
+        &q,
+        p,
+        MERGED_PAGES,
+        |pr| {
+            let Some(id) = pr["id"].as_u64() else {
+                return Ok(false);
+            };
+            let Some(at) = merged_at(c, path, id)? else {
+                return Ok(false);
+            };
+            let day = at.get(..10).unwrap_or_default().to_string();
+            let keep = since.as_deref().is_none_or(|d| day.as_str() >= d)
+                && before.as_deref().is_none_or(|d| day.as_str() < d);
             pr["merged_on"] = at.into();
-            out.push(pr);
-        }
-    }
-    let more = unseen || scanned < candidates.len();
-    Ok(json!({
-        "values": out,
-        "returned": out.len(),
-        "scanned": scanned,
-        "hasNextPage": more,
-        "hasMore": more,
-    }))
+            Ok(keep)
+        },
+    )
 }
 
-/// `--role`.
+/// `--role` of `pr list --mine`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Role {
     Author,
@@ -665,21 +718,32 @@ pub enum Role {
 }
 
 /// The current user's pull requests across repositories.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Mine<'a> {
     pub workspace: &'a str,
     /// Scan only this repository.
     pub repo: Option<&'a str>,
-    /// `None` is the union of the inbox's reviewer and author views.
+    /// `None` is author or reviewer.
     pub role: Option<Role>,
     /// Keep only what is waiting on the user: reviews not approved yet, and
     /// their own pull requests with changes requested.
     pub waiting: bool,
-    pub state: &'a str,
+    pub state: Option<&'a str>,
     pub limit: usize,
     pub repo_limit: usize,
-    pub repo_role: &'a str,
     pub concurrency: usize,
+}
+
+/// What a cross-repository scan found.
+#[derive(Debug, Default)]
+pub struct Found {
+    pub items: Vec<Value>,
+    /// More matched than `limit`, or repositories or pull requests were
+    /// left unscanned.
+    pub more: bool,
+    pub repos_scanned: usize,
+    /// Repositories that could not be read: `{repository, error}`.
+    pub skipped: Vec<Value>,
 }
 
 const WITH_PEOPLE: &str = "+values.participants,+values.reviewers";
@@ -710,15 +774,15 @@ fn keep(pr: &Value, me: &str, role: Option<Role>, waiting: bool) -> bool {
 /// Bitbucket has no workspace-wide reviewer endpoint, so this costs one
 /// request for the user, one or more to list the `repo_limit` most recently
 /// updated repositories, and one or more for each of those.
-pub fn mine(c: &Client, o: &Mine) -> Result<Value> {
-    let state = o.state.to_ascii_uppercase();
+pub fn mine(c: &Client, o: &Mine) -> Result<Found> {
+    let states = states(o.state);
     let me = my_uuid(c)?;
     let (repos, repos_left) = match o.repo {
         Some(path) => (vec![path.to_string()], false),
         None => {
-            let q = [("role", o.repo_role), ("sort", "-updated_on")];
+            let q = [("role", "member"), ("sort", "-updated_on")];
             let list = format!("/repositories/{}", enc(o.workspace));
-            let (repos, left) = paginate_more(c, &list, &q, o.repo_limit)?;
+            let (repos, left) = scan(c, &list, &q, o.repo_limit)?;
             let paths = repos
                 .iter()
                 .filter_map(|r| {
@@ -736,26 +800,26 @@ pub fn mine(c: &Client, o: &Mine) -> Result<Value> {
         Some(Role::Participant) => None,
         None => Some(format!("(author.uuid = {user} OR reviewers.uuid = {user})")),
     };
-    let scan = |repo: &String| {
-        let mut q = vec![
-            ("state", state.as_str()),
-            ("sort", "-updated_on"),
-            ("fields", WITH_PEOPLE),
-        ];
+    let scan_repo = |repo: &String| {
+        let mut q: Vec<(&str, &str)> = states.iter().map(|s| ("state", s.as_str())).collect();
+        q.push(("sort", "-updated_on"));
+        q.push(("fields", WITH_PEOPLE));
         if let Some(f) = &filter {
             q.push(("q", f));
         }
-        paginate_more(c, &format!("{repo}/pullrequests"), &q, MERGED_SCAN)
+        scan(c, &format!("{repo}/pullrequests"), &q, MINE_SCAN)
     };
 
-    let mut found = Vec::new();
-    let mut errors = Vec::new();
-    let mut more = repos_left;
+    let mut found = Found {
+        more: repos_left,
+        repos_scanned: repos.len(),
+        ..Default::default()
+    };
     for chunk in repos.chunks(o.concurrency.max(1)) {
         let results: Vec<Result<(Vec<Value>, bool)>> = std::thread::scope(|s| {
             let running: Vec<_> = chunk
                 .iter()
-                .map(|repo| s.spawn(move || scan(repo)))
+                .map(|repo| s.spawn(move || scan_repo(repo)))
                 .collect();
             running
                 .into_iter()
@@ -768,44 +832,40 @@ pub fn mine(c: &Client, o: &Mine) -> Result<Value> {
         for (repo, result) in chunk.iter().zip(results) {
             match result {
                 Ok((prs, left)) => {
-                    more |= left;
-                    found.extend(
+                    found.more |= left;
+                    found.items.extend(
                         prs.into_iter()
                             .filter(|pr| keep(pr, &me, o.role, o.waiting)),
                     );
                 }
                 // One unreadable repository doesn't spoil a workspace scan.
                 Err(e) if o.repo.is_none() && matches!(status_of(&e), Some(403 | 404)) => {
-                    errors.push(json!({"repository": repo, "error": e.to_string()}));
+                    found.skipped.push(json!({
+                        "repository": super::full_name(repo),
+                        "error": e.to_string(),
+                    }));
                 }
                 Err(e) => return Err(e),
             }
         }
     }
-    found.sort_by(|a, b| b["updated_on"].as_str().cmp(&a["updated_on"].as_str()));
-    more |= found.len() > o.limit;
-    found.truncate(o.limit);
-    let mut out = json!({
-        "values": found,
-        "returned": found.len(),
-        "reposScanned": repos.len(),
-        "hasMore": more,
-    });
-    if !errors.is_empty() {
-        out["errors"] = errors.into();
-    }
-    Ok(out)
+    found
+        .items
+        .sort_by(|a, b| b["updated_on"].as_str().cmp(&a["updated_on"].as_str()));
+    found.more |= found.items.len() > o.limit;
+    found.items.truncate(o.limit);
+    Ok(found)
 }
 
 // --- default reviewers -------------------------------------------------------
 
-pub fn default_reviewers(c: &Client, path: &str, effective: bool, limit: usize) -> Result<Value> {
+pub fn default_reviewers(c: &Client, path: &str, effective: bool, p: &Paging) -> Result<Listed> {
     let what = if effective {
         "effective-default-reviewers"
     } else {
         "default-reviewers"
     };
-    Ok(paginate(c, &format!("{path}/{what}"), &[], limit)?.into())
+    list(c, &format!("{path}/{what}"), &[], p)
 }
 
 fn default_reviewer_path(path: &str, uuid: &str) -> Result<String> {
@@ -826,12 +886,23 @@ pub fn default_reviewer_add(c: &Client, path: &str, uuid: &str) -> Result<Value>
 
 pub fn default_reviewer_remove(c: &Client, path: &str, uuid: &str) -> Result<Value> {
     c.delete(&default_reviewer_path(path, uuid)?, &[])?;
-    Ok(json!({"uuid": braced(uuid.trim()), "deleted": true}))
+    Ok(json!({"id": braced(uuid.trim()), "deleted": true}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_hashes_match() {
+        assert!(same_commit(
+            "abcdef123456",
+            "abcdef1234567890abcdef1234567890abcdef12"
+        ));
+        assert!(same_commit("ABCDEF1", "abcdef123456"));
+        assert!(!same_commit("abcdef123456", "abcdef9"));
+        assert!(!same_commit("abc", "abc"));
+    }
 
     #[test]
     fn branch_globs() {

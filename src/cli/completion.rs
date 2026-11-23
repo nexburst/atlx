@@ -117,7 +117,7 @@ mod tests {
         ] {
             let s = script(shell);
             assert!(s.contains("atlx"), "{shell}: no command name");
-            assert!(s.contains("workitem"), "{shell}: missing nested commands");
+            assert!(s.contains("transition"), "{shell}: missing nested commands");
         }
     }
 
@@ -127,7 +127,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let files = write_man_pages(&dir).unwrap();
         assert!(files.contains(&"atlx.1".to_string()), "{files:?}");
-        assert!(files.contains(&"atlx-jira-workitem-get.1".to_string()));
+        assert!(files.contains(&"atlx-jira-issue-get.1".to_string()));
         assert!(
             !files.iter().any(|f| f == "atlx-man.1"),
             "hidden command got a page"

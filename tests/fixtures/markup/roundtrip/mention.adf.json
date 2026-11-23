@@ -1,0 +1,28 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "mention",
+          "attrs": {
+            "id": "557058:abc-123",
+            "text": "@Ana Lopez"
+          }
+        },
+        {
+          "type": "text",
+          "text": " please review, cc "
+        },
+        {
+          "type": "mention",
+          "attrs": {
+            "id": "5b10a2844c20165700ede21g"
+          }
+        }
+      ]
+    }
+  ]
+}

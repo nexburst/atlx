@@ -1,5 +1,5 @@
-//! Global output controls on the built binary: `--select`, `--output-file`,
-//! `--output-summary`, `--agent-fields` and `--api-version`.
+//! Global output controls on the built binary: `-o json|jsonl|ids|text`,
+//! `--fields`, `--full`, `--raw`, `--max-chars`, `--output-file`.
 
 mod common;
 
@@ -10,8 +10,12 @@ use std::process::{Command, Output};
 
 fn server() -> MockServer {
     MockServer::with_handler(|req| {
-        if req.path.contains("/NOPE-1") {
-            MockResponse::json(404, json!({"errorMessages": ["Issue does not exist"]}))
+        if req.path.ends_with("/rest/api/3/myself") {
+            MockResponse::json(
+                200,
+                json!({"accountId": "acc-1", "displayName": "Ann", "emailAddress": "ann@example.com",
+                       "avatarUrls": {"48x48": "https://x/a.png"}}),
+            )
         } else if req.path.contains("/api/v2/pages/") {
             MockResponse::json(
                 200,
@@ -24,14 +28,10 @@ fn server() -> MockServer {
             )
         } else if req.path.contains("/api/v2/blogposts/") {
             MockResponse::json(404, json!({"message": "not found"}))
+        } else if req.path.contains("/api/v2/spaces") {
+            MockResponse::json(200, json!({"results": []}))
         } else {
-            MockResponse::json(
-                200,
-                json!({"key": "OK-1", "fields": {
-                    "summary": "Fine", "status": {"name": "Done"},
-                    "issuetype": {"name": "Task"}, "updated": "2026-01-01"
-                }}),
-            )
+            MockResponse::json(404, json!({"message": "unexpected"}))
         }
     })
 }
@@ -44,12 +44,17 @@ fn scratch(name: &str) -> PathBuf {
 
 fn atlx(srv: &MockServer, args: &[&str]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_atlx"));
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("ATLX_") {
+            cmd.env_remove(&key);
+        }
+    }
     cmd.args(args)
         .env("ATLX_CONFIG", scratch("cfg").join("missing.toml"))
         .env("ATLX_EMAIL", "me@example.com")
         .env("ATLX_TOKEN", "t")
         .env("ATLX_SITE", srv.base_url())
-        .env_remove("ATLX_OUTPUT");
+        .current_dir(std::env::temp_dir());
     cmd.output().expect("run atlx")
 }
 
@@ -61,263 +66,206 @@ fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).into_owned()
 }
 
+fn json_out(o: &Output) -> Value {
+    serde_json::from_str(&stdout(o)).unwrap_or_else(|e| panic!("{e}: {}", stdout(o)))
+}
+
 fn read_json(p: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
 #[test]
-fn select_projects_json_output() {
+fn registered_records_print_the_default_view_and_fields_pick() {
     let srv = server();
-    let o = atlx(
+    let o = atlx(&srv, &["auth", "status", "-o", "json"]);
+    assert!(o.status.success(), "{}", stdout(&o));
+    assert_eq!(stderr(&o), "");
+    assert_eq!(stdout(&o).lines().count(), 1, "one compact line");
+    let v = json_out(&o);
+    assert_eq!(v["ok"], true);
+    let d = &v["data"];
+    assert_eq!(d["user"], json!({"id": "acc-1", "name": "Ann"}));
+    assert_eq!(d["products"]["jira"], "ok");
+    assert!(d.get("defaults").is_none(), "only in --full: {d}");
+
+    let v = json_out(&atlx(&srv, &["auth", "status", "-o", "json", "--full"]));
+    assert!(v["data"].get("defaults").is_some());
+
+    let v = json_out(&atlx(
         &srv,
         &[
-            "jira",
-            "workitem",
-            "get",
-            "OK-1",
+            "auth",
+            "status",
             "-o",
             "json",
-            "--select",
-            "data.key,status,nope",
+            "--fields",
+            "user.name,readOnly",
         ],
-    );
-    assert!(o.status.success(), "{}", stderr(&o));
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    // The envelope keys stay, `request` and `pageInfo` go.
+    ));
     assert_eq!(
-        v,
-        json!({
-            "apiVersion": "v2",
-            "command": "jira.workitem.get",
-            "meta": {"resourceClass": "entity", "sourceMode": "rest", "resourceType": "jira.workitem"},
-            "data": [{"key": "OK-1", "status": {"name": "Done"}}]
-        })
+        v["data"],
+        json!({"user": {"name": "Ann"}, "readOnly": false})
     );
-
-    // A preset.
-    let o = atlx(
-        &srv,
-        &[
-            "jira", "workitem", "get", "OK-1", "-o", "json", "--select", "@compact",
-        ],
-    );
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["data"][0]["key"], "OK-1");
-    assert_eq!(v["data"][0]["status"], json!({"name": "Done"}));
-    assert!(v["data"][0].get("issuetype").is_none(), "{v}");
-
-    // Nothing matched: full payload and a warning.
-    let o = atlx(
-        &srv,
-        &[
-            "jira", "workitem", "get", "OK-1", "-o", "json", "--select", "nope",
-        ],
-    );
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["data"][0]["issuetype"]["name"], "Task");
-    assert!(stderr(&o).contains("--select matched nothing"));
-
-    // Text mode ignores it, with a warning.
-    let o = atlx(
-        &srv,
-        &[
-            "jira", "workitem", "get", "OK-1", "-o", "text", "--select", "key",
-        ],
-    );
-    assert!(stdout(&o).contains("Task"));
-    assert!(stderr(&o).contains("--select only applies"));
 }
 
 #[test]
-fn unknown_preset_is_a_usage_error() {
+fn unknown_fields_exit_2_before_any_request() {
+    let srv = server();
+    let o = atlx(
+        &srv,
+        &["auth", "status", "-o", "json", "--fields", "user,nope"],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    let v = json_out(&o);
+    assert_eq!(v["error"]["code"], "usage");
+    assert!(v["error"]["message"].as_str().unwrap().contains("nope"));
+    assert!(
+        v["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("profile, site, email, user")
+    );
+    assert!(srv.requests().is_empty(), "sent {:?}", srv.requests());
+}
+
+#[test]
+fn fields_select_record_fields_and_reject_unknown_ones() {
     let srv = server();
     let o = atlx(
         &srv,
         &[
-            "jira", "workitem", "get", "OK-1", "-o", "json", "--select", "@bogus",
+            "confluence",
+            "page",
+            "get",
+            "123",
+            "-o",
+            "json",
+            "--fields",
+            "id,title",
         ],
     );
-    assert_eq!(o.status.code(), Some(1));
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["ok"], false);
-    let msg = v["error"]["message"].as_str().unwrap();
-    assert!(msg.contains("@compact, @evidence, @rows"), "{msg}");
-    assert!(srv.requests().is_empty(), "no request before validation");
+    assert!(o.status.success(), "{}", stdout(&o));
+    assert_eq!(
+        json_out(&o)["data"],
+        json!({"id": "123", "title": "Runbook"})
+    );
+    let o = atlx(
+        &srv,
+        &[
+            "confluence",
+            "page",
+            "get",
+            "123",
+            "-o",
+            "json",
+            "--fields",
+            "nope",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert!(
+        json_out(&o)["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("title")
+    );
 }
 
 #[test]
-fn output_file_redirects_stdout() {
+fn jsonl_prints_records_then_a_trailer_and_ids_print_ids() {
+    let srv = server();
+    let dir = scratch("profiles");
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("config.toml");
+    std::fs::write(
+        &cfg,
+        "default_profile = \"a\"\n[profiles.a]\nsite = \"a\"\n[profiles.b]\nsite = \"b\"\n",
+    )
+    .unwrap();
+    let run = |fmt: &str| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_atlx"));
+        cmd.args(["auth", "profile", "list", "-o", fmt])
+            .env("ATLX_CONFIG", &cfg)
+            .env_remove("ATLX_PROFILE")
+            .env_remove("ATLX_OUTPUT");
+        cmd.output().unwrap()
+    };
+    let o = run("jsonl");
+    let lines: Vec<Value> = stdout(&o)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{}", stdout(&o));
+    assert_eq!(lines[0]["name"], "a");
+    assert_eq!(lines[1]["name"], "b");
+    assert_eq!(
+        lines[2],
+        json!({"_end": {"next": null, "truncated": [], "errors": []}})
+    );
+    assert_eq!(stdout(&run("ids")), "a\nb\n");
+    let text = stdout(&run("text"));
+    assert!(text.starts_with("NAME"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+    drop(srv);
+}
+
+#[test]
+fn output_file_writes_data_and_prints_what_it_wrote() {
     let srv = server();
     let dir = scratch("file");
     let file = dir.join("nested/out.json");
     let f = file.to_str().unwrap();
-    let o = atlx(
-        &srv,
-        &[
-            "jira",
-            "workitem",
-            "get",
-            "OK-1",
-            "-o",
-            "json",
-            "--output-file",
-            f,
-        ],
-    );
+    let o = atlx(&srv, &["auth", "status", "-o", "json", "--output-file", f]);
     assert!(o.status.success(), "{}", stderr(&o));
-    assert_eq!(stdout(&o), format!("stdout={f}\n"));
-    let v = read_json(&file);
-    assert_eq!(v["data"][0]["key"], "OK-1");
-    assert_eq!(v["data"][0]["issuetype"]["name"], "Task");
-
-    // Errors go to the file too, and keep their exit code.
-    let o = atlx(
-        &srv,
-        &[
-            "jira",
-            "workitem",
-            "get",
-            "NOPE-1",
-            "-o",
-            "json",
-            "--output-file",
-            f,
-        ],
-    );
-    assert_eq!(o.status.code(), Some(1));
-    assert_eq!(stdout(&o), format!("stdout={f}\n"));
-    assert_eq!(read_json(&file)["ok"], false);
+    let v = json_out(&o);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["file"], f);
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(v["data"]["bytes"], written.len());
+    assert_eq!(v["data"]["lines"], written.lines().count());
+    assert_eq!(read_json(&file)["user"]["name"], "Ann");
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn body_only_output_file_prints_metadata() {
+fn body_only_output_file_writes_the_body() {
     let srv = server();
     let dir = scratch("body");
     let file = dir.join("page.html");
     let f = file.to_str().unwrap();
     let args = [
         "confluence",
-        "content",
+        "page",
         "get",
         "123",
+        "--body-format",
+        "storage",
         "--body-only",
         "--output-file",
         f,
-    ];
-    let o = atlx(&srv, &[&args[..], &["-o", "json"]].concat());
-    assert!(o.status.success(), "{}", stderr(&o));
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "<p>Hello</p>");
-    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
-    assert_eq!(v["command"], "confluence.content.get");
-    assert_eq!(v["data"]["snapshotToken"], "7");
-    assert_eq!(
-        v["data"]["body"],
-        json!({"format": "html", "outputFile": f})
-    );
-
-    let o = atlx(&srv, &[&args[..], &["-o", "text"]].concat());
-    assert_eq!(stdout(&o), format!("stdout={f}\n"));
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn output_summary_writes_payload_and_prints_envelope() {
-    let srv = server();
-    let dir = scratch("summary");
-    let file = dir.join("out.json");
-    let f = file.to_str().unwrap();
-    let base = [
-        "jira",
-        "workitem",
-        "get",
-        "OK-1",
         "-o",
         "json",
-        "--output-file",
-        f,
     ];
-
-    let o = atlx(&srv, &[&base[..], &["--output-summary"]].concat());
+    let o = atlx(&srv, &args);
     assert!(o.status.success(), "{}", stderr(&o));
-    let out = stdout(&o);
-    let full = std::fs::read_to_string(&file).unwrap();
-    assert!(
-        out.starts_with(&format!(
-            "output_files:\n  stdout: \"{}\"\n  stdout_lines: {}\n  stdout_bytes: {}\ncommand: \"jira.workitem.get\"\nresource_type: \"entity\"\nstdout_inline:\n  apiVersion: \"v2\"\n  command: \"jira.workitem.get\"\n",
-            f.replace('\\', "\\\\"),
-            full.split('\n').count(),
-            full.len()
-        )),
-        "{out}"
-    );
-    assert!(out.ends_with("---END---\n"));
-
-    let o = atlx(&srv, &[&base[..], &["--output-summary", "stats"]].concat());
-    let out = stdout(&o);
-    assert!(
-        out.contains("agent_output:\n  summary: \"stats\"\n"),
-        "{out}"
-    );
-    assert!(
-        out.contains("stdout_shape:\n") && out.contains("\n      key: [S, 4, 1, [\"OK-1\"]]\n"),
-        "{out}"
-    );
-    assert!(!out.contains("stdout_inline"));
-
-    let o = atlx(
-        &srv,
-        &[
-            &base[..],
-            &[
-                "--output-summary",
-                "--agent-fields",
-                "data.key,data.summary",
-            ],
-        ]
-        .concat(),
-    );
-    let out = stdout(&o);
-    assert!(out.contains("field_source: \"explicit\"\n"), "{out}");
-    assert!(
-        out.contains(
-            "stdout_inline:\n  data:\n    -\n      key: \"OK-1\"\n      summary: \"Fine\"\n---END---\n"
-        ),
-        "{out}"
-    );
-    let compact = read_json(&dir.join("out.compact.json"));
-    assert_eq!(
-        compact,
-        json!({"data": [{"key": "OK-1", "summary": "Fine"}]})
-    );
-
-    // `none` prints the payload as usual (here: into the file).
-    let o = atlx(&srv, &[&base[..], &["--output-summary", "none"]].concat());
-    assert_eq!(stdout(&o), format!("stdout={f}\n"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "<p>Hello</p>");
+    let v = json_out(&o);
+    assert_eq!(v["data"], json!({"file": f, "bytes": 12, "lines": 1}));
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn api_version_accepts_only_v2() {
+fn removed_output_flags_are_usage_errors() {
     let srv = server();
-    let o = atlx(
-        &srv,
-        &[
-            "jira",
-            "workitem",
-            "get",
-            "OK-1",
-            "-o",
-            "json",
-            "--api-version",
-            "v2",
-        ],
-    );
-    assert!(o.status.success(), "{}", stderr(&o));
-    let o = atlx(
-        &srv,
-        &["jira", "workitem", "get", "OK-1", "--api-version", "v3"],
-    );
-    assert_eq!(o.status.code(), Some(1));
-    assert!(stderr(&o).contains("v3"));
+    for flag in [
+        "--select",
+        "--agent-fields",
+        "--output-summary",
+        "--api-version",
+    ] {
+        let o = atlx(&srv, &["auth", "status", "-o", "json", flag, "x"]);
+        assert_eq!(o.status.code(), Some(2), "{flag}");
+        assert_eq!(json_out(&o)["error"]["code"], "usage", "{flag}");
+    }
+    assert!(srv.requests().is_empty());
 }

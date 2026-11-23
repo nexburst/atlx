@@ -2,37 +2,48 @@
 //!
 //! Each product keeps its clap enums and dispatch in its own module
 //! (`jira`, `confluence`, `bitbucket`); the API calls they make live in the
-//! crate-level product modules (`crate::jira`, ...).
+//! crate-level product modules (`crate::jira`, ...). Each product module
+//! also exports `META`: its commands' effects, records and examples (see
+//! [`crate::schema::CommandMeta`]).
 
 mod api;
 mod auth;
 mod bitbucket;
+mod cache;
 mod completion;
 mod confluence;
+mod describe;
 mod doctor;
 mod jira;
 mod jsm;
 mod search;
 mod shape;
 mod skill;
-mod unsupported;
 mod user;
 mod util;
 
-use crate::client::{ApiError, exit};
+use crate::client::{ApiError, DryRun, exit};
 use crate::config::{self, Config};
-use crate::output::{self, Format};
+use crate::output::Format;
+use crate::schema::{CommandMeta, Effect, registry};
 use anyhow::Result;
+use clap::error::ContextKind;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use serde_json::Value;
 use std::io::IsTerminal;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Open, agent-friendly CLI for Jira, Confluence and Bitbucket Cloud.
+/// A command line for Jira, Confluence and Bitbucket Cloud, built for coding
+/// agents and people on Atlassian's public REST APIs.
 ///
-/// Commands and flags follow Atlassian's `twg` CLI, so `twg jira workitem get
-/// PROJ-1 --comments` becomes `atlx jira workitem get PROJ-1 --comments`.
+/// Every command prints one JSON envelope when piped (`{"ok":…,"data":…}`)
+/// and tables on a terminal. Machine-readable: atlx describe <path>.
 #[derive(Parser)]
-#[command(name = "atlx", version)]
+#[command(
+    name = "atlx",
+    version,
+    after_help = "Machine-readable: atlx describe <path>"
+)]
 pub struct Cli {
     /// Output format [default: text on a terminal, json when piped]
     #[arg(short, long, global = true, value_enum, env = "ATLX_OUTPUT")]
@@ -49,6 +60,15 @@ pub struct Cli {
     /// Saved profile to use; `default` means the saved default [env: ATLX_PROFILE]
     #[arg(short, long, global = true, value_name = "NAME")]
     profile: Option<String>,
+    /// Send no write: reads run, the first write is printed instead of sent
+    #[arg(long, global = true)]
+    dry_run: bool,
+    /// Refuse every write (also ATLX_READ_ONLY=1 or `read_only = true` in a profile)
+    #[arg(long, global = true)]
+    read_only: bool,
+    /// Do not read or write the metadata cache (also ATLX_NO_CACHE=1)
+    #[arg(long, global = true)]
+    no_cache: bool,
     #[command(flatten)]
     shaping: shape::OutputArgs,
     #[command(subcommand)]
@@ -58,29 +78,18 @@ pub struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)] // parsed once per run
 enum Cmd {
-    /// Save credentials (site, email, API token)
-    Login(auth::LoginArgs),
-    /// Remove the selected profile and its saved credentials
-    Logout,
-    /// Show the authenticated user
-    Whoami,
-    /// Check config, permissions, and service connectivity (atlx extra)
+    /// Sign in, sign out, check who is signed in, manage profiles
+    Auth {
+        #[command(subcommand)]
+        cmd: auth::AuthCmd,
+    },
+    /// Check config, permissions, and service connectivity in depth
     Doctor {
         /// Fail on warnings or unconfigured checks
         #[arg(long)]
         strict: bool,
     },
-    /// Saved credentials and login profiles
-    Auth {
-        #[command(subcommand)]
-        cmd: auth::AuthCmd,
-    },
-    /// Optional setup: Bitbucket token, default site
-    Setup {
-        #[command(subcommand)]
-        cmd: auth::SetupCmd,
-    },
-    /// Jira work items, metadata, boards and sprints
+    /// Jira issues, projects, boards, sprints, filters and dashboards
     Jira {
         #[command(subcommand)]
         cmd: jira::JiraCmd,
@@ -89,11 +98,6 @@ enum Cmd {
     Jsm {
         #[command(subcommand)]
         cmd: jsm::JsmCmd,
-    },
-    /// Atlassian users
-    User {
-        #[command(subcommand)]
-        cmd: user::UserCmd,
     },
     /// Confluence search, content and spaces
     Confluence {
@@ -106,14 +110,22 @@ enum Cmd {
         #[command(subcommand)]
         cmd: bitbucket::BbCmd,
     },
-    /// Search Jira, Confluence and Bitbucket at once (atlx extra)
+    /// Search Jira, Confluence and Bitbucket at once
     Search(search::SearchArgs),
-    /// Call any REST endpoint directly (atlx extra)
+    /// Call any REST endpoint directly
     ///
     /// Paths are relative to https://SITE (jira), https://SITE/wiki (confluence)
     /// or https://api.bitbucket.org/2.0 (bitbucket, where `{workspace}` is replaced
-    /// with your default workspace).
+    /// with your default workspace). The response goes in `data` untouched.
+    /// Read-only mode and --dry-run apply to it like to every other command.
     Api(api::ApiArgs),
+    /// Describe commands, record types and error codes as JSON
+    Describe(describe::DescribeArgs),
+    /// The local metadata cache (field names, space keys; never content)
+    Cache {
+        #[command(subcommand)]
+        cmd: cache::CacheCmd,
+    },
     /// Shell completion scripts
     Completion {
         #[command(subcommand)]
@@ -122,12 +134,47 @@ enum Cmd {
     /// Generate man pages (used by the release build)
     #[command(hide = true)]
     Man(completion::ManArgs),
-    /// The agent skill that ships with atlx (atlx extra)
+    /// The agent skill that ships with atlx
     Skill {
         #[command(subcommand)]
         cmd: skill::SkillCmd,
     },
 }
+
+/// The core commands' registry entries.
+const CORE_META: &[CommandMeta] = &[
+    CommandMeta::new("doctor", Effect::Read).examples(&["atlx doctor", "atlx doctor --strict"]),
+    CommandMeta::new("search", Effect::Read).examples(&[
+        "atlx search 'login timeout' --limit 5",
+        "atlx search deploy --only jira,confluence",
+    ]),
+    CommandMeta::new("api", Effect::ByMethod).examples(&[
+        "atlx api jira /rest/api/3/myself",
+        "atlx api confluence /api/v2/pages -q limit=5",
+        "atlx api jira /rest/api/3/issue -X POST -d @issue.json --dry-run",
+        "atlx api jira /rest/api/3/issue/PROJ-1 -X DELETE --yes",
+    ]),
+    CommandMeta::new("describe", Effect::Read).examples(&[
+        "atlx describe",
+        "atlx describe auth status",
+        "atlx describe --errors",
+    ]),
+    CommandMeta::new("cache path", Effect::Read).examples(&["atlx cache path"]),
+    CommandMeta::new("cache clear", Effect::Write).examples(&["atlx cache clear"]),
+    CommandMeta::new("completion script", Effect::Read).examples(&["atlx completion script bash"]),
+    CommandMeta::new("skill install", Effect::Write).examples(&["atlx skill install"]),
+    CommandMeta::new("skill print", Effect::Read).examples(&["atlx skill print"]),
+];
+
+/// Every registry table: core, then each product's `META`.
+pub(crate) const META_TABLES: &[&[CommandMeta]] = &[
+    CORE_META,
+    auth::META,
+    jira::META,
+    jsm::META,
+    confluence::META,
+    bitbucket::META,
+];
 
 // --- runtime ---------------------------------------------------------------------
 
@@ -136,9 +183,10 @@ pub(crate) enum Out {
     /// Printed verbatim regardless of format.
     Raw(String),
     /// `--body-only`: `body` is printed verbatim, or with `--output-file`
-    /// written to the file while the rest of `full` is printed.
+    /// written to the file.
     Body {
         body: String,
+        #[allow(dead_code)]
         full: Value,
     },
     /// Text mode prints `text`; JSON and JSONL print `full`.
@@ -152,16 +200,22 @@ pub(crate) enum Out {
     Exit(Value, i32),
 }
 
+static DRY_RUN: AtomicBool = AtomicBool::new(false);
+
+/// Whether this run is a `--dry-run`.
+pub(crate) fn dry_run_requested() -> bool {
+    DRY_RUN.load(Ordering::SeqCst)
+}
+
 /// Parse the command line, run the command, print the result and exit.
 ///
-/// Exit codes follow twg (see [`exit`]): 0 on success, 1 on any failure
-/// (including argument errors), 3 when a batch read partially failed.
+/// Exit codes are listed by `atlx describe --errors` (see [`exit`]).
 pub fn main() {
     let matches = match Cli::command().try_get_matches() {
         Ok(m) => m,
         Err(e) => exit_clap(e),
     };
-    let cli = match Cli::from_arg_matches(&matches) {
+    let mut cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => exit_clap(e),
     };
@@ -170,25 +224,45 @@ pub fn main() {
     } else {
         Format::Json
     });
-    util::enable_notes(
-        fmt == Format::Text && std::io::stdout().is_terminal() && std::io::stderr().is_terminal(),
-    );
     util::set_text_output(fmt == Format::Text);
     let path = command_path(&matches);
-    let shaping = match shape::Shaping::new(cli.shaping, fmt, &path) {
+    let leaf = leaf_matches(&matches);
+    DRY_RUN.store(cli.dry_run, Ordering::SeqCst);
+    if cli.no_cache {
+        crate::cache::disable();
+    }
+    // A command may define its own flag with a global's name (Jira's
+    // `--fields` names REST fields); then the global does not apply.
+    for id in ["fields", "full", "raw", "max_chars", "output_file"] {
+        if defines_locally(&path, id) {
+            match id {
+                "fields" => cli.shaping.fields = None,
+                "full" => cli.shaping.full = false,
+                "raw" => cli.shaping.raw = false,
+                "max_chars" => cli.shaping.max_chars = None,
+                _ => {}
+            }
+        }
+    }
+    let shaping = match shape::Shaping::new(cli.shaping, fmt, &path, Some(leaf)) {
         Ok(s) => s,
         Err(e) => {
             let plain = shape::Shaping::plain(fmt, &path);
-            std::process::exit(report_error(&e, fmt, &path, &plain));
+            std::process::exit(plain.emit_error(&ApiError::from_anyhow(&e)));
         }
     };
+    if let Err(e) = confirm(&path, leaf, cli.dry_run) {
+        std::process::exit(shaping.emit_error(&ApiError::from_anyhow(&e)));
+    }
     let globals = Globals {
         site: cli.site,
         user: cli.user,
         timeout_ms: cli.timeout_ms,
         profile: cli.profile,
+        dry_run: cli.dry_run,
+        read_only: cli.read_only,
     };
-    let code = match run(&globals, cli.cmd).map(|out| wrap(&path, out)) {
+    let code = match run(&globals, cli.cmd) {
         Ok(Out::Exit(v, code)) => shaping.emit(Out::Exit(v, code), code),
         Ok(Out::Streamed(code)) => code,
         Ok(out) => {
@@ -201,35 +275,101 @@ pub fn main() {
             };
             shaping.emit(out, code)
         }
-        Err(e) => report_error(&e, fmt, &path, &shaping),
+        Err(e) => match DryRun::find(&e) {
+            Some(d) => shaping.emit_dry_run(d),
+            None => shaping.emit_error(&ApiError::from_anyhow(&e)),
+        },
     };
     std::process::exit(code);
 }
 
-/// clap errors: help and version go to stdout with exit 0; argument errors go
-/// to stderr with exit 1. A twg command atlx doesn't offer gets a
-/// twg error envelope instead (see [`unsupported`]).
-fn exit_clap(e: clap::Error) -> ! {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if e.use_stderr()
-        && let Some(api) = unsupported::explain(&args)
-    {
-        let fmt = output_from_args(&args);
-        let plain = shape::Shaping::plain(fmt, "");
-        if fmt == Format::Text {
-            eprintln!("✗ {}", api.message);
-        } else {
-            plain.emit_error(&api.envelope());
-        }
-        eprint!("{}", api.report());
-        std::process::exit(api.exit_code());
+/// The `--yes` rule: a command registered as destructive refuses to run
+/// without `--yes`, unless this is a `--dry-run`. Nothing ever prompts.
+fn confirm(path: &str, leaf: &clap::ArgMatches, dry_run: bool) -> Result<()> {
+    let Some(meta) = registry::lookup(path) else {
+        return Ok(());
+    };
+    let destructive = match meta.effect {
+        Effect::ByMethod => leaf
+            .try_get_one::<String>("method")
+            .ok()
+            .flatten()
+            .is_some_and(|m| Effect::of_method(m) == Effect::Destructive),
+        _ => meta.confirm(),
+    };
+    if !destructive || dry_run {
+        return Ok(());
     }
-    let _ = e.print();
-    std::process::exit(if e.use_stderr() {
-        exit::FAILURE
-    } else {
-        exit::OK
-    })
+    let yes = leaf.try_get_one::<bool>("yes").ok().flatten() == Some(&true);
+    if yes {
+        return Ok(());
+    }
+    Err(util::needs_yes(&format!("`atlx {path}`")))
+}
+
+/// Whether the command at `path` defines an argument `id` of its own
+/// (rather than inheriting the global one).
+fn defines_locally(path: &str, id: &str) -> bool {
+    let mut cmd = Cli::command();
+    for word in path.split(' ').filter(|w| !w.is_empty()) {
+        let Some(sc) = cmd.find_subcommand(word).cloned() else {
+            return false;
+        };
+        cmd = sc;
+    }
+    cmd.get_arguments().any(|a| a.get_id() == id)
+}
+
+/// clap errors: help and version go to stdout with exit 0. Argument errors
+/// exit 2 (`usage`): in JSON modes as an error envelope on stdout with
+/// `suggestions`, in text mode as clap's message on stderr.
+fn exit_clap(e: clap::Error) -> ! {
+    if !e.use_stderr() {
+        let _ = e.print();
+        std::process::exit(exit::OK);
+    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let fmt = output_from_args(&args);
+    if fmt == Format::Text {
+        let _ = e.print();
+        std::process::exit(exit::USAGE);
+    }
+    let shaping = shape::Shaping::plain(fmt, "");
+    std::process::exit(shaping.emit_error(&clap_usage(&e)))
+}
+
+/// A clap parse error as a structured `usage` error.
+fn clap_usage(e: &clap::Error) -> ApiError {
+    let text = e.render().to_string();
+    let message = text
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim_start_matches("error: ")
+        .to_string();
+    let mut suggestions = Vec::new();
+    for kind in [
+        ContextKind::SuggestedArg,
+        ContextKind::SuggestedSubcommand,
+        ContextKind::SuggestedValue,
+    ] {
+        match e.get(kind) {
+            Some(clap::error::ContextValue::String(s)) => suggestions.push(s.clone()),
+            Some(clap::error::ContextValue::Strings(v)) => suggestions.extend(v.iter().cloned()),
+            _ => {}
+        }
+    }
+    if let Some(clap::error::ContextValue::Strings(v)) = e.get(ContextKind::ValidValue) {
+        suggestions.extend(v.iter().cloned());
+    }
+    let mut api = ApiError::usage(message).with_suggestions(suggestions);
+    if let Some(clap::error::ContextValue::String(u)) = e.get(ContextKind::Usage) {
+        api.hint = Some(format!(
+            "{}; run `atlx describe <command>` for its flags",
+            u.trim().trim_start_matches("Usage: ")
+        ));
+    }
+    api
 }
 
 /// The output format named on a command line clap could not parse: `-o`,
@@ -248,13 +388,14 @@ fn output_from_args(args: &[String]) -> Format {
     match named.as_deref() {
         Some("json") => Format::Json,
         Some("jsonl") => Format::Jsonl,
+        Some("ids") => Format::Ids,
         Some("text") => Format::Text,
         _ if std::io::stdout().is_terminal() => Format::Text,
         _ => Format::Json,
     }
 }
 
-/// `jira.workitem.get` for `atlx jira workitem get ...`.
+/// `jira issue get` for `atlx jira issue get ...`.
 fn command_path(m: &clap::ArgMatches) -> String {
     let mut parts = Vec::new();
     let mut cur = m;
@@ -262,53 +403,20 @@ fn command_path(m: &clap::ArgMatches) -> String {
         parts.push(name);
         cur = sub;
     }
-    parts.join(".")
+    // `bb` is an alias; the registry uses the command's name.
+    if parts.first() == Some(&"bb") {
+        parts[0] = "bitbucket";
+    }
+    parts.join(" ")
 }
 
-/// Print an error the way twg does: in JSON modes the `{"ok": false,
-/// "error": ...}` envelope goes to stdout, and a readable report always goes
-/// to stderr. Returns the exit code.
-fn report_error(e: &anyhow::Error, fmt: Format, path: &str, shaping: &shape::Shaping) -> i32 {
-    let api = ApiError::from_anyhow(e);
-    if fmt == Format::Text {
-        eprintln!("✗ Failed {path}.");
+/// The matches of the command that runs.
+fn leaf_matches(m: &clap::ArgMatches) -> &clap::ArgMatches {
+    let mut cur = m;
+    while let Some((_, sub)) = cur.subcommand() {
+        cur = sub;
     }
-    shaping.emit_error(&api.envelope());
-    eprint!("{}", api.report());
-    api.exit_code()
-}
-
-/// Put results that are not already in an envelope into one
-/// for every command outside Bitbucket. The command name is the dotted CLI
-/// path (`doctor` is `doctor.get`). Bitbucket payloads, raw text and
-/// the atlx-only `api`, `completion` and `man` output stay as they are.
-fn wrap(path: &str, out: Out) -> Out {
-    let first = path.split('.').next().unwrap_or_default();
-    if matches!(
-        first,
-        "bitbucket" | "bb" | "api" | "completion" | "man" | "jira" | "jsm" | "confluence" | "user"
-    ) {
-        return out;
-    }
-    let command = if path == "doctor" { "doctor.get" } else { path };
-    let kind = match first {
-        "doctor" => "doctor",
-        "search" => "search-result",
-        "skill" => "skill",
-        _ => "auth",
-    };
-    let env = |v: Value| {
-        if output::envelope::is_envelope(&v) {
-            v
-        } else {
-            output::envelope::envelope(command, kind).data(v)
-        }
-    };
-    match out {
-        Out::Data(v) => Out::Data(env(v)),
-        Out::Exit(v, code) => Out::Exit(env(v), code),
-        other => other,
-    }
+    cur
 }
 
 pub(crate) struct Globals {
@@ -317,6 +425,10 @@ pub(crate) struct Globals {
     pub(crate) timeout_ms: Option<u64>,
     /// `-p/--profile`; `ATLX_PROFILE` is read by the config loader.
     pub(crate) profile: Option<String>,
+    pub(crate) dry_run: bool,
+    /// `--read-only`; `ATLX_READ_ONLY` and the profile are read by the
+    /// config loader.
+    pub(crate) read_only: bool,
 }
 
 impl Globals {
@@ -328,25 +440,29 @@ impl Globals {
             cfg.email = Some(u.clone());
         }
         cfg.timeout_ms = self.timeout_ms;
+        cfg.dry_run = self.dry_run;
+        cfg.read_only |= self.read_only;
         cfg
     }
 
     pub(crate) fn config(&self) -> Result<Config> {
         Ok(self.apply(Config::load(self.profile.as_deref())?))
     }
+
+    /// `--read-only` or `ATLX_READ_ONLY` (without loading a profile).
+    pub(crate) fn read_only_requested(&self) -> bool {
+        self.read_only
+            || std::env::var("ATLX_READ_ONLY")
+                .is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "no" | "off"))
+    }
 }
 
 fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
     let data = match cmd {
-        Cmd::Login(a) => auth::login(g, a)?,
-        Cmd::Logout => auth::logout(g)?,
-        Cmd::Auth { cmd } => auth::auth_cmd(g, cmd)?,
-        Cmd::Whoami => auth::whoami(g)?,
+        Cmd::Auth { cmd } => auth::run(g, cmd)?,
         Cmd::Doctor { strict } => return Ok(doctor::doctor(g, strict)),
-        Cmd::Setup { cmd } => auth::setup(g, cmd)?,
         Cmd::Jira { cmd } => jira::jira_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Jsm { cmd } => jsm::jsm_cmd(&g.config()?.jira()?, cmd)?,
-        Cmd::User { cmd } => user::user_cmd(&g.config()?.jira()?, cmd)?,
         Cmd::Confluence { cmd } => {
             if let Some(out) = confluence::offline(&cmd) {
                 return out;
@@ -356,6 +472,8 @@ fn run(g: &Globals, cmd: Cmd) -> Result<Out> {
         Cmd::Bitbucket { cmd } => return bitbucket::bb_cmd(&g.config()?, cmd),
         Cmd::Search(a) => search::run(g, a)?,
         Cmd::Api(a) => api::run(&g.config()?, a)?,
+        Cmd::Describe(a) => return describe::run(a),
+        Cmd::Cache { cmd } => cache::run(cmd)?,
         Cmd::Completion { cmd } => return completion::completion_cmd(cmd),
         Cmd::Man(a) => return completion::man(a),
         Cmd::Skill { cmd } => return skill::run(cmd),
@@ -373,96 +491,64 @@ mod tests {
     }
 
     #[test]
-    fn parses_twg_style_invocations() {
+    fn parses_core_and_product_invocations() {
         for args in [
-            "atlx jira workitem get PROJ-1 PROJ-2 --comments -o json --site acme",
-            "atlx jira workitem query --jql 'project = X' --limit 5",
-            "atlx jira workitem create --space PROJ --type Bug --summary S --description-format markdown",
-            "atlx jira workitem update --id PROJ-1 --add-labels a,b --status Done --comment hi --comment-format plain",
-            "atlx jira workitem comment create --issue-id PROJ-1 --body hi --body-format plain",
-            "atlx jira workitem transition --id PROJ-1 --transition-id 31",
-            "atlx jira workitem transitions query --id PROJ-1",
-            "atlx jira workitem create-meta --space PROJ --type Task",
-            "atlx jira workitem create-meta --space PROJ",
-            "atlx jira workitem link types",
-            "atlx jira workitem link create --inward PROJ-1 --outward PROJ-2 --type Blocks --comment 'blocked by'",
-            "atlx jira workitem link remote --id PROJ-1 --url https://example.com/spec --title Spec --relationship 'Wiki Page'",
-            "atlx jira field list --query story --custom-only",
-            "atlx jira project list --query PROJ --limit 10",
-            "atlx jira project get PROJ",
-            "atlx jira board list --project PROJ --type scrum --limit 10",
-            "atlx jira sprint list --board 12 --state active,future --limit 5",
-            "atlx jira sprint issues --sprint 99 --jql 'status != Done' --limit 20",
-            "atlx user search alice --limit 10 -o json",
-            "atlx user search 'alice smith' -o jsonl --site acme --user me@acme.com --timeout-ms 5000",
-            "atlx confluence search query --cql type=page --excerpt",
-            "atlx confluence search text launch plan --since 7d",
-            "atlx confluence content get 12345 --detail full --format md",
-            "atlx confluence content get 'Runbook' --reference-space ENG",
-            "atlx confluence content create --space-id ENG --content-type page --title T --body-file f --format html --ack-body-formats -y",
-            "atlx confluence content update 12345 --snapshot-token 3 --body x --format markdown --dry-run",
-            "atlx confluence content list --space ENG --status archived",
-            "atlx confluence content comments list 12345 --inline --format html --limit 10 --cursor c1",
-            "atlx confluence content comments create 12345 --body 'Looks good' --format markdown",
-            "atlx confluence content children 12345 --limit 10 --cursor c1",
-            "atlx confluence content labels 12345 --limit 20",
-            "atlx confluence content delete 12345 --yes --purge",
-            "atlx confluence tree 12345 --depth 3",
-            "atlx confluence space get ENG",
-            "atlx confluence space me",
-            "atlx bb repo query --workspace acme",
-            "atlx bitbucket repo get --workspace acme --repo api",
-            "atlx bb repo file src/main.rs --repo acme/api --ref main",
-            "atlx bitbucket repo file src --repo api",
-            "atlx bb repo branches --repo acme/api --query feat --limit 10",
-            "atlx bitbucket repo branches --repo api",
-            "atlx bb pull-requests query --workspace acme --repo api --state MERGED",
-            "atlx bb prs get 930 931 --statuses --comments --repo acme/api",
-            "atlx bb pull-requests create --title t --source feat --dest main --repo api",
-            "atlx bb pull-requests comment create --pull-request 930 --text LGTM --repo api",
-            "atlx bb pull-requests diff 930 --repo acme/api",
-            "atlx bitbucket pull-requests diff https://bitbucket.org/acme/api/pull-requests/930 --repo acme/api",
-            "atlx bb pull-requests activity 930 --repo api --type comment --limit 10",
-            "atlx bitbucket pull-requests tasks 930 --repo api",
-            "atlx bb pull-requests approve 930 --repo api",
-            "atlx bitbucket pull-requests unapprove 930 --repo api",
-            "atlx bb pull-requests request-changes 930 --repo api",
-            "atlx bb pull-requests merge 930 --repo api --strategy squash --close-source-branch --message 'Ship it' --yes",
-            "atlx bitbucket pull-requests merge 930 --repo api --strategy fast_forward -y",
-            "atlx bb pull-requests decline 930 --repo api --yes",
-            "atlx bitbucket pull-requests decline 930 --repo api -y",
-            "atlx bb pipeline query --repo api --status FAILED",
-            "atlx bb pipeline get --pipeline 1234 --logs --failed-steps --repo api",
-            "atlx bb search code 'AuthService' --workspace acme --repo api --limit 10",
-            "atlx bitbucket search code AuthService --repo api",
-            "atlx whoami -o text",
-            "atlx doctor",
+            "atlx jira issue get PROJ-1 PROJ-2 -o json --site acme",
+            "atlx jira issue list --jql 'project = X' --limit 5",
+            "atlx jira issue create --project PROJ --type Bug --summary S --body-format markdown",
+            "atlx jira issue comment create --issue PROJ-1 --body hi --body-format plain",
+            "atlx jira field list --query story --custom",
+            "atlx jira user search alice --limit 10 -o json",
+            "atlx confluence search --cql type=page",
+            "atlx confluence page get 12345 --body-format markdown --full",
+            "atlx confluence page update 12345 --if-version 3 --body x --body-format markdown --dry-run",
+            "atlx bb repo list --workspace acme",
+            "atlx bb pr merge 930 --repo acme/api --strategy squash --yes",
+            "atlx bb pipeline log 1234 --failed --repo acme/api",
             "atlx doctor --strict -o json",
-            "atlx setup bitbucket --workspace acme",
-            "atlx jira workitem get PROJ-1 -o json --select data.key,data.status.name --output-file /tmp/x.json",
-            "atlx jira workitem query --jql 'project = X' -o json --select @compact",
-            "atlx jira workitem query --jql 'project = X' -o json --output-summary --agent-fields @compact",
-            "atlx jira workitem get PROJ-1 -o json --output-summary stats --output-file out.json",
-            "atlx jira workitem get PROJ-1 -o jsonl --output-summary inline --api-version v2",
-            "atlx confluence content get 12345 --detail full --format html --body-only --output-file ./page.html -o json",
-            "atlx --select key --output-summary none jira workitem get PROJ-1",
-            "atlx setup bitbucket --workspace acme --token-cmd 'pass show bb' -p work",
-            "atlx setup default-site acme --profile work",
-            "atlx -p work jira workitem get PROJ-1",
-            "atlx jira workitem get PROJ-1 --profile default",
-            "atlx login --new-profile",
-            "atlx login --new-profile work -s acme -u me@acme.com --token-cmd 'op read op://x/y' --no-verify",
-            "atlx login -p work --force",
-            "atlx logout -p work",
+            "atlx jira issue get PROJ-1 -o json --fields key,status --output-file /tmp/x.json",
+            "atlx jira issue get PROJ-1 -o ids --full",
+            "atlx jira issue get PROJ-1 --raw --max-chars 0",
+            "atlx --dry-run --read-only --no-cache jira issue get PROJ-1",
+            "atlx confluence page get 12345 --body-only --output-file ./page.md -o json",
+            "atlx -p work jira issue get PROJ-1",
+            "atlx jira issue get PROJ-1 --profile default",
+            "atlx auth login --new-profile",
+            "atlx auth login --new-profile work -s acme -u me@acme.com --token-cmd 'op read op://x/y' --no-verify",
+            "atlx auth login -p work --force",
+            "atlx auth logout -p work",
+            "atlx auth status -o json",
+            "atlx auth bitbucket --workspace acme --token-cmd 'pass show bb' -p work",
             "atlx auth profile list",
+            "atlx auth profile update -s acme --profile work",
             "atlx auth profile default work",
             "atlx auth profile rename default work",
             "atlx auth profile migrate --yes",
+            "atlx describe",
+            "atlx describe jira issue get",
+            "atlx describe --records",
+            "atlx describe --errors",
+            "atlx describe bitbucket --all",
+            "atlx cache path",
+            "atlx cache clear",
         ] {
             let argv: Vec<String> = shell_words(args);
             if let Err(e) = Cli::try_parse_from(&argv) {
                 panic!("{args}: {e}");
             }
+        }
+    }
+
+    #[test]
+    fn removed_spellings_no_longer_parse() {
+        for args in [
+            "atlx whoami",
+            "atlx login",
+            "atlx setup bitbucket",
+            "atlx jira issue get P-1 --select key",
+            "atlx jira issue get P-1 --output-summary",
+        ] {
+            assert!(Cli::try_parse_from(shell_words(args)).is_err(), "{args}");
         }
     }
 
@@ -500,14 +586,21 @@ mod tests {
     #[test]
     fn descending_sort_values_parse_as_documented() {
         for args in [
-            "bb branch query -r acme/api --sort -name",
-            "bb repo query --workspace acme --sort -updated_on",
-            "jira space query --sort-by -lastIssueUpdatedDate",
-            "confluence content attachments list --id 1 --sort -created-date",
+            "bb repo branch list -r acme/api --sort -name",
+            "bb repo list --workspace acme --sort -updated_on",
+            "jira project list --order-by -lastIssueUpdatedDate",
+            "confluence page attachment list --page 1 --sort -created-date",
         ] {
             if let Err(e) = Cli::try_parse_from(["atlx"].into_iter().chain(args.split(' '))) {
                 panic!("{args}: {e}");
             }
         }
+    }
+
+    #[test]
+    fn local_flags_shadow_globals() {
+        assert!(!defines_locally("confluence page update", "dry_run"));
+        assert!(!defines_locally("auth status", "dry_run"));
+        assert!(!defines_locally("nope nope", "fields"));
     }
 }

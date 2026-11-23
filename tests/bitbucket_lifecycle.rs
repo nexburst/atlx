@@ -1,9 +1,10 @@
-//! Offline tests for the pull request lifecycle (#32).
+//! Offline tests for the pull request lifecycle: update, reviewers, merge
+//! (with `--if-head`), checks, and the cross-repository scans.
 
 mod common;
 
 use atlx::bitbucket::lifecycle::{self as lc, User};
-use atlx::bitbucket::{self, PrMerge, PrQuery};
+use atlx::bitbucket::{self, Paging, PrMerge, PrQuery};
 use atlx::client::{ApiError, ErrorKind};
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
@@ -35,12 +36,7 @@ fn pr() -> MockResponse {
 }
 
 fn plain() -> PrMerge<'static> {
-    PrMerge {
-        strategy: None,
-        close_source_branch: false,
-        keep_source_branch: false,
-        message: None,
-    }
+    PrMerge::default()
 }
 
 fn quick(timeout_ms: u64) -> Option<lc::Wait> {
@@ -185,7 +181,9 @@ fn merge_wait_times_out_without_merging_again() {
     let srv = MockServer::with_responses([accepted(), ok(json!({"task_status": "PENDING"}))]);
     let err = lc::merge(&srv.client(), REPO, 4, &plain(), quick(0)).unwrap_err();
     assert_eq!(kind(&err), Some(ErrorKind::Timeout));
-    assert!(err.to_string().contains("t-1"), "{err}");
+    assert!(err.to_string().contains("don't merge again"), "{err}");
+    let api = ApiError::find(&err).unwrap();
+    assert!(api.hint.as_deref().unwrap().contains("pr get 4"));
     assert_eq!(
         srv.requests().iter().filter(|r| r.method == "POST").count(),
         1
@@ -193,10 +191,10 @@ fn merge_wait_times_out_without_merging_again() {
 }
 
 #[test]
-fn merge_without_wait_returns_the_task() {
+fn merge_without_wait_says_it_is_merging() {
     let srv = MockServer::with_responses([accepted()]);
     let out = lc::merge(&srv.client(), REPO, 4, &plain(), None).unwrap();
-    assert_eq!(out["task_id"], "t-1");
+    assert_eq!(out, json!({"id": 4, "state": "MERGING"}));
     assert_eq!(srv.requests()[0].query_param("async"), None);
 }
 
@@ -212,8 +210,8 @@ fn merge_555_checks_before_retrying() {
 
     let srv = MockServer::with_responses([timed_out(), pr(), accepted()]);
     assert_eq!(
-        lc::merge(&srv.client(), REPO, 4, &plain(), None).unwrap()["task_id"],
-        "t-1"
+        lc::merge(&srv.client(), REPO, 4, &plain(), None).unwrap()["state"],
+        "MERGING"
     );
     assert_eq!(
         srv.requests()[2].query_param("async").as_deref(),
@@ -221,8 +219,49 @@ fn merge_555_checks_before_retrying() {
     );
 }
 
+fn head(hash: &str) -> MockResponse {
+    ok(json!({"id": 4, "state": "OPEN", "source": {"commit": {"hash": hash}}}))
+}
+
 #[test]
-fn mergeability_lists_every_blocker() {
+fn merge_if_head_refuses_a_moved_branch_and_sends_no_merge() {
+    let srv = MockServer::with_responses([head("9999999aaaaa")]);
+    let o = PrMerge {
+        if_head: Some("3f2a9c1b7e44d0c1"),
+        ..Default::default()
+    };
+    let err = lc::merge(&srv.client(), REPO, 4, &o, quick(1000)).unwrap_err();
+    let api = ApiError::find(&err).unwrap();
+    assert_eq!(api.kind, ErrorKind::Conflict);
+    assert_eq!(api.exit_code(), 6);
+    assert!(api.message.contains("9999999aaaaa"), "{}", api.message);
+    assert!(api.hint.as_deref().unwrap().contains("pr get 4"));
+    let r = srv.requests();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].method, "GET");
+
+    // A matching head (Bitbucket's 12-character short hash) merges.
+    let srv = MockServer::with_responses([
+        head("3f2a9c1b7e44"),
+        ok(json!({"id": 4, "state": "MERGED"})),
+    ]);
+    let out = lc::merge(&srv.client(), REPO, 4, &o, None).unwrap();
+    assert_eq!(out["state"], "MERGED");
+    assert_eq!(srv.requests()[1].method, "POST");
+
+    // Too short to compare: refused before any request.
+    let srv = MockServer::with_responses([]);
+    let short = PrMerge {
+        if_head: Some("3f2a"),
+        ..Default::default()
+    };
+    let err = lc::merge(&srv.client(), REPO, 4, &short, None).unwrap_err();
+    assert_eq!(kind(&err), Some(ErrorKind::Usage));
+    assert!(srv.requests().is_empty());
+}
+
+#[test]
+fn checks_list_every_blocker_and_the_statuses() {
     let srv = MockServer::with_responses([
         ok(json!({
             "state": "OPEN", "author": {"uuid": "{author}"},
@@ -237,7 +276,9 @@ fn mergeability_lists_every_blocker() {
         page(json!([{"status": "merge conflict"}, {"status": "modified"}])),
         page(json!([{"pattern": "release/*", "value": 2}, {"pattern": "main", "value": 5}])),
     ]);
-    let out = lc::mergeability(&srv.client(), REPO, 4, lc::Exclude::default()).unwrap();
+    let out = lc::checks(&srv.client(), REPO, 4, lc::Exclude::default()).unwrap();
+    assert_eq!(out["pr"], 4);
+    assert_eq!(out["statuses"].as_array().unwrap().len(), 2);
     assert_eq!(out["mergeable"], false);
     assert_eq!(out["approvals"], 1);
     let kinds: Vec<&str> = out["blockers"]
@@ -259,21 +300,26 @@ fn mergeability_lists_every_blocker() {
 }
 
 #[test]
-fn mergeability_says_what_it_could_not_check() {
+fn checks_say_what_they_could_not_check() {
     let srv = MockServer::with_responses([
         pr(),
         page(json!([])),
         page(json!([])),
         MockResponse::json(403, json!({"error": {"message": "admin only"}})),
     ]);
-    let x = lc::Exclude {
-        git_mergeability: true,
-        commits_behind: true,
-    };
-    let out = lc::mergeability(&srv.client(), REPO, 4, x).unwrap();
+    let x = lc::Exclude { conflicts: true };
+    let out = lc::checks(&srv.client(), REPO, 4, x).unwrap();
     assert_eq!(out["mergeable"], true);
-    assert_eq!(out["unchecked"].as_array().unwrap().len(), 1);
-    assert_eq!(out["unchecked"][0]["kind"], "approvals");
+    let kinds: Vec<&str> = out["unchecked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["approvals", "maximum_commits_behind", "merge_conflict"]
+    );
 }
 
 #[test]
@@ -281,19 +327,23 @@ fn conflicts_keep_only_conflicting_files() {
     let srv = MockServer::with_responses([page(json!([
         {"status": "modified"}, {"status": "merge conflict"}
     ]))]);
-    let out = lc::conflicts(&srv.client(), REPO, 4, 100).unwrap();
-    assert_eq!(out, json!([{"status": "merge conflict"}]));
+    let (out, next) =
+        bitbucket::pr_diffstat(&srv.client(), REPO, 4, true, &Paging::new(100)).unwrap();
+    assert_eq!(out, [json!({"status": "merge conflict"})]);
+    assert_eq!(next, None);
 }
 
 #[test]
 fn for_commit_explains_indexing() {
     let srv = MockServer::with_responses([MockResponse::json(202, json!({}))]);
-    let err = lc::for_commit(&srv.client(), REPO, "abc123", 25).unwrap_err();
+    let err = lc::for_commit(&srv.client(), REPO, "abc123", &Paging::new(25)).unwrap_err();
     assert!(err.to_string().contains("indexing"), "{err}");
 
     let srv = MockServer::with_responses([page(json!([{"id": 4}]))]);
     assert_eq!(
-        lc::for_commit(&srv.client(), REPO, "abc123", 25).unwrap()[0]["id"],
+        lc::for_commit(&srv.client(), REPO, "abc123", &Paging::new(25))
+            .unwrap()
+            .0[0]["id"],
         4
     );
     assert_eq!(
@@ -303,20 +353,25 @@ fn for_commit_explains_indexing() {
 }
 
 #[test]
-fn query_takes_reviewer_and_page() {
-    let srv = MockServer::with_responses([ok(json!({"values": [{"id": 1}], "next": "x"}))]);
+fn list_takes_reviewer_and_a_cursor() {
+    let srv = MockServer::with_responses([ok(
+        json!({"values": [{"id": 1}], "next": "https://api.bitbucket.org/2.0/x?pagelen=10&page=4"}),
+    )]);
     let q = PrQuery {
         reviewer: Some("{a}"),
-        page: Some(3),
-        limit: 10,
         ..Default::default()
     };
-    let out = bitbucket::pr_query(&srv.client(), REPO, &q).unwrap();
-    assert_eq!(out["page"], 3);
-    assert_eq!(out["hasMore"], true);
+    let p = Paging {
+        limit: 1,
+        cursor: Some("t:10:3".into()),
+    };
+    let (items, next) = bitbucket::pr_list(&srv.client(), REPO, &q, &p).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(next.as_deref(), Some("t:10:4"));
     let r = &srv.requests();
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].query_param("page").as_deref(), Some("3"));
+    assert_eq!(r[0].query_param("pagelen").as_deref(), Some("10"));
     assert_eq!(
         r[0].query_param("q").as_deref(),
         Some("reviewers.uuid = \"{a}\"")
@@ -332,14 +387,20 @@ fn merged_filters_use_the_merge_event() {
         event("2026-03-05T10:00:00+00:00"),
         event("2026-01-05T10:00:00+00:00"),
     ]);
-    let q = PrQuery {
-        limit: 10,
-        ..Default::default()
-    };
-    let out = lc::merged(&srv.client(), REPO, &q, Some("2026-03-01"), None).unwrap();
-    assert_eq!(out["returned"], 1);
-    assert_eq!(out["values"][0]["id"], 1);
-    assert_eq!(out["scanned"], 2);
+    let q = PrQuery::default();
+    let (items, next) = lc::merged(
+        &srv.client(),
+        REPO,
+        &q,
+        Some("2026-03-01"),
+        None,
+        &Paging::new(10),
+    )
+    .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], 1);
+    assert_eq!(items[0]["merged_on"], "2026-03-05T10:00:00+00:00");
+    assert_eq!(next, None);
     let r = srv.requests();
     assert_eq!(r[0].query_param("state").as_deref(), Some("MERGED"));
     assert_eq!(
@@ -366,16 +427,16 @@ fn inbox_keeps_what_waits_on_me() {
         repo: None,
         role: None,
         waiting: true,
-        state: "open",
+        state: Some("open"),
         limit: 25,
         repo_limit: 25,
-        repo_role: "member",
         concurrency: 1,
     };
     let out = lc::mine(&srv.client(), &o).unwrap();
-    let mut ids: Vec<u64> = out["values"]
-        .as_array()
-        .unwrap()
+    assert!(!out.more);
+    assert_eq!(out.repos_scanned, 1);
+    let mut ids: Vec<u64> = out
+        .items
         .iter()
         .map(|p| p["id"].as_u64().unwrap())
         .collect();
@@ -400,8 +461,8 @@ fn default_reviewers_and_request_changes() {
         MockResponse::empty(204),
     ]);
     let c = srv.client();
-    lc::default_reviewers(&c, REPO, false, 50).unwrap();
-    lc::default_reviewers(&c, REPO, true, 50).unwrap();
+    lc::default_reviewers(&c, REPO, false, &Paging::new(50)).unwrap();
+    lc::default_reviewers(&c, REPO, true, &Paging::new(50)).unwrap();
     lc::default_reviewer_get(&c, REPO, "abc").unwrap();
     lc::default_reviewer_add(&c, REPO, "{abc}").unwrap();
     lc::default_reviewer_remove(&c, REPO, "abc").unwrap();

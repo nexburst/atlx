@@ -4,7 +4,6 @@ mod common;
 
 use atlx::client::{ApiError, ErrorKind};
 use atlx::jira::{attachments, people, worklogs};
-use atlx::markup::TextFormat;
 use atlx::time;
 use common::{MockResponse, MockServer};
 use serde_json::{Value, json};
@@ -28,14 +27,14 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn attachment_query_and_get_strip_avatars() {
+fn attachment_list_and_get() {
     let file =
         || json!({"id": "10001", "filename": "a.txt", "author": {"avatarUrls": {"48x48": "x"}}});
     let srv =
         MockServer::with_responses([ok(json!({"fields": {"attachment": [file()]}})), ok(file())]);
     let c = srv.client();
-    let list = attachments::query(&c, "PROJ-1").unwrap();
-    assert!(list[0]["author"].get("avatarUrls").is_none());
+    let list = attachments::list(&c, "PROJ-1").unwrap();
+    assert_eq!(list[0]["id"], "10001");
     assert_eq!(attachments::get(&c, "10001").unwrap()["filename"], "a.txt");
     let r = srv.requests();
     assert_eq!(r[0].query_param("fields").as_deref(), Some("attachment"));
@@ -150,16 +149,16 @@ fn watcher_defaults_resolve_me_and_never_send_an_empty_account() {
 #[test]
 fn watchers_and_votes_use_their_endpoints() {
     let srv = MockServer::with_responses([
-        ok(json!({"watchCount": 1})),
+        ok(json!({"watchCount": 1, "watchers": [{"accountId": "a"}]})),
         ok(json!({"votes": 2})),
         MockResponse::empty(204),
         MockResponse::empty(204),
     ]);
     let c = srv.client();
-    assert_eq!(people::watchers(&c, "PROJ-1").unwrap()["watchCount"], 1);
+    assert_eq!(people::watchers(&c, "PROJ-1").unwrap()[0]["accountId"], "a");
     assert_eq!(people::votes(&c, "PROJ-1").unwrap()["votes"], 2);
-    people::vote(&c, "PROJ-1", true).unwrap();
-    people::vote(&c, "PROJ-1", false).unwrap();
+    people::vote(&c, "PROJ-1").unwrap();
+    people::unvote(&c, "PROJ-1").unwrap();
     let r = srv.requests();
     assert_eq!((r[2].method.as_str(), r[2].body.as_str()), ("POST", ""));
     assert_eq!(r[3].method, "DELETE");
@@ -176,7 +175,7 @@ fn worklog_add_sends_body_and_estimate_options() {
     let entry = worklogs::Entry {
         time_spent: Some("1h 30m"),
         started: Some(time::epoch_millis("2026-01-05T10:00:00+02:00").unwrap()),
-        comment: Some(("Pairing", TextFormat::Plain)),
+        comment: Some(atlx::markup::text_to_adf("Pairing")),
         ..Default::default()
     };
     let opts = worklogs::WriteOpts {
@@ -256,13 +255,21 @@ fn worklog_update_get_and_delete_address_one_worklog() {
 }
 
 #[test]
-fn worklog_query_pages_by_offset() {
+fn worklog_list_pages_by_offset() {
     let srv = MockServer::with_responses([ok(json!({
         "startAt": 2, "maxResults": 2, "total": 5, "worklogs": [{"id": "3"}, {"id": "4"}]
     }))]);
-    let page =
-        worklogs::query(&srv.client(), "PROJ-1", 2, 2, Some(1000), Some(2000), None).unwrap();
-    assert_eq!(page.next.as_deref(), Some("4"));
+    let (items, next) = worklogs::list(
+        &srv.client(),
+        "PROJ-1",
+        Some(1000),
+        Some(2000),
+        2,
+        Some("o:2"),
+    )
+    .unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(next.as_deref(), Some("o:4"));
     let r = &srv.requests()[0];
     assert_eq!(r.query_param("startedAfter").as_deref(), Some("1000"));
     assert_eq!(r.query_param("startedBefore").as_deref(), Some("2000"));
@@ -270,14 +277,22 @@ fn worklog_query_pages_by_offset() {
 
 #[test]
 fn worklog_feeds_send_since_in_epoch_millis() {
-    let page = || ok(json!({"values": [{"worklogId": 1}], "until": 5, "lastPage": true}));
-    let srv = MockServer::with_responses([page(), page()]);
+    let srv = MockServer::with_responses([
+        ok(json!({"values": [{"worklogId": 1}], "until": 5, "lastPage": false})),
+        ok(json!({"values": [{"worklogId": 2}], "until": 9, "lastPage": true})),
+        ok(json!({"values": [{"worklogId": 1}], "until": 5, "lastPage": false})),
+    ]);
     let c = srv.client();
     let since = time::epoch_millis("2025-11-13").unwrap();
-    worklogs::feed(&c, worklogs::Feed::Changed, Some(since), None).unwrap();
-    worklogs::feed(&c, worklogs::Feed::Deleted, Some(since), None).unwrap();
+    // The next cursor carries the page's `until`, so a run resumes there.
+    let (items, next) = worklogs::feed(&c, worklogs::Feed::Changed, since, 25, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(next, None);
+    let (_, next) = worklogs::feed(&c, worklogs::Feed::Deleted, since, 1, None).unwrap();
+    assert_eq!(next.as_deref(), Some("t:5"));
     let r = srv.requests();
     assert_eq!(r[0].path, "/rest/api/3/worklog/updated");
     assert_eq!(r[0].query_param("since").as_deref(), Some("1762992000000"));
-    assert_eq!(r[1].path, "/rest/api/3/worklog/deleted");
+    assert_eq!(r[1].query_param("since").as_deref(), Some("5"));
+    assert_eq!(r[2].path, "/rest/api/3/worklog/deleted");
 }

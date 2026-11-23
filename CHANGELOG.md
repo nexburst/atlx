@@ -9,263 +9,223 @@ GitHub release notes, so keep one `## [X.Y.Z] - YYYY-MM-DD` heading per release.
 
 ## [Unreleased]
 
-### Changed
+No version has been released yet; the first release will be 0.1.0. The
+tables below map the command paths that earlier builds of `main` used.
 
-- atlx no longer presents itself as a twg alternative or compares itself with
-  twg. The scripts that ran twg side by side with atlx
-  (`scripts/conformance.sh`, `twg-fixtures.sh`, `twg-inventory.sh`) are
-  removed, and the command inventory is now kept by hand from Atlassian's
-  public commands catalog.
+### Breaking: a command line designed for coding agents
+
+atlx is redesigned around one contract for agents and scripts: one grammar,
+one envelope, curated records, explicit truncation, one paging model, its
+own error codes and exit codes, a self-describing schema, and fail-closed
+writes. Nearly every command path, flag and output shape changes. Old paths
+are not kept as aliases; they fail with a usage error (exit 2) and
+suggestions. `atlx describe` documents the new tree.
+
+- **Grammar.** `atlx <product> <resource> [<sub-resource>] <verb>`: singular
+  REST nouns (`jira issue`, `jira project`, `confluence page`, `bb pr`), the
+  verb last (`list`, `search`, `get`, `create`, `update`, `delete`, or a
+  REST action), the target positional and parents as named flags (`--issue`,
+  `--page`, `--pr`, `--repo workspace/slug`, `--project`, `--space`).
+  `query` is gone; `--id`, `--issue-id`, `--pull-request` and the like are
+  gone.
+- **Envelope.** Every command in every product, Bitbucket included, prints
+  `{"ok":…,"data":…,"next":…,"truncated":…,"warnings":…}` as one line of
+  compact JSON when piped. `data` is a list for lists and multi-ID gets,
+  with no wrapper key; partial results carry `errors`. `apiVersion`,
+  `command`, `request`, `meta` and `pageInfo` are gone, and stderr stays
+  empty in JSON modes. `-o jsonl` ends with an `_end` trailer line; new
+  `-o ids` prints one ID per line, and `get` reads IDs from stdin with `-`.
+- **Records.** Commands return curated records instead of REST payloads:
+  a short default view, `--full` for every field, `--fields a,b.c` to pick
+  (an unknown name is a usage error), `--raw` for the REST payload.
+  `--select`, its presets, `--agent-fields`, `--output-summary` and
+  `--api-version` are removed.
+- **Truncation.** Bodies (20 000 characters), pull request diffs (40 000),
+  file contents (20 000) and pipeline logs (last 200 lines) are cut on a
+  block boundary and announced in `truncated` with the flag that continues
+  them (`--body-offset`, `--diff-offset`, `--content-offset`,
+  `--log-offset`). `--max-chars` changes the budget; `0` turns it off.
+- **Paging.** Every `list` and `search` takes `--limit` (default 25, at most
+  1000), `--cursor` and `--all`, and returns `next`. `--max-results`,
+  `--start-at`, `--first`, `--after` and `--page` are removed.
+  `--concurrency` replaces `--batch-concurrency`.
+- **Errors and exit codes.** `error.code` is one of `usage`, `config`,
+  `auth`, `forbidden`, `not_found`, `conflict`, `validation`,
+  `rate_limited`, `server`, `network`, `timeout`, `refused`, `other`, with a
+  `hint` and `retryable`. Exit codes: 0 ok, 1 failed, 2 usage, 3 partial,
+  4 config/auth/forbidden, 5 not found, 6 conflict, 7 retry later, 8
+  refused by a safety guard. The old error codes, `kind`, `statusCode`,
+  `downstreamError` and `retry.guidance` are removed, and exit 2 no longer
+  means "unsupported".
+- **`atlx describe`** prints every command's flags, effect, record fields,
+  examples and exit codes as JSON (`--records`, `--errors`, `--all`).
+- **Safe writes.** `--dry-run` is global and works on every command (reads
+  run, the first write is printed, nothing is sent). Read-only mode
+  (`--read-only`, `ATLX_READ_ONLY=1`, `read_only = true` in a profile)
+  refuses every write, `api` included. `--yes` is required on every
+  destructive command and nowhere else: Jira deletes, sprint, version and
+  component deletes and `bb pr merge`/`decline` now need it; Confluence
+  create and update, label add and watch no longer need it. Nothing
+  prompts.
+- **Version checks.** Confluence `page update` and `page edit` require
+  `--if-version N` (replaces `--snapshot-token`); a stale version exits 6.
+  `bb pr merge --if-head <sha>` is new.
+- **Bodies.** Markdown is the default for reading and writing in every
+  product, converted through ADF with loss reporting: a Markdown write that
+  cannot be represented, or a full-body replace that would destroy macros or
+  layouts, is refused (exit 8); a lossy read carries a `lossy_body` warning
+  and markers. HTML is no longer an input format; `--body-format` is the one
+  flag (`markdown`, `adf`, `storage`, `plain`). `--format`,
+  `--description-format` and `--ack-body-formats` are removed. Jira `issue
+  get` returns the description as Markdown.
+- **Auth.** `login`, `logout`, `whoami` and `setup` move under `auth`
+  (`auth status` replaces `whoami`). Agents are never prompted: missing
+  credentials fail with `config` (exit 4).
+- **Repository defaults.** An optional `.atlx.toml` sets `profile`,
+  `jira.project`, `confluence.space` and `bitbucket.repo`; Bitbucket `--repo`
+  also defaults to the git `origin` remote.
+- **Metadata cache.** Jira field names, issue types and priorities,
+  Confluence space IDs and the Bitbucket user are cached for 24 hours
+  (`atlx cache path|clear`, `--no-cache`). Content is never cached.
+- **Skill.** `skills/atlx` is rewritten; its command references are
+  generated from `atlx describe`. Reinstall with `atlx skill install --force`.
+
+#### Core commands
+
+| Old | New |
+| --- | --- |
+| `login`, `logout` | `auth login`, `auth logout` |
+| `whoami` | `auth status` |
+| `setup bitbucket` | `auth bitbucket` |
+| `setup default-site` | `auth profile update -s SITE` |
+| `user search`, `user get`, `user bulk-lookup` | `jira user search`, `jira user get` (several IDs or emails) |
+| | `describe`, `cache path`, `cache clear` (new) |
+
+#### Jira
+
+| Old | New |
+| --- | --- |
+| `jira workitem get`, `bulk-get` | `jira issue get KEY...` |
+| `jira workitem query`, `search` | `jira issue list --jql`, `jira issue search TEXT` |
+| `jira workitem create`, `create-bulk` | `jira issue create` (`--bulk-file`) |
+| `jira workitem update`, `delete`, `archive`, `unarchive` | `jira issue update`, `delete`, `archive`, `restore` |
+| `jira workitem transition`, `bulk-transition` | `jira issue transition KEY... --to STATUS` |
+| `jira workitem transitions query` | `jira transition list --issue KEY` |
+| `jira workitem comment query`, `changelog query` | `jira issue comment list`, `jira issue changelog list` |
+| `jira workitem worklog add`, `query`, `changed`, `deleted` | `jira issue worklog create`, `list` (`--changed-since`, `--deleted-since`) |
+| `jira workitem attachment query`, `thumbnail` | `jira issue attachment list`, `download --thumbnail` |
+| `jira workitem link workitem`, `link query`, `unlink workitem` | `jira issue link create`, `list`, `delete` |
+| `jira workitem link weblink`, `unlink weblink` | `jira issue weblink create`, `delete` |
+| `jira workitem watcher`, `vote` `query`/`add`/`remove` | `jira issue watcher list`/`create`/`delete`, `jira issue vote get`/`create`/`delete` |
+| `jira workitem property query`, `set` | `jira issue property list`, `update` |
+| `jira workitem types`, `statuses`, `priorities`, `link-types` | `jira issue-type`, `status`, `priority`, `link-type` `list`/`get` |
+| `jira workitem field create-metadata`, `update-metadata` | `jira field list --project P --type T`, `jira field list --issue KEY` |
+| `jira space query`, `get`, `create`, `update`, `delete`, `archive`, `restore` | `jira project list`, `get`, `create`, `update`, `delete`, `archive`, `restore` |
+| `jira space versions query`, `space version ...` | `jira project version list`, `project version ...` |
+| `jira space component query`, `component ...` | `jira project component list`, `project component ...` |
+| `jira space issue-types`, `space status query` | `jira issue-type list --project`, `jira status list --project` |
+| `jira board query`, `quick-filter query` | `jira board list`, `board quick-filter list` |
+| `jira board backlog query`, `sprint workitems query` | `jira issue list --backlog BOARD`, `jira issue list --sprint SPRINT` |
+| `jira board projects query`, `board sprints query` | `jira project list --board`, `jira sprint list --board` |
+| `jira filter query`, `share query`/`add`/`remove`, `subscription query` | `jira filter list`, `filter share list`/`create`/`delete`, `filter subscription list` |
+| `jira filter add-favourite`, `remove-favourite`, `change-owner` | `jira filter update --favourite BOOL`, `--owner` |
+| `jira filter columns get`/`set`, `reset-columns` | `jira filter column list`/`update`/`delete` |
+| `jira dashboard query`, `gadget query`/`add`, `gadget catalog query` | `jira dashboard list`, `dashboard gadget list`/`create`, `dashboard gadget list --catalog` |
+| `jira dashboard item-property query`/`set` | `jira dashboard property list`/`update` |
+| `jira space types query`, `space notification-scheme get`, `version counts`, `component counts`, `dashboard bulk-edit` | removed; use `api` (version `get` includes issue counts) |
+
+#### Jira Service Management
+
+| Old | New |
+| --- | --- |
+| `jsm request query`, `request validate` | `jsm request list`, `jsm request create --dry-run` |
+| `jsm request transition query`, `transition create` | `jsm transition list --request KEY`, `jsm request transition KEY --to X` |
+| `jsm request participant add`, `remove` | `jsm request participant create`, `delete` |
+| `jsm approval list`/`get`/`approve`/`reject` | `jsm request approval list`/`get`/`approve`/`decline` |
+| `jsm sla get` | `jsm request sla list`, `get` |
+| `jsm portal query`, `servicedesk query` | `jsm desk list` |
+| `jsm request-type query`, `field get`, `fields get`, `form get` | `jsm request-type list`, `jsm request-type get ID --desk D --full` |
+| `jsm queue query`, `queue workitems query` | `jsm queue list`, `jsm queue issue list` |
+| `jsm knowledge-article query` | `jsm article search TEXT` |
+
+#### Confluence
+
+| Old | New |
+| --- | --- |
+| `confluence search query`, `search text` | `confluence search [TEXT] [--cql CQL]` |
+| `confluence content get`, `list`, `create`, `update` | `confluence page get`, `list`, `create`, `update` |
+| `confluence content update --edits` | `confluence page edit` |
+| `confluence content children` | `confluence page list --parent ID` |
+| `confluence content trash`, `purge`, `delete-draft`, `untrash` | `confluence page delete`, `delete --purge`, `delete --draft`, `restore` |
+| `confluence content move`, `copy`, `archive`, `publish`, `watch`, `unwatch` | `confluence page move`, `copy`, `archive`, `publish`, `watch`, `unwatch` |
+| `confluence tree` | `confluence page tree`, `confluence space tree` |
+| `confluence content comments ...`, `comments reply`, `resolve`, `reopen` | `confluence page comment ...`, `comment create --comment ID`, `comment update --resolve`/`--reopen` |
+| `confluence content attachments ...` | `confluence page attachment ...` |
+| `confluence content labels list`/`add`/`remove`, `labels watch`/`unwatch` | `confluence page label list`/`create`/`delete`, `confluence label watch`/`unwatch` |
+| `confluence content versions ...`, `content history ...` | `confluence page version list`/`get`/`diff`/`restore` |
+| `confluence content tasks list`/`get`/`complete`/`reopen` | `confluence page task list`/`get`, `task update --status complete`/`open` |
+| `confluence content status get`/`set`, `list-available-statuses` | `confluence page state get`/`update`/`list` |
+| `confluence space unarchive`, `space me` | `confluence space restore`, `confluence space get --personal` |
+| `confluence templates list`, `get` | `confluence template list`, `get` |
+| `confluence content body-formats`, `space permission available` | removed (body formats are documented in the README and the skill) |
+
+#### Bitbucket
+
+| Old | New |
+| --- | --- |
+| `bb repo query`, `repo file`, `repo list-files`, `repo contributors` | `bb repo list`, `bb repo file get`, `bb repo file list`, `bb repo contributor list` |
+| `bb search code`, `bb repo url` | `bb repo file search TEXT`; removed (records carry `url`) |
+| `bb branch query`/`create`/`delete`, `repo branches` | `bb repo branch list`/`create`/`delete` |
+| `bb commit query`/`create`, `commit report query`/`create` | `bb repo commit list`/`create`, `bb repo report list`/`create` |
+| `bb pull-requests query`, `search prs`, `for-commit`, `inbox` | `bb pr list`, `bb pr search TEXT`, `bb pr list --commit`, `bb pr list --mine --waiting` |
+| `bb pull-requests get`, `create`, `update`, `merge`, `decline`, `approve`, `unapprove`, `request-changes` | `bb pr get`, `create`, `update`, `merge`, `decline`, `approve`, `unapprove`, `request-changes` |
+| `bb pull-requests remove-request-changes` | `bb pr request-changes --withdraw` |
+| `bb pull-requests diff`, `patch`, `diff-line`, `diffstat`, `commits`, `activity` | `bb pr diff`, `diff --patch`, `diff --grep`, `diffstat`, `commits`, `activity` |
+| `bb pull-requests mergeability`, `conflicts`, `merge-status` | `bb pr checks`, `bb pr diffstat --conflicts`, `bb pr get` |
+| `bb pull-requests comment ...`, `task ...`, `tasks` | `bb pr comment ...`, `bb pr task ...`, `bb pr task list` |
+| `bb pull-requests update --add-reviewer` | `bb pr reviewer add`/`remove`/`list` |
+| `bb pull-requests default-reviewer ...`, `effective-default-reviewer query` | `bb repo default-reviewer ...`, `default-reviewer list --effective` |
+| `bb pipeline query`, `trigger`, `rerun-failed` | `bb pipeline list`, `bb pipeline run`, `bb pipeline run --rerun` |
+| `bb pipeline get --logs`, `latest-failure`, `tail`, `grep` | `bb pipeline log`, `log --failed`, `log --follow`, `log --grep` |
+| `bb pipeline get --test-reports` | `bb pipeline step get STEP --pipeline N` |
+| `bb deployment query`, `deployment history query`/`get` | `bb deployment list`/`get` (`--environment`) |
+| `bb deployment commits query`, `deployment environments query`, `deployment environment variable query` | `bb deployment commits UUID`, `bb environment list`, `bb environment variable list` |
+| `bb workspace member query` | `bb workspace member list` |
+
+### Added
+
+Besides the redesign: Jira collaboration (attachments,
+worklogs, watchers, votes, properties), Agile (boards, sprints, backlog),
+administration (projects, versions, components, filters, dashboards) and
+bulk create; Jira Service Management requests, approvals, SLAs, queues and
+knowledge base search; Confluence comment threads and inline comments,
+versions, labels, attachments, tasks, page states, templates, page and space
+lifecycle, section reads and targeted `page edit`; Bitbucket pull request
+review (inline comments, tasks, reviewers, checks), repositories, branches,
+commits without a checkout, Code Insights reports, pipelines, logs and
+deployments; named profiles and credential helpers; shell completions, man
+pages and the release workflow; cross-product `atlx search`, `atlx doctor`,
+and the raw `atlx api` escape hatch.
+
+- `.atlx.toml`'s `confluence.space` is the default `--space` for
+  `confluence page list` and `page create`.
+- `atlx api` takes `--yes`, which a `DELETE` requires; `describe` reports its
+  effect as `by-method` with an `effectByMethod` map.
+- `ATLX_BITBUCKET_API` points Bitbucket at a local test server. Only loopback
+  URLs are accepted, so the token can't be sent elsewhere.
 
 ### Security
 
-- `confluence content create`, `update` and `delete` (including `--purge`)
-  wrote without confirmation. They now need `--yes`.
-  `update` needs `--snapshot-token`, so it can't overwrite a newer edit
-  unseen, and a body needs `--format` and `--ack-body-formats`. Scripts that
-  relied on the old behavior must add these flags.
-
-### Fixed
-
-- Output shapes made consistent. **These shapes changed:** `jira board get` (a list, `--id` repeats), `filter query` and
-  `space versions query` (the page object), `space status query`
-  (`{statuses}`), `space issue-types` (`{space, issueTypes}`), `workitem
-  bulk-get` and `user bulk-lookup` (`{items, summary}`), `workitem property
-  query` and `worklog changed|deleted` (bare lists).
-- `jira space query` returns 50 spaces by default, not 25.
-- JSONL prints an empty page as one row.
-- `user bulk-lookup` prints its result when it fails, and exits 0 on a
-  partial result without `--strict`.
-- `whoami` and `user get`: `locale` is spelled `en-US`, `zoneinfo` is null,
-  and Jira's time zone is the extra key `timeZone`.
-- `bb repo url` also prints `workspace` and `repo`; resource types and
-  request echoes are made consistent.
-
-### Added
-
-- Jira dashboards (#73): `jira dashboard query|get|create|update|copy|
-  delete|bulk-edit`, `dashboard gadget` and `dashboard item-property`.
-  `update` keeps what isn't given; deletes and bulk edits need `--yes`.
-- Confluence (#71): `content tasks list|get|complete|reopen`, `content
-  status get|set`, `content list-available-statuses`, `content
-  watch|unwatch`, `space watch|unwatch`, `space permission list|available`
-  and `templates list|get`.
-- Jira in bulk (#69): `jira workitem bulk-get|create-bulk|bulk-transition|
-  archive|unarchive`, `jira workitem property get|query|set|delete`, and
-  `user get|bulk-lookup`. A bulk transition needs `--yes`; partial results
-  exit 3.
-- Jira Service Management over the public Service Desk API (#37): `jsm
-  request`, `request-type`, `approval`, `portal`/`servicedesk`, `queue`,
-  `sla get` and `knowledge-article query`. Request comments are public to
-  customers unless `--internal` is given.
-- An agent skill written for atlx, with `atlx skill install` and `atlx skill
-  print` (#36).
-- Bitbucket repository commands (#33): `branch create|delete`, `commit
-  query|create`, Code Insights `commit report create|query`, `workspace
-  get`, `workspace member query|get`, `repo create|list-files|url|
-  contributors` and `search prs`.
-- Confluence lifecycle (#30): `content move|copy|trash|untrash|purge|archive|
-  publish|delete-draft`, `create --private --content-width --title-emoji`,
-  `space create|update|archive|unarchive|delete`, and `tree` for whole
-  spaces, with `--type`, depth 10 and a 500-node cap. Writes need `--yes`; `space delete` refuses content URLs.
-- Jira administration (#26): space lifecycle and lookups, versions,
-  components, saved filters, and `jira workitem query --filter`. Space
-  delete (to the trash), archive and restore need `--yes` and accept only an
-  exact key, ID, ARI or project URL.
-- Bitbucket Pipelines and deployments (#34): `pipeline run|trigger`,
-  `latest-failure`, `tail`, `grep`, `rerun-failed --whole-pipeline`, `config
-  get|update`, `get --test-reports --test-cases`, `query --pattern`, and
-  `bb deployment`. Secured variable values come from the environment and
-  are never printed. `pipeline get --step` now takes an index and reports
-  an unknown step; `query --status PASSED` now matches successful runs.
-- Bitbucket pull request lifecycle (#32): `pull-requests update`, reviewers
-  by name on `create`, `merge --wait`, `merge-status`, `mergeability`,
-  `conflicts`, `for-commit`, `remove-request-changes`, default reviewers,
-  `query --reviewer --page --merged-since --merged-before --scope me`, and
-  `bb inbox`.
-- Confluence comment threads (#29): `content comments
-  get|reply|update|delete|resolve|reopen`, inline comments with `create
-  --text-selection`, and `list --include-replies --sort --status
-  --resolution-status --content-type --reference-space`. `delete` needs
-  `--yes`; resolution is for inline comments only.
-- Jira Agile (#25): `jira sprint get|create|update|start|complete|delete`,
-  `jira board get|create|delete`, `board backlog|projects|quick-filter
-  query`, `board quick-filter get`, and `--sprint`, `--story-points`,
-  `--original-estimate`, `--remaining-estimate` and `--team` on `workitem
-  create|update`. Names are resolved before anything is written.
-- Jira collaboration commands (#24): `jira workitem attachment
-  query|get|download|thumbnail|upload|delete`, `worklog
-  add|update|query|get|delete|changed|deleted`, `watcher query|add|remove`
-  and `vote query|add|remove`. Attachment and worklog deletes need `--yes`.
-- Confluence versions, labels and attachments (#28): `content versions
-  list|get|diff|restore` (also `content history list|get|diff`), `labels
-  add|remove|watch|unwatch`, `labels list --content-type --reference-space`,
-  `attachments list|get|download|upload|delete`, an offline `content
-  body-formats` guide and `content get --format url`. Destructive commands confirm
-  with `--yes`. A download without `--out` refuses hidden or
-  otherwise unsafe file names from the server.
-- Jira triage commands (#23): `jira workitem
-  comment query|update|delete`, `comment create --parent-id`, `changelog
-  query`, `field update-metadata`, `link query`, `unlink workitem|weblink`,
-  `delete`, `types query|get`, `statuses query` and `priorities query`.
-  Comment and changelog pages print `pageInfo` with the next `--after`
-  cursor. Deletes ask for no confirmation.
-
-- Bitbucket pull request review loop (#31): `comment create --reply-to
-  --pending` and inline anchors (`--path` with `--line`, `--from-line` or a
-  `--start-line/--end-line` or `--start-from-line/--end-from-line` range);
-  `comment query|get|update|delete|resolve|reopen`; `task
-  create|get|update|delete|resolve|reopen`; `diffstat`, `commits`, `patch`;
-  and `diff-line`, which finds diff lines by text and gives the line numbers
-  an inline comment needs. Comment and task `delete` need `--yes`.
-
-- Confluence section reads and targeted edits (#27): `content get --detail
-  outline` (headings with level, anchor, ADF `localId` and word count),
-  `--section <heading>` (repeatable; Markdown by default, the exact storage
-  slice with `--format html`), the atlx-extra `--format adf`, and
-  `content update --edits`/`--edits-file` with `localId` operations
-  plus heading- and text-based extras. Edits apply all-or-nothing to the ADF
-  body, honour `--snapshot-token`, and `--dry-run` prints the resulting HTML
-  and a unified diff without writing.
-
-- Global output controls: `--select` (dot-path projection with
-  `@compact`, `@evidence` and `@rows` presets), `--output-file`,
-  `--output-summary [none|stats|auto|inline]` with its YAML envelope,
-  `--agent-fields`, and `--api-version v2`. `confluence content get
-  --body-only --output-file` keeps the snapshot token on stdout (#19).
-
-- `atlx completion script <bash|zsh|fish|powershell|elvish>` prints a shell
-  completion script (#35).
-- Man pages generated from the command tree, shipped in release archives (#35).
-- Release workflow: tagged cross-platform builds for Linux (gnu and static
-  musl, x86_64 and aarch64), macOS (x86_64 and Apple silicon) and Windows
-  (x86_64 and ARM64), named to match the `cargo binstall` metadata, with
-  `SHA256SUMS`, release notes from this file and a crates.io publish (#35).
-- HTTP client transport: binary downloads, multipart uploads, per-request
-  headers, retries on 429 and 5xx with backoff, and response bodies larger
-  than 10 MB (#16).
-- `CONTRIBUTING.md` and `AGENTS.md` contributor guides (#14).
-
-- Typed errors: `client::ApiError` carries the error class, HTTP status,
-  request and hint, and `client::Bytes` reports its HTTP status (#17).
-- Named profiles: global `-p/--profile` and `ATLX_PROFILE`, `login
-  --new-profile`, per-profile `setup bitbucket` and `setup default-site`, and
-  `auth profile list|default|rename|migrate`. v1 config files load unchanged as
-  the `default` profile (#20).
-- Credential helpers: `token_cmd` / `bitbucket.token_cmd`, `ATLX_TOKEN_CMD`,
-  `ATLX_BB_TOKEN_CMD` and `--token-cmd` on `login` and `setup bitbucket`,
-  run lazily with a 10 s timeout. `whoami` and `doctor` report the active
-  profile and token source (#20).
-
-- Command names and flags aligned with twg 1.4.4's command paths (#18):
-  `jira space query|list|get`, `jira board query`, `jira board sprints query`,
-  `jira sprint workitems query`, `jira workitem field create-metadata` (also
-  `custom-fields`), `jira workitem link-types query`, `jira workitem link
-  workitem` (repeatable `--target-id`) and `link weblink` (with `--global-id`,
-  `--application-name/-type`, `--summary`, `--icon-url`, `--resolved`),
-  `confluence content labels list --id`, `comments list|create --id` with
-  `--comment-type` and `--body-format` (create also takes `--body-file`),
-  `confluence tree --target`, `confluence space get|list --labels`,
-  `bb branch query` (`--author`, `--sort`), `bb pull-requests task query`,
-  `merge --pull-request --merge-strategy --merge-message
-  --keep-source-branch`, batched `bb pull-requests activity <id...>` with
-  `--strict`, `bb repo query --repo`, the `-w`/`-r` short flags, and `user
-  search --name --query --email --account-id -n`.
-- `--batch-concurrency <1-20>` (default 5) on `jira workitem get`, `bb
-  pull-requests get` and `bb pull-requests activity`: batch reads now run in
-  parallel on scoped threads and keep the input order (#18).
-
-- Commands that need Teamwork Graph, Rovo or the GraphQL gateway (`rovo`,
-  `work`, `context`, `jira board cells query`, ...) fail with "not supported
-  by atlx (requires Teamwork Graph)" and exit code 2.
-  Planned commands fail with a pointer to their issue (#21).
-- `user search --compact` (#21).
-
-### Changed
-
-- **New JSON output envelope** (#21). Jira, Confluence, user and account
-  commands print an envelope (`apiVersion`, `command`, `request`, `data`,
-  `pageInfo`, `meta`) with key names that are mostly the REST APIs' own: `jira workitem get` prints `data: [<issue>]` with REST fields next to
-  `key`, `query`/`search` print `data.issues` rows and `pageInfo.nextCursor`
-  instead of `next_cursor`, `transitions query` prints `{id, name, toName,
-  category}`, `space query` prints `projects`, `board query` `boards`, and
-  `whoami` profile fields. Bitbucket commands print Bitbucket's REST
-  objects without an envelope. Batches gain `returned`,
-  `omitted` and `truncated` counts. `-o jsonl` adds a `_twg` locator to
-  each row. The old snake_case summary keys are gone, and `--select` presets
-  no longer carry fallbacks for them.
-- `user search` returns 20 users by default (was 25).
-- `jira space query` sorts by key unless `--sort-by` is given.
-- Merge and decline no longer require `--yes`;
-  `--yes` is still accepted and ignored (#18).
-- The 0.1 names (`jira project`, `jira board list`, `jira sprint list|issues`,
-  `jira workitem create-meta`, `jira workitem link types|create|remote`, `bb
-  repo branches`, `bb pull-requests tasks`, positional `labels`/`comments`/
-  `merge` forms, and `--inline`, `--format`, `--strategy`, `--message`) still
-  work but are hidden from help. In text mode on a terminal they print a
-  one-line note naming the new form; they will be removed in 0.3 (#18).
-- `atlx logout` removes only the selected profile (the whole file only when
-  nothing else is left) (#20).
-- `login` and `setup bitbucket` accept `-f` for `--force`, and `setup bb` is an
-  alias of `setup bitbucket` (#20).
-
-- Structured errors: in JSON modes an `{"ok": false, "error": {...}}` envelope
-  goes to stdout and a readable report to stderr. Every failure exits 1
-  (clap argument errors included, previously 2), and a partly failed batch
-  read exits 3. Batch items now carry structured errors plus a `summary`, and
-  `atlx search` reports per-product errors as objects (#17).
-- Rich-text bodies convert with better fidelity: Markdown and HTML to Jira ADF
-  and Confluence storage, and ADF back to GitHub-flavoured Markdown (#22).
-- The CLI moved into `src/cli/` and the mock-HTTP tests were split per product,
-  with a snapshot test of the whole command tree. No behaviour change (#14).
-
-### Fixed
-
-- Moved off deprecated REST endpoints (#66). `bb search code` uses
-  `codesearch`: the token needs `repository:read` and `workspace:read`, and
-  hits keep `file.path` and `content_match_count` (now matched chunks) but
-  otherwise change shape. `jira sprint workitems query` and `jira board
-  backlog query` page by token, so no longer report `total`. Priorities and
-  Confluence children use their replacement endpoints.
-- Checked against Atlassian's OpenAPI specs (#65): `confluence content
-  untrash` restores through REST v2 (v1's endpoint is gone); `labels list`
-  refuses content types REST can't list instead of calling a removed
-  endpoint; `jira filter share add` sends `authenticated` for `loggedin`.
-- Descending sort values such as `--sort -name` can be typed with a space
-  in `bb branch query`, `bb repo query`, `jira space query` and `confluence
-  content attachments list` (#65).
+- Confluence bodies are no longer sent as storage format built from
+  unchecked HTML, which could drop content Confluence did not accept.
 - Requests whose path has a `.` or `..` segment, and DELETEs with an empty
   one, are refused before they are sent. An ID of `..` used to address the
-  parent resource, so deleting a comment could delete its work item.
-
-## [0.1.0] - 2026-11-13
-
-First release.
-
-### Added
-
-- Commands for Jira (`jira workitem get/search/query/create/
-  update/comment create/transition/transitions query`), Confluence (`confluence
-  search query/text`, `content get/create/update/list`, `space get`) and
-  Bitbucket (`bb repo`, `bb pull-requests`, `bb pipeline`), on the public REST
-  APIs with API-token auth.
-- `login`, `logout`, `whoami` and `setup bitbucket/default-site`.
-- Cross-product `atlx search` and a raw `atlx api` escape hatch.
-- Output as text on a terminal and JSON when piped, plus `-o jsonl`.
-- Jira metadata and Agile commands: `workitem create-meta`, issue links and
-  remote links, `field list`, `project list/get`, `board list`, `sprint
-  list/issues`, and `user search` (#3).
-- Confluence comments (including inline), page tree, personal space, lookup by
-  title, labels and delete (#4).
-- Bitbucket PR diff, activity and tasks; approve, request changes, merge and
-  decline; repository files and branches; code search (#5).
-- `atlx doctor` for config, permission and connectivity checks; GitHub Actions
-  CI on Linux, macOS and Windows; `cargo binstall` metadata (#6).
-- Offline mock-HTTP integration tests and opt-in live smoke tests (#2).
+  parent resource.
 
 ### Fixed
 
-- Argument validation, pagination and auth-origin edge cases (#1).
+- Moved off deprecated REST endpoints (#66) and checked requests against
+  Atlassian's OpenAPI specs (#65). Bitbucket code search uses `codesearch`
+  and needs `repository:read` and `workspace:read`.
 
-[Unreleased]: https://github.com/nexburst/atlx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/nexburst/atlx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nexburst/atlx/commits/main

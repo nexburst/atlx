@@ -1,13 +1,14 @@
-//! Deployments, their environments, history and commits.
+//! Deployments, their environments and environment variables.
 
-use super::{enc, paginate, paginate_more, pipelines::hide_secured};
+use super::{Listed, Paging, enc, list, pipelines::hide_secured, scan, scan_all};
 use crate::client::{ApiError, Client, ErrorKind};
+use crate::paging::{self, Cursor, Position};
 use crate::time::epoch_millis;
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
-/// How many deployments a history read looks at. REST can neither sort nor
-/// filter them, so that happens here.
+/// How many deployments a filtered list or a comparison reads. REST can
+/// neither sort nor filter them, so that happens here.
 pub const SCAN: usize = 5000;
 
 fn bare(uuid: &str) -> &str {
@@ -23,8 +24,12 @@ fn looks_like_uuid(s: &str) -> bool {
     s.len() == 36 && s.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
-pub fn environments(c: &Client, path: &str) -> Result<Value> {
-    Ok(paginate(c, &format!("{path}/environments"), &[], SCAN)?.into())
+fn usage(message: impl Into<String>) -> anyhow::Error {
+    ApiError::usage(message).into()
+}
+
+pub fn environments(c: &Client, path: &str, p: &Paging) -> Result<Listed> {
+    list(c, &format!("{path}/environments"), &[], p)
 }
 
 /// An environment UUID from a UUID, name or slug.
@@ -32,7 +37,7 @@ pub fn environment(c: &Client, path: &str, r: &str) -> Result<String> {
     if looks_like_uuid(r) {
         return Ok(braced(r));
     }
-    let all = paginate(c, &format!("{path}/environments"), &[], SCAN)?;
+    let all = scan_all(c, &format!("{path}/environments"), &[], SCAN)?;
     let found: Vec<&str> = all
         .iter()
         .filter(|e| {
@@ -46,24 +51,28 @@ pub fn environment(c: &Client, path: &str, r: &str) -> Result<String> {
         .collect();
     match found.as_slice() {
         [id] => Ok(id.to_string()),
-        _ => Err(ApiError::usage(format!(
-            "'{r}' matches {} environments; see `bb deployment environments query`",
-            found.len()
-        ))
-        .into()),
+        _ => Err(
+            ApiError::usage(format!("'{r}' matches {} environments", found.len()))
+                .with_hint("list them with `atlx bitbucket environment list`")
+                .into(),
+        ),
     }
 }
 
 /// Environment variables, without the values of secured ones.
-pub fn variables(c: &Client, path: &str, env: &str) -> Result<Value> {
+pub fn variables(c: &Client, path: &str, env: &str, p: &Paging) -> Result<Listed> {
     let id = environment(c, path, env)?;
     let url = format!(
         "{path}/deployments_config/environments/{}/variables",
         enc(&id)
     );
-    let mut list = Value::Array(paginate(c, &url, &[], SCAN)?);
-    hide_secured(&mut list);
-    Ok(list)
+    let (items, next) = list(c, &url, &[], p)?;
+    let mut items = Value::Array(items);
+    hide_secured(&mut items);
+    let Value::Array(items) = items else {
+        unreachable!("an array stays an array")
+    };
+    Ok((items, next))
 }
 
 fn in_environment(d: &Value, env: &str) -> bool {
@@ -91,44 +100,47 @@ fn commit_of(d: &Value) -> Option<&str> {
         .find_map(|k| d[*k]["commit"]["hash"].as_str())
 }
 
-pub fn query(c: &Client, path: &str, env: Option<&str>, limit: usize) -> Result<Value> {
-    let url = format!("{path}/deployments");
-    let Some(env) = env else {
-        return Ok(paginate(c, &url, &[], limit)?.into());
-    };
-    let id = environment(c, path, env)?;
-    Ok(paginate(c, &url, &[], SCAN)?
-        .into_iter()
-        .filter(|d| in_environment(d, &id))
-        .take(limit)
-        .collect())
-}
-
-pub fn get(c: &Client, path: &str, uuid: &str) -> Result<Value> {
-    c.get(&format!("{path}/deployments/{}", enc(&braced(uuid))), &[])
-}
-
+/// Filters for `deployment list`; any of them makes atlx read up to
+/// [`SCAN`] deployments, filter and sort them by start time.
 #[derive(Debug, Default)]
-pub struct History<'a> {
-    pub environment: &'a str,
+pub struct Filter<'a> {
+    pub environment: Option<&'a str>,
     pub statuses: &'a [String],
     pub pipeline: Option<&'a str>,
     pub after: Option<&'a str>,
     pub before: Option<&'a str>,
+    /// Oldest first.
     pub ascending: bool,
-    pub limit: usize,
 }
 
-pub fn history(c: &Client, path: &str, o: &History) -> Result<Value> {
+impl Filter<'_> {
+    fn any(&self) -> bool {
+        self.environment.is_some()
+            || !self.statuses.is_empty()
+            || self.pipeline.is_some()
+            || self.after.is_some()
+            || self.before.is_some()
+            || self.ascending
+    }
+}
+
+/// Deployments. Without filters, in REST order; with any, newest started
+/// first (or oldest with `ascending`), with an offset cursor into the
+/// filtered list.
+pub fn deployment_list(c: &Client, path: &str, o: &Filter, p: &Paging) -> Result<Listed> {
+    let url = format!("{path}/deployments");
+    if !o.any() {
+        return list(c, &url, &[], p);
+    }
     let after = o.after.map(epoch_millis).transpose()?;
     let before = o.before.map(epoch_millis).transpose()?;
-    let env = environment(c, path, o.environment)?;
-    let (all, unseen) = paginate_more(c, &format!("{path}/deployments"), &[], SCAN)?;
+    let env = o.environment.map(|e| environment(c, path, e)).transpose()?;
+    let (all, unseen) = scan(c, &url, &[], SCAN)?;
     let mut found: Vec<Value> = all
         .into_iter()
         .filter(|d| {
             let at = started(d);
-            in_environment(d, &env)
+            env.as_deref().is_none_or(|e| in_environment(d, e))
                 && (o.statuses.is_empty()
                     || o.statuses
                         .iter()
@@ -146,32 +158,73 @@ pub fn history(c: &Client, path: &str, o: &History) -> Result<Value> {
     if !o.ascending {
         found.reverse();
     }
-    let more = unseen || found.len() > o.limit;
-    found.truncate(o.limit);
-    Ok(json!({"values": found, "hasMore": more}))
+    if unseen {
+        crate::output::notes::warn(
+            "scan_limit",
+            format!("only the first {SCAN} deployments were read"),
+        );
+    }
+    let start = match p.cursor.as_deref() {
+        None => 0,
+        Some(s) => match Cursor::decode(s)?.position {
+            Position::Offset(n) => usize::try_from(n).unwrap_or(usize::MAX),
+            _ => return Err(usage("--cursor is not a cursor from this deployment list")),
+        },
+    };
+    let limit = p.limit.clamp(1, paging::HARD_CAP);
+    let end = start.saturating_add(limit).min(found.len());
+    let page = found
+        .get(start..end)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let next = (end < found.len()).then(|| Cursor::at(Position::Offset(end as u64)).encode());
+    Ok((page, next))
 }
 
-pub fn history_get(c: &Client, path: &str, uuid: &str, env: &str) -> Result<Value> {
-    let env = environment(c, path, env)?;
-    let d = get(c, path, uuid)?;
-    if !in_environment(&d, &env) {
-        return Err(ApiError::new(
-            ErrorKind::NotFound,
-            format!("deployment {uuid} is not in that environment"),
-        )
-        .into());
+/// One deployment; with `env`, it must be in that environment.
+pub fn get(c: &Client, path: &str, uuid: &str, env: Option<&str>) -> Result<Value> {
+    let d = c.get(&format!("{path}/deployments/{}", enc(&braced(uuid))), &[])?;
+    if let Some(env) = env {
+        let env = environment(c, path, env)?;
+        if !in_environment(&d, &env) {
+            return Err(ApiError::new(
+                ErrorKind::NotFound,
+                format!("deployment {uuid} is not in that environment"),
+            )
+            .into());
+        }
     }
     Ok(d)
 }
 
-/// What a deployment added and removed compared with the environment's
-/// previous successful one.
-pub fn commits(c: &Client, path: &str, env: &str, deployment: &str, limit: usize) -> Result<Value> {
-    let env = environment(c, path, env)?;
-    let target = history_get(c, path, deployment, &env)?;
+/// A commit as a deployment comparison lists it.
+fn short_commit(v: &Value) -> Value {
+    json!({
+        "hash": v["hash"],
+        "date": v["date"],
+        "author": v["author"]["user"]["display_name"].as_str().or(v["author"]["raw"].as_str()),
+        "title": v["message"].as_str().and_then(|m| m.lines().next()),
+    })
+}
+
+/// What a deployment added and removed compared with its environment's
+/// previous successful one: `{deployment, environment, previous, added,
+/// removed}`.
+pub fn commits(
+    c: &Client,
+    path: &str,
+    uuid: &str,
+    env: Option<&str>,
+    limit: usize,
+) -> Result<Value> {
+    let target = get(c, path, uuid, env)?;
+    let env = target["environment"]["uuid"]
+        .as_str()
+        .ok_or_else(|| anyhow!("that deployment has no environment"))?
+        .to_string();
     let at = started(&target).ok_or_else(|| anyhow!("that deployment has no start time"))?;
     let new = commit_of(&target).ok_or_else(|| anyhow!("that deployment has no commit"))?;
-    let (all, unseen) = paginate_more(c, &format!("{path}/deployments"), &[], SCAN)?;
+    let (all, unseen) = scan(c, &format!("{path}/deployments"), &[], SCAN)?;
     if unseen {
         return Err(anyhow!(
             "the repository has more than {SCAN} deployments, so the previous one can't be found reliably"
@@ -185,17 +238,17 @@ pub fn commits(c: &Client, path: &str, env: &str, deployment: &str, limit: usize
     let Some(previous) = previous else {
         return Ok(json!({
             "deployment": target["uuid"],
+            "environment": env,
             "previous": null,
             "added": [],
             "removed": [],
-            "hasMore": false,
         }));
     };
     let old =
         commit_of(previous).ok_or_else(|| anyhow!("the previous deployment has no commit"))?;
     let url = format!("{path}/commits");
     let between = |include: &str, exclude: &str| {
-        paginate_more(
+        scan(
             c,
             &url,
             &[("include", include), ("exclude", exclude)],
@@ -204,11 +257,17 @@ pub fn commits(c: &Client, path: &str, env: &str, deployment: &str, limit: usize
     };
     let (added, more_added) = between(new, old)?;
     let (removed, more_removed) = between(old, new)?;
+    if more_added || more_removed {
+        crate::output::notes::warn(
+            "more_commits",
+            format!("more than {limit} commits changed; raise --limit"),
+        );
+    }
     Ok(json!({
         "deployment": target["uuid"],
+        "environment": env,
         "previous": previous["uuid"],
-        "added": added,
-        "removed": removed,
-        "hasMore": more_added || more_removed,
+        "added": added.iter().map(short_commit).collect::<Vec<_>>(),
+        "removed": removed.iter().map(short_commit).collect::<Vec<_>>(),
     }))
 }

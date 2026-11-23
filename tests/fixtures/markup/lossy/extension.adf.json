@@ -1,0 +1,38 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        }
+      ]
+    },
+    {
+      "type": "extension",
+      "attrs": {
+        "extensionType": "com.atlassian.confluence.macro.core",
+        "extensionKey": "jira",
+        "parameters": {
+          "macroParams": {
+            "key": {
+              "value": "OPS-12"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ]
+    }
+  ]
+}

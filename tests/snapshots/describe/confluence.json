@@ -1,0 +1,5181 @@
+[
+  {
+    "contract": 1,
+    "path": "confluence search",
+    "summary": "Search content with free text or CQL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "TEXT",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Free text: searches pages and blog posts, most recently changed first"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--cql",
+        "type": "string",
+        "required": false,
+        "description": "A CQL query instead of free text (`type = page AND space = ENG`)"
+      },
+      {
+        "name": "--updated-since",
+        "type": "string",
+        "required": false,
+        "description": "With free text: changed on or after this date (YYYY-MM-DD) or within a duration (7d, 2w, 1m)"
+      },
+      {
+        "name": "--created-since",
+        "type": "string",
+        "required": false,
+        "description": "With free text: created on or after this date or within a duration"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.search-hit",
+      "description": "one CQL search result",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page, blogpost, comment, attachment, ...",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title, without highlight markers",
+          "default": true
+        },
+        {
+          "name": "space",
+          "type": "string",
+          "description": "name of the space it is in",
+          "default": true
+        },
+        {
+          "name": "excerpt",
+          "type": "string",
+          "description": "matched text, without highlight markers",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "last modified",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "content status",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence search 'deploy runbook' --limit 5",
+      "atlx confluence search --cql 'type = page AND space = ENG AND title ~ \"release\"'",
+      "atlx confluence search onboarding --updated-since 30d --fields id,title,url"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page list",
+    "summary": "List the pages or blog posts of a space, or the child pages of a page",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID whose pages to list [default: confluence.space in .atlx.toml]"
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "List the child pages of this page (ID or URL)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "default": "page",
+        "description": "page (default) or blogpost; with --space only"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "draft",
+          "archived",
+          "trashed"
+        ],
+        "required": false,
+        "default": "current",
+        "description": "current (default), draft, archived or trashed; with --space only"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.page-item",
+      "description": "a Confluence page or blog post without its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page list --space ENG --limit 10",
+      "atlx confluence page list --parent 12345 --all -o ids",
+      "atlx confluence page list --space ENG --type blogpost --status draft"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page get",
+    "summary": "Read pages or blog posts by ID, URL or exact title; the body is Markdown unless --body-format says otherwise",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Page or blog post IDs or URLs (or exact titles with --space); `-` reads them from stdin"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking IDs up by exact title"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "The body as markdown (default), adf (JSON with node localIds), storage (as Confluence stores it) or plain text"
+      },
+      {
+        "name": "--section",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only the section under this heading, subsections included; repeatable. Case-insensitive: an exact heading wins, else any heading containing the text"
+      },
+      {
+        "name": "--outline",
+        "type": "boolean",
+        "required": false,
+        "description": "Return the headings (with their localIds and word counts) instead of the body"
+      },
+      {
+        "name": "--body-offset",
+        "type": "integer",
+        "required": false,
+        "description": "Start the body at this character (continue a cut body; see `truncated` in the result)"
+      },
+      {
+        "name": "--body-only",
+        "type": "boolean",
+        "required": false,
+        "description": "Print only the body, as it is (one ID)"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Read the draft instead of the published version"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the whole command if any ID fails"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many IDs to read at once (1-20)"
+      }
+    ],
+    "record": {
+      "name": "confluence.page",
+      "description": "a Confluence page or blog post, with its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number; pass it as --if-version when you update",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the body in --body-format (Markdown by default); content Markdown cannot show is marked <!-- atlx: ... --> and listed in a lossy_body warning",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "outline",
+          "type": "object[]",
+          "description": "with --outline: the headings, each {level, text, anchor, localId, wordCount}",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        },
+        {
+          "name": "bodyFormat",
+          "type": "string",
+          "description": "markdown, adf or storage",
+          "default": false
+        },
+        {
+          "name": "versionMessage",
+          "type": "string",
+          "description": "the message of this version",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page get 12345",
+      "atlx confluence page get 12345 --section Rollback --fields title,version,body",
+      "atlx confluence page get 12345 --outline",
+      "atlx confluence page get Runbook --space ENG --body-format adf"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page create",
+    "summary": "Create a page or blog post",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID [default: confluence.space in .atlx.toml]"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "The body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "What the body is written in: markdown (default), adf (JSON), storage (Confluence XHTML, checked and sent unchanged) or plain"
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "Parent page (ID or URL, or exact title in --space)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "default": "page",
+        "description": "page (default) or blogpost"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Create it as a draft"
+      },
+      {
+        "name": "--private",
+        "type": "boolean",
+        "required": false,
+        "description": "Only you can see and edit it"
+      },
+      {
+        "name": "--width",
+        "type": "enum",
+        "values": [
+          "narrow",
+          "wide",
+          "max"
+        ],
+        "required": false,
+        "description": "Page width: narrow, wide or max"
+      },
+      {
+        "name": "--emoji",
+        "type": "string",
+        "required": false,
+        "description": "Title emoji: an emoji, or its hex code point such as 1f44d"
+      }
+    ],
+    "record": {
+      "name": "confluence.page-item",
+      "description": "a Confluence page or blog post without its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page create --space ENG --title 'Release 1.2' --body-file notes.md",
+      "atlx confluence page create --space ENG --parent 12345 --title Child --body '# Hello' --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page update",
+    "summary": "Replace the title or the whole body (needs --if-version)",
+    "description": "Replace the title or the whole body (needs --if-version)\n\nA Markdown or plain body is refused when the current body holds content Markdown cannot express (macros, layouts, ...): use `page edit` to change only part of it, or pass the body as ADF.",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--if-version",
+        "type": "integer",
+        "required": true,
+        "description": "The `version` of the page you read and changed; a newer version on the server is a conflict (exit 6) and nothing is written"
+      },
+      {
+        "name": "--version-message",
+        "type": "string",
+        "required": false,
+        "description": "Message for the new version"
+      },
+      {
+        "name": "--minor-edit",
+        "type": "boolean",
+        "required": false,
+        "description": "Ask for a minor edit (watchers may still be notified)"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Change the draft instead of the published version"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "New title"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "The body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "What the body is written in: markdown (default), adf (JSON), storage (Confluence XHTML, checked and sent unchanged) or plain"
+      },
+      {
+        "name": "--allow-lossy",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace a body even though Markdown cannot express all of it, losing that content (needs --yes)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm --allow-lossy"
+      }
+    ],
+    "record": {
+      "name": "confluence.page-item",
+      "description": "a Confluence page or blog post without its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page update 12345 --if-version 7 --title 'New title'",
+      "atlx confluence page update 12345 --if-version 7 --body-file page.md --dry-run",
+      "atlx confluence page update 12345 --if-version 7 --body-file page.json --body-format adf"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page edit",
+    "summary": "Change parts of the body with edit operations (needs --if-version)",
+    "description": "Change parts of the body with edit operations (needs --if-version)\n\n--edits takes a JSON array of operations, each {\"name\": ..., ...}: replaceNode, insertNodeBefore, insertNodeAfter, deleteNode, removeNodes, moveNode, appendNodeToEnd, setAttrs (by ADF `localId`, from `page get --outline` or `--body-format adf`), replaceText ({find, replace, count}), and replaceSection, appendToSection, prependToSection, deleteSection, insertSectionAfter (by `heading`). A `value` is Markdown, or ADF with \"format\": \"adf\". Nodes no operation touches are sent back unchanged.",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--if-version",
+        "type": "integer",
+        "required": true,
+        "description": "The `version` of the page you read and changed; a newer version on the server is a conflict (exit 6) and nothing is written"
+      },
+      {
+        "name": "--version-message",
+        "type": "string",
+        "required": false,
+        "description": "Message for the new version"
+      },
+      {
+        "name": "--minor-edit",
+        "type": "boolean",
+        "required": false,
+        "description": "Ask for a minor edit (watchers may still be notified)"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Change the draft instead of the published version"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--edits",
+        "type": "string",
+        "required": false,
+        "description": "JSON array of edit operations (`-` reads stdin)"
+      },
+      {
+        "name": "--edits-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the edit operations from a JSON file"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "New title as well"
+      }
+    ],
+    "record": {
+      "name": "confluence.page-item",
+      "description": "a Confluence page or blog post without its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page edit 12345 --if-version 7 --edits '[{\"name\":\"replaceText\",\"find\":\"v1.1\",\"replace\":\"v1.2\"}]'",
+      "atlx confluence page edit 12345 --if-version 7 --edits-file edits.json --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page delete",
+    "summary": "Move to the trash; with --purge delete from the trash for good; with --draft delete a draft that was never published",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--purge",
+        "type": "boolean",
+        "required": false,
+        "description": "Delete it from the trash for good (it must be in the trash)"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "Delete its draft, which must never have been published"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost (with --draft), which skips probing for it"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page delete 12345 --yes",
+      "atlx confluence page delete 12345 --purge --yes",
+      "atlx confluence page delete 12345 --draft --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page restore",
+    "summary": "Bring a page or blog post back from the trash",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page restore 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page move",
+    "summary": "Move a page under or next to another page",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "Make it the last child of this page"
+      },
+      {
+        "name": "--before",
+        "type": "string",
+        "required": false,
+        "description": "Put it just before this page, under the same parent"
+      },
+      {
+        "name": "--after",
+        "type": "string",
+        "required": false,
+        "description": "Put it just after this page, under the same parent"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page move 12345 --parent 67890",
+      "atlx confluence page move 12345 --before 67890"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page copy",
+    "summary": "Copy a page under a parent or into a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--parent",
+        "type": "string",
+        "required": false,
+        "description": "Copy it under this page"
+      },
+      {
+        "name": "--to-space",
+        "type": "string",
+        "required": false,
+        "description": "Copy it to the top of this space (key or ID)"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Title of the copy"
+      },
+      {
+        "name": "--attachments",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the attachments too"
+      },
+      {
+        "name": "--labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the labels too"
+      },
+      {
+        "name": "--permissions",
+        "type": "boolean",
+        "required": false,
+        "description": "Copy the restrictions too"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page copy 12345 --parent 67890 --title 'Copy of runbook'",
+      "atlx confluence page copy 12345 --to-space OPS --attachments --labels"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page archive",
+    "summary": "Archive a page",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--wait",
+        "type": "boolean",
+        "required": false,
+        "description": "Wait until Confluence has finished archiving it"
+      },
+      {
+        "name": "--timeout",
+        "type": "integer",
+        "required": false,
+        "default": "120",
+        "description": "Seconds to wait with --wait"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page archive 12345 --yes",
+      "atlx confluence page archive 12345 --wait --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page publish",
+    "summary": "Publish a draft",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--title",
+        "type": "string",
+        "required": false,
+        "description": "Title to publish it with (default: the draft's)"
+      }
+    ],
+    "record": {
+      "name": "confluence.page-item",
+      "description": "a Confluence page or blog post without its body",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "content ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blogpost",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "title",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current, draft, archived or trashed",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "ID of the space it is in",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "parent page ID (pages only)",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "updated",
+          "type": "datetime",
+          "description": "when this version was made",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the version's author",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "description": "account ID of its owner",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page publish 12345 --title 'Final title'"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page watch",
+    "summary": "Watch a page or blog post (get notified about changes)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page watch 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page unwatch",
+    "summary": "Stop watching a page or blog post",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page unwatch 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page tree",
+    "summary": "A page's ancestors and its descendants",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page ID or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--depth",
+        "type": "integer",
+        "required": false,
+        "default": "2",
+        "description": "How many levels below it (default 2, at most 10; at most 500 nodes)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "whiteboard",
+          "database"
+        ],
+        "required": false,
+        "description": "Only this type of descendant, with whatever contains it"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page tree 12345",
+      "atlx confluence page tree 12345 --depth 4 --type whiteboard"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page comment list",
+    "summary": "List the footer (default) or inline comments of a page or blog post",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--inline",
+        "type": "boolean",
+        "required": false,
+        "description": "Inline comments instead of footer comments"
+      },
+      {
+        "name": "--resolution",
+        "type": "enum",
+        "values": [
+          "open",
+          "resolved",
+          "reopened",
+          "dangling"
+        ],
+        "required": false,
+        "description": "Inline comments in this state; open also takes in reopened and dangling ones"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "draft"
+        ],
+        "required": false,
+        "description": "current (default) or draft"
+      },
+      {
+        "name": "--sort",
+        "type": "enum",
+        "values": [
+          "created-date",
+          "-created-date"
+        ],
+        "required": false,
+        "description": "Oldest (created-date) or newest (-created-date) first"
+      },
+      {
+        "name": "--replies",
+        "type": "boolean",
+        "required": false,
+        "description": "Nest each comment's replies under it (at most 500 in all)"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "Bodies as markdown (default), adf, storage or plain"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.comment",
+      "description": "a footer or inline comment",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "comment ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "footer or inline",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "the comment it replies to",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when this version was written",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "resolution",
+          "type": "string",
+          "description": "inline comments: open, resolved, reopened or dangling",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "replies",
+          "type": "object[]",
+          "description": "with --replies: the replies, nested",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or draft",
+          "default": false
+        },
+        {
+          "name": "selection",
+          "type": "string",
+          "description": "inline comments: the text it is anchored to",
+          "default": false
+        },
+        {
+          "name": "repliesTruncated",
+          "type": "boolean",
+          "description": "the reply thread was cut at 500 replies",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page comment list --page 12345",
+      "atlx confluence page comment list --page 12345 --inline --resolution open --replies"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page comment get",
+    "summary": "Read comments by ID, ARI or URL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Comment IDs, ARIs or URLs; `-` reads them from stdin"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--inline",
+        "type": "boolean",
+        "required": false,
+        "description": "They are inline comments (skips probing footer comments first)"
+      },
+      {
+        "name": "--replies",
+        "type": "boolean",
+        "required": false,
+        "description": "Nest the replies"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "Bodies as markdown (default), adf, storage or plain"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the whole command if any ID fails"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many IDs to read at once (1-20)"
+      }
+    ],
+    "record": {
+      "name": "confluence.comment",
+      "description": "a footer or inline comment",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "comment ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "footer or inline",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "the comment it replies to",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when this version was written",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "resolution",
+          "type": "string",
+          "description": "inline comments: open, resolved, reopened or dangling",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "replies",
+          "type": "object[]",
+          "description": "with --replies: the replies, nested",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or draft",
+          "default": false
+        },
+        {
+          "name": "selection",
+          "type": "string",
+          "description": "inline comments: the text it is anchored to",
+          "default": false
+        },
+        {
+          "name": "repliesTruncated",
+          "type": "boolean",
+          "description": "the reply thread was cut at 500 replies",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page comment get 777",
+      "atlx confluence page comment get 777 778 --replies"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page comment create",
+    "summary": "Add a footer comment, an inline comment on selected text, or a reply",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": false,
+        "description": "Comment on this page or blog post (ID, URL, or exact title with --space)"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "Reply to this comment instead"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "The body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "What the body is written in: markdown (default), adf (JSON), storage (Confluence XHTML, checked and sent unchanged) or plain"
+      },
+      {
+        "name": "--text-selection",
+        "type": "string",
+        "required": false,
+        "description": "Make it an inline comment anchored to this exact text"
+      },
+      {
+        "name": "--text-selection-match-count",
+        "type": "integer",
+        "required": false,
+        "description": "How often that text appears in the page [default: counted]"
+      },
+      {
+        "name": "--text-selection-match-index",
+        "type": "integer",
+        "required": false,
+        "description": "Which appearance to anchor to, from 0 [default: 0]"
+      }
+    ],
+    "record": {
+      "name": "confluence.comment",
+      "description": "a footer or inline comment",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "comment ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "footer or inline",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "the comment it replies to",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when this version was written",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "resolution",
+          "type": "string",
+          "description": "inline comments: open, resolved, reopened or dangling",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "replies",
+          "type": "object[]",
+          "description": "with --replies: the replies, nested",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or draft",
+          "default": false
+        },
+        {
+          "name": "selection",
+          "type": "string",
+          "description": "inline comments: the text it is anchored to",
+          "default": false
+        },
+        {
+          "name": "repliesTruncated",
+          "type": "boolean",
+          "description": "the reply thread was cut at 500 replies",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page comment create --page 12345 --body 'Looks good'",
+      "atlx confluence page comment create --page 12345 --body 'Typo?' --text-selection 'teh'",
+      "atlx confluence page comment create --comment 777 --body Thanks"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page comment update",
+    "summary": "Replace a comment's body, or resolve or reopen an inline comment",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--body",
+        "type": "string",
+        "required": false,
+        "description": "The body (`-` reads stdin)"
+      },
+      {
+        "name": "--body-file",
+        "type": "string",
+        "required": false,
+        "description": "Read the body from a file"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "What the body is written in: markdown (default), adf (JSON), storage (Confluence XHTML, checked and sent unchanged) or plain"
+      },
+      {
+        "name": "--if-version",
+        "type": "integer",
+        "required": false,
+        "description": "The comment's `version` you read; a newer one is a conflict (exit 6)"
+      },
+      {
+        "name": "--resolve",
+        "type": "boolean",
+        "required": false,
+        "description": "Resolve the inline comment"
+      },
+      {
+        "name": "--reopen",
+        "type": "boolean",
+        "required": false,
+        "description": "Reopen the resolved inline comment"
+      },
+      {
+        "name": "--inline",
+        "type": "boolean",
+        "required": false,
+        "description": "It is an inline comment (skips probing footer comments first)"
+      },
+      {
+        "name": "--allow-lossy",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace a body even though Markdown cannot express all of it, losing that content (needs --yes)"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm --allow-lossy"
+      }
+    ],
+    "record": {
+      "name": "confluence.comment",
+      "description": "a footer or inline comment",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "comment ID",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "footer or inline",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "parentId",
+          "type": "string",
+          "description": "the comment it replies to",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when this version was written",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "resolution",
+          "type": "string",
+          "description": "inline comments: open, resolved, reopened or dangling",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "replies",
+          "type": "object[]",
+          "description": "with --replies: the replies, nested",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or draft",
+          "default": false
+        },
+        {
+          "name": "selection",
+          "type": "string",
+          "description": "inline comments: the text it is anchored to",
+          "default": false
+        },
+        {
+          "name": "repliesTruncated",
+          "type": "boolean",
+          "description": "the reply thread was cut at 500 replies",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page comment update 777 --body 'Fixed wording' --if-version 2",
+      "atlx confluence page comment update 777 --resolve"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page comment delete",
+    "summary": "Delete a comment for good",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Comment ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page comment delete 777 --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page attachment list",
+    "summary": "List a page's attachments",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--media-type",
+        "type": "string",
+        "required": false,
+        "description": "Only this media type, e.g. image/png"
+      },
+      {
+        "name": "--filename",
+        "type": "string",
+        "required": false,
+        "description": "Only this file name"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "archived",
+          "trashed"
+        ],
+        "required": false,
+        "default": "current",
+        "description": "current (default), archived or trashed"
+      },
+      {
+        "name": "--sort",
+        "type": "string",
+        "required": false,
+        "description": "created-date or modified-date; prefix - for newest first"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.attachment",
+      "description": "a file attached to a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "attachment ID (att...)",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "file name",
+          "default": true
+        },
+        {
+          "name": "mediaType",
+          "type": "string",
+          "description": "media type",
+          "default": true
+        },
+        {
+          "name": "fileSize",
+          "type": "integer",
+          "description": "size in bytes",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "description": "comment of this version",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was attached",
+          "default": false
+        },
+        {
+          "name": "downloadLink",
+          "type": "string",
+          "description": "download path",
+          "default": false
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "description": "upload: created, or updated (a new version of a file with the same name)",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page attachment list --page 12345",
+      "atlx confluence page attachment list --page 12345 --media-type image/png"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page attachment get",
+    "summary": "Attachment details by ID (att12345) or URL",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Attachment IDs or URLs; `-` reads them from stdin"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the whole command if any ID fails"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many IDs to read at once (1-20)"
+      }
+    ],
+    "record": {
+      "name": "confluence.attachment",
+      "description": "a file attached to a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "attachment ID (att...)",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "file name",
+          "default": true
+        },
+        {
+          "name": "mediaType",
+          "type": "string",
+          "description": "media type",
+          "default": true
+        },
+        {
+          "name": "fileSize",
+          "type": "integer",
+          "description": "size in bytes",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "description": "comment of this version",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was attached",
+          "default": false
+        },
+        {
+          "name": "downloadLink",
+          "type": "string",
+          "description": "download path",
+          "default": false
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "description": "upload: created, or updated (a new version of a file with the same name)",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page attachment get att456"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page attachment download",
+    "summary": "Save an attachment to a local file",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID (att12345) or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--out",
+        "type": "path",
+        "required": false,
+        "description": "File to write (default: the attachment's name, in the current directory)"
+      },
+      {
+        "name": "--force",
+        "type": "boolean",
+        "required": false,
+        "description": "Replace the file if it exists"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page attachment download att456 --out diagram.png"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page attachment upload",
+    "summary": "Attach local files; a file with the name of an existing attachment becomes its new version",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--file",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "File to upload; repeat for several"
+      },
+      {
+        "name": "--comment",
+        "type": "string",
+        "required": false,
+        "description": "Comment for the new attachment version"
+      },
+      {
+        "name": "--minor-edit",
+        "type": "boolean",
+        "required": false,
+        "description": "Don't notify watchers"
+      }
+    ],
+    "record": {
+      "name": "confluence.attachment",
+      "description": "a file attached to a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "attachment ID (att...)",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "file name",
+          "default": true
+        },
+        {
+          "name": "mediaType",
+          "type": "string",
+          "description": "media type",
+          "default": true
+        },
+        {
+          "name": "fileSize",
+          "type": "integer",
+          "description": "size in bytes",
+          "default": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is on",
+          "default": true
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "description": "comment of this version",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was attached",
+          "default": false
+        },
+        {
+          "name": "downloadLink",
+          "type": "string",
+          "description": "download path",
+          "default": false
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "description": "upload: created, or updated (a new version of a file with the same name)",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page attachment upload --page 12345 --file diagram.png",
+      "atlx confluence page attachment upload --page 12345 --file a.pdf --file b.pdf --comment v2"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page attachment delete",
+    "summary": "Move an attachment to the trash, or with --purge delete it from the trash for good",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Attachment ID (att12345) or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--purge",
+        "type": "boolean",
+        "required": false,
+        "description": "Delete it for good; it must be in the trash already"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page attachment delete att456 --yes",
+      "atlx confluence page attachment delete att456 --purge --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page label list",
+    "summary": "List a page's labels",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost",
+          "custom-content"
+        ],
+        "required": false,
+        "description": "page, blogpost or custom-content, which skips probing for it"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.label",
+      "description": "a label on a page or blog post",
+      "primary": "name",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "label name",
+          "default": true
+        },
+        {
+          "name": "prefix",
+          "type": "string",
+          "description": "global, my or team",
+          "default": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "description": "label ID",
+          "default": true
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page label list --page 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page label create",
+    "summary": "Add labels; prints the page's labels afterwards",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "LABEL",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Label names (commas also separate them)"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--prefix",
+        "type": "string",
+        "required": false,
+        "default": "global",
+        "description": "Label prefix"
+      }
+    ],
+    "record": {
+      "name": "confluence.label",
+      "description": "a label on a page or blog post",
+      "primary": "name",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "label name",
+          "default": true
+        },
+        {
+          "name": "prefix",
+          "type": "string",
+          "description": "global, my or team",
+          "default": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "description": "label ID",
+          "default": true
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page label create runbook ops --page 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page label delete",
+    "summary": "Remove labels",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "LABEL",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Label names (commas also separate them)"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--prefix",
+        "type": "string",
+        "required": false,
+        "default": "global",
+        "description": "Label prefix"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page label delete draft --page 12345 --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page version list",
+    "summary": "List versions, newest first",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.version",
+      "description": "one version of a page or blog post",
+      "primary": "number",
+      "fields": [
+        {
+          "name": "number",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "description": "version message",
+          "default": true
+        },
+        {
+          "name": "minorEdit",
+          "type": "boolean",
+          "description": "marked as a minor edit",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was made",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "version get: the title at that version",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "version get: the body at that version, in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page version list --page 12345 --limit 5"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page version get",
+    "summary": "One version, with the title and body it had",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "N",
+        "type": "integer",
+        "required": true,
+        "description": "Version number"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "The body as markdown (default), adf, storage or plain"
+      }
+    ],
+    "record": {
+      "name": "confluence.version",
+      "description": "one version of a page or blog post",
+      "primary": "number",
+      "fields": [
+        {
+          "name": "number",
+          "type": "integer",
+          "description": "version number",
+          "default": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "description": "version message",
+          "default": true
+        },
+        {
+          "name": "minorEdit",
+          "type": "boolean",
+          "description": "marked as a minor edit",
+          "default": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "description": "account ID of the author",
+          "default": true
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was made",
+          "default": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "version get: the title at that version",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "version get: the body at that version, in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page version get 3 --page 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page version diff",
+    "summary": "A unified diff between two versions' bodies",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--from",
+        "type": "integer",
+        "required": true,
+        "description": "Older version number"
+      },
+      {
+        "name": "--to",
+        "type": "integer",
+        "required": true,
+        "description": "Newer version number"
+      },
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "Compare markdown (default) or adf (one top-level node per line)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page version diff --page 12345 --from 3 --to 5"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page version restore",
+    "summary": "Make an old version the latest again (adds a new version)",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "N",
+        "type": "integer",
+        "required": true,
+        "description": "Version number to bring back"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--message",
+        "type": "string",
+        "required": false,
+        "description": "Message for the new version"
+      },
+      {
+        "name": "--restore-title",
+        "type": "boolean",
+        "required": false,
+        "description": "Bring back that version's title too"
+      },
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page version restore 3 --page 12345 --message 'Undo bad edit' --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page task list",
+    "summary": "List the tasks of a page, or every task you can see",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--page",
+        "type": "string",
+        "required": false,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      },
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking --page up by exact title"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "blogpost"
+        ],
+        "required": false,
+        "description": "page or blogpost, which skips probing for it"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "open",
+          "complete",
+          "all"
+        ],
+        "required": false,
+        "default": "all",
+        "description": "open, complete or all (default)"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.task",
+      "description": "a task (checkbox) written in a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "task ID",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "complete or incomplete",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is in",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "space it is in",
+          "default": true
+        },
+        {
+          "name": "assignee",
+          "type": "string",
+          "description": "account ID it is assigned to",
+          "default": true
+        },
+        {
+          "name": "due",
+          "type": "datetime",
+          "description": "due date",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the task text",
+          "default": true,
+          "truncated": {
+            "limit": 2000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "creator",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "completed",
+          "type": "datetime",
+          "description": "when it was completed",
+          "default": false
+        },
+        {
+          "name": "completedBy",
+          "type": "string",
+          "description": "account ID that completed it",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page task list --page 12345 --status open",
+      "atlx confluence page task list --status open --limit 50"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page task get",
+    "summary": "Tasks by ID",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "repeatable": true,
+        "description": "Task IDs; `-` reads them from stdin"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the whole command if any ID fails"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many IDs to read at once (1-20)"
+      }
+    ],
+    "record": {
+      "name": "confluence.task",
+      "description": "a task (checkbox) written in a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "task ID",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "complete or incomplete",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is in",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "space it is in",
+          "default": true
+        },
+        {
+          "name": "assignee",
+          "type": "string",
+          "description": "account ID it is assigned to",
+          "default": true
+        },
+        {
+          "name": "due",
+          "type": "datetime",
+          "description": "due date",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the task text",
+          "default": true,
+          "truncated": {
+            "limit": 2000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "creator",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "completed",
+          "type": "datetime",
+          "description": "when it was completed",
+          "default": false
+        },
+        {
+          "name": "completedBy",
+          "type": "string",
+          "description": "account ID that completed it",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page task get 42"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page task update",
+    "summary": "Complete or reopen a task",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Task ID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "open",
+          "complete"
+        ],
+        "required": true,
+        "description": "complete or open"
+      }
+    ],
+    "record": {
+      "name": "confluence.task",
+      "description": "a task (checkbox) written in a page or blog post",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "task ID",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "complete or incomplete",
+          "default": true
+        },
+        {
+          "name": "pageId",
+          "type": "string",
+          "description": "page or blog post it is in",
+          "default": true
+        },
+        {
+          "name": "spaceId",
+          "type": "string",
+          "description": "space it is in",
+          "default": true
+        },
+        {
+          "name": "assignee",
+          "type": "string",
+          "description": "account ID it is assigned to",
+          "default": true
+        },
+        {
+          "name": "due",
+          "type": "datetime",
+          "description": "due date",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "the task text",
+          "default": true,
+          "truncated": {
+            "limit": 2000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        },
+        {
+          "name": "creator",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "completed",
+          "type": "datetime",
+          "description": "when it was completed",
+          "default": false
+        },
+        {
+          "name": "completedBy",
+          "type": "string",
+          "description": "account ID that completed it",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence page task update 42 --status complete"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page state get",
+    "summary": "The status shown on a page",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "The draft's status"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page state get 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page state update",
+    "summary": "Set the status (publishes a new version)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      },
+      {
+        "name": "--draft",
+        "type": "boolean",
+        "required": false,
+        "description": "The draft's status"
+      },
+      {
+        "name": "--state-id",
+        "type": "integer",
+        "required": false,
+        "description": "An existing status, by ID (from `page state list`)"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false,
+        "description": "A status by name (up to 20 characters)"
+      },
+      {
+        "name": "--color",
+        "type": "string",
+        "required": false,
+        "description": "Its color, like #ffc400"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page state update 12345 --name 'In review' --color '#ffc400'",
+      "atlx confluence page state update 12345 --state-id 3"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence page state list",
+    "summary": "The statuses a page can be given",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Page or blog post ID, URL, or exact title with --space"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "Space key or ID for looking the ID up by exact title"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence page state list 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space list",
+    "summary": "List spaces",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "global",
+          "personal"
+        ],
+        "required": false,
+        "description": "global or personal"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "archived"
+        ],
+        "required": false,
+        "description": "current or archived"
+      },
+      {
+        "name": "--key",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Only these space keys; repeatable, commas also separate them"
+      },
+      {
+        "name": "--labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Also fetch each space's labels (one request per space; shown with --full or --fields labels)"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space list --limit 10",
+      "atlx confluence space list --type personal --all -o ids"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space get",
+    "summary": "Spaces by key or ID, or your personal space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": false,
+        "repeatable": true,
+        "description": "Space keys or IDs; `-` reads them from stdin"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--personal",
+        "type": "boolean",
+        "required": false,
+        "description": "Your personal space"
+      },
+      {
+        "name": "--labels",
+        "type": "boolean",
+        "required": false,
+        "description": "Also fetch the labels (shown with --full or --fields labels)"
+      },
+      {
+        "name": "--strict",
+        "type": "boolean",
+        "required": false,
+        "description": "Fail the whole command if any ID fails"
+      },
+      {
+        "name": "--concurrency",
+        "type": "integer",
+        "required": false,
+        "default": "5",
+        "description": "How many IDs to read at once (1-20)"
+      }
+    ],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space get ENG",
+      "atlx confluence space get ENG OPS --labels --full",
+      "atlx confluence space get --personal"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space create",
+    "summary": "Create a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--key",
+        "type": "string",
+        "required": true,
+        "description": "Space key: letters and digits"
+      },
+      {
+        "name": "--name",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Plain-text description"
+      },
+      {
+        "name": "--private",
+        "type": "boolean",
+        "required": false,
+        "description": "Only you can see it"
+      }
+    ],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space create --key NEW --name 'New team' --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space update",
+    "summary": "Change a space's name, description, type, status or home page",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--name",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "--description",
+        "type": "string",
+        "required": false,
+        "description": "Plain-text description"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "global",
+          "personal"
+        ],
+        "required": false,
+        "description": "global or personal"
+      },
+      {
+        "name": "--status",
+        "type": "enum",
+        "values": [
+          "current",
+          "archived"
+        ],
+        "required": false,
+        "description": "current or archived"
+      },
+      {
+        "name": "--homepage",
+        "type": "string",
+        "required": false,
+        "description": "Home page ID or URL"
+      }
+    ],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space update ENG --name Engineering"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space archive",
+    "summary": "Archive a space",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space archive OLD --yes"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space restore",
+    "summary": "Bring an archived space back",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [],
+    "record": {
+      "name": "confluence.space",
+      "description": "a Confluence space",
+      "primary": "key",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "space ID",
+          "default": true
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "description": "space key",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "global or personal",
+          "default": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "current or archived",
+          "default": true
+        },
+        {
+          "name": "homepageId",
+          "type": "string",
+          "description": "ID of its home page",
+          "default": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "description": "web address",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "plain-text description",
+          "default": false
+        },
+        {
+          "name": "created",
+          "type": "datetime",
+          "description": "when it was created",
+          "default": false
+        },
+        {
+          "name": "authorId",
+          "type": "string",
+          "description": "account ID of its creator",
+          "default": false
+        },
+        {
+          "name": "labels",
+          "type": "object[]",
+          "description": "with --labels: the space's labels as {id, name, prefix}",
+          "default": false
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space restore OLD"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space delete",
+    "summary": "Delete a space and everything in it, for good",
+    "effect": "destructive",
+    "confirm": true,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--yes",
+        "short": "-y",
+        "type": "boolean",
+        "required": false,
+        "description": "Confirm this destructive change (preview it with --dry-run first)"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence space delete OLD --dry-run"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space watch",
+    "summary": "Watch a space (get notified about changes in it)",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx confluence space watch ENG"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space unwatch",
+    "summary": "Stop watching a space",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx confluence space unwatch ENG"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space tree",
+    "summary": "A space's page tree, from its top-level pages",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "SPACE",
+        "type": "string",
+        "required": true,
+        "description": "Space key, ID, ARI or URL"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--depth",
+        "type": "integer",
+        "required": false,
+        "default": "2",
+        "description": "How many levels (default 2, at most 10; at most 500 nodes)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "page",
+          "whiteboard",
+          "database"
+        ],
+        "required": false,
+        "description": "Only this type of node, with whatever contains it"
+      }
+    ],
+    "record": null,
+    "examples": [
+      "atlx confluence space tree ENG --depth 1"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence space permission list",
+    "summary": "The permissions granted in a space",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": true,
+        "description": "Space key or ID"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.space-permission",
+      "description": "one permission granted in a space",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "permission ID",
+          "default": true
+        },
+        {
+          "name": "principal",
+          "type": "object",
+          "description": "who has it: {type: user|group|role, id}",
+          "default": true
+        },
+        {
+          "name": "operation",
+          "type": "object",
+          "description": "what it allows: {key, targetType}",
+          "default": true
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence space permission list --space ENG --all"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence template list",
+    "summary": "List templates and blueprints",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [],
+    "flags": [
+      {
+        "name": "--space",
+        "type": "string",
+        "required": false,
+        "description": "A space's templates (key or ID)"
+      },
+      {
+        "name": "--scope",
+        "type": "enum",
+        "values": [
+          "global",
+          "space",
+          "available"
+        ],
+        "required": false,
+        "description": "global, space (default with --space), or available (both)"
+      },
+      {
+        "name": "--type",
+        "type": "enum",
+        "values": [
+          "all",
+          "page",
+          "blueprint"
+        ],
+        "required": false,
+        "default": "all",
+        "description": "all (default), page or blueprint"
+      },
+      {
+        "name": "--query",
+        "short": "-q",
+        "type": "string",
+        "required": false,
+        "description": "Only templates whose ID, name or description contains this text"
+      },
+      {
+        "name": "--limit",
+        "type": "integer",
+        "required": false,
+        "description": "How many records to return (default 25, at most 1000)"
+      },
+      {
+        "name": "--cursor",
+        "type": "string",
+        "required": false,
+        "description": "Continue from a previous result's `next`"
+      },
+      {
+        "name": "--all",
+        "type": "boolean",
+        "required": false,
+        "description": "Return every record, up to 1000"
+      }
+    ],
+    "record": {
+      "name": "confluence.template",
+      "description": "a page template or blueprint",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "template ID",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "description",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blueprint",
+          "default": true
+        },
+        {
+          "name": "spaceKey",
+          "type": "string",
+          "description": "space it belongs to (none: global)",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "template get: the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence template list",
+      "atlx confluence template list --space ENG --scope available -q retro"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence template get",
+    "summary": "One template, with its body",
+    "effect": "read",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "ID",
+        "type": "string",
+        "required": true,
+        "description": "Template ID"
+      }
+    ],
+    "flags": [
+      {
+        "name": "--body-format",
+        "type": "enum",
+        "values": [
+          "markdown",
+          "adf",
+          "storage",
+          "plain"
+        ],
+        "required": false,
+        "default": "markdown",
+        "description": "The body as markdown (default), adf, storage or plain"
+      }
+    ],
+    "record": {
+      "name": "confluence.template",
+      "description": "a page template or blueprint",
+      "primary": "id",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "template ID",
+          "default": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": "name",
+          "default": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "description",
+          "default": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "page or blueprint",
+          "default": true
+        },
+        {
+          "name": "spaceKey",
+          "type": "string",
+          "description": "space it belongs to (none: global)",
+          "default": true
+        },
+        {
+          "name": "body",
+          "type": "markdown",
+          "description": "template get: the body in --body-format",
+          "default": true,
+          "truncated": {
+            "limit": 20000,
+            "unit": "chars",
+            "from": "start",
+            "more": "--body-offset"
+          }
+        }
+      ]
+    },
+    "examples": [
+      "atlx confluence template get 12345"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      7
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence label watch",
+    "summary": "Get notified about content that gets this label",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "LABEL",
+        "type": "string",
+        "required": true,
+        "description": "Label name"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx confluence label watch runbook"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "contract": 1,
+    "path": "confluence label unwatch",
+    "summary": "Stop watching a label",
+    "effect": "write",
+    "confirm": false,
+    "positionals": [
+      {
+        "name": "LABEL",
+        "type": "string",
+        "required": true,
+        "description": "Label name"
+      }
+    ],
+    "flags": [],
+    "record": null,
+    "examples": [
+      "atlx confluence label unwatch runbook"
+    ],
+    "exitCodes": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  }
+]

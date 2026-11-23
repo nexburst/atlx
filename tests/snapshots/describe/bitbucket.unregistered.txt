@@ -1,0 +1,2 @@
+# Commands without a CommandMeta yet. Package owners empty this list;
+# unregistered_commands_only_shrink fails if it grows.

@@ -7,12 +7,25 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// Every file of the skill, by its path inside it.
-const FILES: [(&str, &str); 5] = [
+/// Every file of the skill, by its path inside it. The per-product command
+/// references are generated from `atlx describe` (`tests/skill.rs`).
+const FILES: [(&str, &str); 7] = [
     ("SKILL.md", include_str!("../../skills/atlx/SKILL.md")),
+    (
+        "references/bodies.md",
+        include_str!("../../skills/atlx/references/bodies.md"),
+    ),
+    (
+        "references/core.md",
+        include_str!("../../skills/atlx/references/core.md"),
+    ),
     (
         "references/jira.md",
         include_str!("../../skills/atlx/references/jira.md"),
+    ),
+    (
+        "references/jsm.md",
+        include_str!("../../skills/atlx/references/jsm.md"),
     ),
     (
         "references/confluence.md",
@@ -21,10 +34,6 @@ const FILES: [(&str, &str); 5] = [
     (
         "references/bitbucket.md",
         include_str!("../../skills/atlx/references/bitbucket.md"),
-    ),
-    (
-        "references/output-and-errors.md",
-        include_str!("../../skills/atlx/references/output-and-errors.md"),
     ),
 ];
 
@@ -143,8 +152,89 @@ pub(crate) fn run(cmd: SkillCmd) -> Result<Out> {
 mod tests {
     use super::*;
     use crate::cli::Cli;
-    use crate::cli::tests::shell_words;
     use clap::Parser;
+
+    /// The README's command lines are held to the same rule as the skill's.
+    const README: &str = include_str!("../../README.md");
+
+    /// Shell words, with single and double quotes removed.
+    fn words(s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut quote = None;
+        let mut started = false;
+        for ch in s.chars() {
+            match (quote, ch) {
+                (None, '\'' | '"') => {
+                    quote = Some(ch);
+                    started = true;
+                }
+                (Some(q), c) if c == q => quote = None,
+                (None, ' ') => {
+                    if started {
+                        out.push(std::mem::take(&mut cur));
+                        started = false;
+                    }
+                }
+                _ => {
+                    cur.push(ch);
+                    started = true;
+                }
+            }
+        }
+        if started {
+            out.push(cur);
+        }
+        out
+    }
+
+    /// The `atlx` invocations in one shell line: pipelines and `&&` lists
+    /// are split; redirections, comments and leading `VAR=value` words are
+    /// dropped.
+    fn invocations(line: &str) -> Vec<String> {
+        let mut segments = vec![String::new()];
+        let mut quote = None;
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match (quote, ch) {
+                (None, '\'' | '"') => quote = Some(ch),
+                (Some(q), c) if c == q => quote = None,
+                (None, '#') if segments.last().unwrap().ends_with(' ') => break,
+                (None, '|' | ';' | '&') => {
+                    if chars.peek() == Some(&ch) {
+                        chars.next();
+                    }
+                    segments.push(String::new());
+                    continue;
+                }
+                (None, '>' | '<') => {
+                    // The rest of the segment is the redirection's target.
+                    while chars.peek().is_some_and(|c| !matches!(c, '|' | ';' | '&')) {
+                        chars.next();
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            segments.last_mut().unwrap().push(ch);
+        }
+        segments
+            .iter()
+            .filter_map(|s| {
+                let mut s = s.trim();
+                while let Some((first, rest)) = s.split_once(' ') {
+                    let env = first.split_once('=').is_some_and(|(k, _)| {
+                        !k.is_empty() && k.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                    });
+                    if !env {
+                        break;
+                    }
+                    s = rest.trim_start();
+                }
+                s.starts_with("atlx ").then(|| s.to_string())
+            })
+            .collect()
+    }
 
     /// Every `atlx ...` command in code blocks and inline code.
     fn commands(markdown: &str) -> Vec<String> {
@@ -154,34 +244,58 @@ mod tests {
             if line.trim_start().starts_with("```") {
                 fenced = !fenced;
             } else if fenced {
-                if line.trim_start().starts_with("atlx ") {
-                    out.push(line.trim().to_string());
-                }
+                out.extend(invocations(line));
             } else {
-                out.extend(
-                    line.split('`')
-                        .skip(1)
-                        .step_by(2)
-                        .filter(|code| code.starts_with("atlx "))
-                        .map(String::from),
-                );
+                for code in line.split('`').skip(1).step_by(2) {
+                    out.extend(invocations(code));
+                }
             }
         }
         out
     }
 
     #[test]
-    fn every_command_in_the_skill_parses() {
+    fn invocations_are_split_like_a_shell_would() {
+        assert_eq!(
+            invocations("atlx jira issue list -o ids | atlx jira issue get - # all"),
+            ["atlx jira issue list -o ids", "atlx jira issue get -"]
+        );
+        assert_eq!(
+            invocations("ATLX_READ_ONLY=1 atlx api jira /x > out.json && echo ok"),
+            ["atlx api jira /x"]
+        );
+        assert_eq!(
+            invocations("atlx search 'a | b # c'"),
+            ["atlx search 'a | b # c'"]
+        );
+        assert_eq!(
+            words(r#"atlx x --cql 'a = "b"' "c d" ''"#),
+            ["atlx", "x", "--cql", "a = \"b\"", "c d", ""]
+        );
+    }
+
+    #[test]
+    fn every_command_in_the_skill_and_readme_parses() {
         let mut checked = 0;
-        for (name, content) in FILES {
+        for (name, content) in FILES.into_iter().chain([("README.md", README)]) {
             for command in commands(content) {
-                if let Err(e) = Cli::try_parse_from(shell_words(&command)) {
+                if let Err(e) = Cli::try_parse_from(words(&command)) {
                     panic!("{name}: {command}: {e}");
                 }
                 checked += 1;
             }
         }
-        assert!(checked > 50, "only {checked} commands were found");
+        assert!(checked > 300, "only {checked} commands were found");
+    }
+
+    #[test]
+    fn skill_md_stays_under_its_budget() {
+        // About 1 500 tokens: SKILL.md is loaded whole, references on demand.
+        let len = FILES[0].1.chars().count();
+        assert!(
+            len <= 6000,
+            "SKILL.md has {len} characters; keep it at 6000 or fewer"
+        );
     }
 
     #[test]

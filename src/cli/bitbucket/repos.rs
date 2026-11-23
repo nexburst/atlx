@@ -1,74 +1,255 @@
-//! `bb branch create|delete`, `commit`, `workspace`, repository extras and
-//! `search prs`.
+//! `bb repo ...` (files, branches, commits, contributors, Code Insights
+//! reports, default reviewers) and `bb workspace ...`.
 
-use super::lifecycle::{PathOf, QueryScope};
-use super::{RepoArgs, positive_limit};
-use crate::bitbucket::{self, lifecycle::Role, repos};
-use crate::cli::util::{self, require_yes};
-use crate::client::{ApiError, Client};
-use crate::config::Config;
+use super::{BatchArgs, Ctx, ListArgs, RepoArg, complete, get_many, listed};
+use crate::bitbucket::{self, lifecycle, repos};
+use crate::cli::Out;
+use crate::client::ApiError;
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use repos::Change;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 fn usage(message: impl Into<String>) -> anyhow::Error {
     ApiError::usage(message).into()
 }
 
-#[derive(Args)]
-pub(crate) struct BranchCreateArgs {
-    /// Name of the new branch
-    #[arg(long, alias = "name")]
-    branch: String,
-    /// Branch or commit hash to start from [default: the main branch]
-    #[arg(long)]
-    from: Option<String>,
-    #[command(flatten)]
-    repo: RepoArgs,
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum RepoCmd {
+    /// List the repositories of a workspace, most recently updated first
+    List {
+        /// Workspace slug [default: the repository's, else the saved one]
+        #[arg(long, value_name = "SLUG")]
+        workspace: Option<String>,
+        /// Name contains
+        #[arg(long)]
+        name: Option<String>,
+        /// BBQL filter, e.g. 'is_private = false'
+        #[arg(long, short = 'q', value_name = "BBQL")]
+        query: Option<String>,
+        /// Project key
+        #[arg(long)]
+        project: Option<String>,
+        /// Main language
+        #[arg(long)]
+        language: Option<String>,
+        /// Only repositories where you are owner, admin, contributor or member
+        #[arg(long)]
+        role: Option<String>,
+        /// Sort field, `-` for descending
+        #[arg(long, allow_hyphen_values = true, default_value = "-updated_on")]
+        sort: String,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One or more repositories (workspace/slug; `-` reads them from stdin)
+    Get {
+        /// Repositories [default: the current one]
+        #[arg(value_name = "REPO")]
+        repos: Vec<String>,
+        #[command(flatten)]
+        batch: BatchArgs,
+    },
+    /// Create a repository (private unless --public)
+    Create {
+        /// The new repository: workspace/slug, or a slug in the default workspace
+        #[arg(value_name = "REPO")]
+        repo: String,
+        /// Display name [default: the slug]
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        /// Main language
+        #[arg(long)]
+        language: Option<String>,
+        /// Project key
+        #[arg(long)]
+        project: Option<String>,
+        /// Visible to everyone
+        #[arg(long)]
+        public: bool,
+    },
+    /// Files: read, list, download, search
+    File {
+        #[command(subcommand)]
+        cmd: FileCmd,
+    },
+    /// Branches
+    Branch {
+        #[command(subcommand)]
+        cmd: BranchCmd,
+    },
+    /// Commits
+    Commit {
+        #[command(subcommand)]
+        cmd: CommitCmd,
+    },
+    /// Commit authors and their commit counts
+    Contributor {
+        #[command(subcommand)]
+        cmd: ContributorCmd,
+    },
+    /// Code Insights reports on commits
+    Report {
+        #[command(subcommand)]
+        cmd: ReportCmd,
+    },
+    /// Users added to every new pull request as reviewers
+    DefaultReviewer {
+        #[command(subcommand)]
+        cmd: DefaultReviewerCmd,
+    },
 }
 
-#[derive(Args)]
-pub(crate) struct BranchDeleteArgs {
-    /// Branch name
-    name: String,
-    /// Confirm the delete (required)
-    #[arg(long, short)]
-    yes: bool,
-    #[command(flatten)]
-    repo: RepoArgs,
+#[derive(Subcommand)]
+pub(crate) enum FileCmd {
+    /// A file's text (the first 20 000 characters; --content-offset continues)
+    Get {
+        /// Path in the repository
+        path: String,
+        /// Branch, tag or commit [default: the main branch]
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
+        /// Start the text at this character
+        #[arg(long, value_name = "N")]
+        content_offset: Option<usize>,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
+    /// A directory's entries
+    List {
+        /// Directory [default: the root]
+        #[arg(long)]
+        path: Option<String>,
+        /// Branch, tag or commit [default: the main branch]
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
+        /// Descend this many levels
+        #[arg(long, value_name = "N")]
+        depth: Option<u32>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// Save a file, text or binary, to disk
+    Download {
+        /// Path in the repository
+        path: String,
+        /// Local file to write [default: the file's name, here]
+        #[arg(long, value_name = "FILE")]
+        to: Option<PathBuf>,
+        /// Replace the local file if it exists
+        #[arg(long)]
+        overwrite: bool,
+        /// Branch, tag or commit [default: the main branch]
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
+    /// Search code; `repo:`, `path:`, `ext:`, `lang:` words in the text filter
+    Search {
+        /// Text to look for
+        #[arg(required = true)]
+        text: Vec<String>,
+        /// Search the whole workspace [default: the current repository]
+        #[arg(long, value_name = "SLUG")]
+        workspace: Option<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum BranchCmd {
+    /// Branches, newest head commit first
+    List {
+        /// Name contains
+        #[arg(long)]
+        name: Option<String>,
+        /// BBQL filter
+        #[arg(long, short = 'q', value_name = "BBQL")]
+        query: Option<String>,
+        /// Head commit author: name (or part of it) or account ID
+        #[arg(long)]
+        author: Option<String>,
+        /// name, -name, target.date or -target.date
+        #[arg(long, allow_hyphen_values = true, default_value = "-target.date")]
+        sort: String,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One or more branches
+    Get {
+        #[arg(required = true, value_name = "NAME")]
+        names: Vec<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        batch: BatchArgs,
+    },
+    /// Create a branch
+    Create {
+        /// Name of the new branch
+        name: String,
+        /// Branch or commit to start from [default: the main branch]
+        #[arg(long)]
+        from: Option<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
+    /// Delete a branch
+    Delete {
+        name: String,
+        /// Confirm the deletion
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
 }
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum CommitCmd {
-    /// Commit history, of the main branch by default
-    Query {
+    /// Commit history, newest first, of the main branch by default
+    List {
         /// Branch to read
         #[arg(long, conflicts_with = "include")]
         branch: Option<String>,
-        /// Revisions to include; repeatable (atlx extra)
-        #[arg(long)]
+        /// Revisions to include; repeatable
+        #[arg(long, value_name = "REV")]
         include: Vec<String>,
-        /// Revisions to exclude; repeatable (atlx extra)
-        #[arg(long)]
+        /// Revisions to exclude; repeatable
+        #[arg(long, value_name = "REV")]
         exclude: Vec<String>,
-        /// Only commits touching this path (atlx extra)
+        /// Only commits touching this path
         #[arg(long)]
         path: Option<String>,
-        #[arg(long, short = 'n', default_value_t = 20, value_parser = positive_limit)]
-        limit: usize,
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
     },
-    /// Commit files without a checkout
+    /// One or more commits
+    Get {
+        #[arg(required = true, value_name = "HASH")]
+        hashes: Vec<String>,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        batch: BatchArgs,
+    },
+    /// Commit files to a branch without a checkout
     Create(CommitCreateArgs),
-    /// Code Insights reports
-    Report {
-        #[command(subcommand)]
-        cmd: ReportCmd,
-    },
 }
 
 #[derive(Args)]
@@ -76,8 +257,8 @@ pub(crate) struct CommitCreateArgs {
     /// Commit message
     #[arg(long, short = 'm')]
     message: String,
-    /// Local file to commit at the same relative path, or
-    /// repoPath=localPath (atlx extra); repeatable
+    /// Local file to commit at the same relative path, or repoPath=localPath;
+    /// repeatable
     #[arg(long)]
     file: Vec<String>,
     /// Local file for the --file-remote in the same position
@@ -99,7 +280,7 @@ pub(crate) struct CommitCreateArgs {
         required_unless_present = "default_branch"
     )]
     branch: Option<String>,
-    /// Commit to the repository's default branch
+    /// Commit to the repository's main branch
     #[arg(long)]
     default_branch: bool,
     /// Author, as "Name <email>"
@@ -108,45 +289,107 @@ pub(crate) struct CommitCreateArgs {
     /// Fail unless the branch is still at this commit
     #[arg(long)]
     parent: Option<String>,
-    /// Confirm the commit (required)
-    #[arg(long, short)]
-    yes: bool,
     #[command(flatten)]
-    repo: RepoArgs,
+    repo: RepoArg,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ContributorCmd {
+    /// Commit authors by commit count, over the 1000 most recent commits
+    List {
+        /// Branch, tag or commit [default: the main branch]
+        #[arg(long = "ref", value_name = "REF", conflicts_with = "range")]
+        git_ref: Option<String>,
+        /// Commits in to but not in from: from..to
+        #[arg(long)]
+        range: Option<String>,
+        /// Only commits since this day (YYYY-MM-DD or 30d)
+        #[arg(long)]
+        since: Option<String>,
+        /// How many authors [default: 10]
+        #[arg(long, value_name = "N", default_value_t = 10, value_parser = super::positive)]
+        limit: usize,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum ReportCmd {
+    /// A commit's reports
+    List {
+        /// Commit hash
+        #[arg(long)]
+        commit: String,
+        #[command(flatten)]
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
     /// Create or replace a report
     Create {
+        /// Report ID (your own, e.g. the tool's name)
+        id: String,
         /// Commit hash
+        #[arg(long)]
         commit: String,
-        /// Report ID
-        #[arg(value_name = "report-id")]
-        report_id: String,
-        /// Report JSON
+        /// Report JSON, or @file to read it from a file
         #[arg(long)]
         report: String,
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
     },
-    /// A commit's reports
-    Query {
-        /// Commit hash
-        commit: String,
-        #[arg(long, short = 'n', default_value_t = 100, value_parser = positive_limit)]
-        limit: usize,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum DefaultReviewerCmd {
+    /// The repository's default reviewers
+    List {
+        /// Include those inherited from the project
+        #[arg(long)]
+        effective: bool,
         #[command(flatten)]
-        repo: RepoArgs,
+        repo: RepoArg,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One default reviewer
+    Get {
+        /// UUID, account ID, nickname, display name or me
+        user: String,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
+    /// Make a user a default reviewer of every new pull request
+    Add {
+        /// UUID, account ID, nickname, display name or me
+        user: String,
+        /// Confirm the change
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArg,
+    },
+    /// Stop a user being a default reviewer
+    Remove {
+        /// UUID, account ID, nickname, display name or me
+        user: String,
+        /// Confirm the change
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[command(flatten)]
+        repo: RepoArg,
     },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum WorkspaceCmd {
-    /// Workspace details
+    /// One or more workspaces [default: the current one]
     Get {
+        #[arg(value_name = "SLUG")]
+        slugs: Vec<String>,
         #[command(flatten)]
-        repo: RepoArgs,
+        batch: BatchArgs,
     },
     /// Workspace members
     Member {
@@ -158,140 +401,30 @@ pub(crate) enum WorkspaceCmd {
 #[derive(Subcommand)]
 pub(crate) enum MemberCmd {
     /// List members
-    Query {
-        /// Nickname or display name contains (atlx extra)
-        #[arg(long, short = 'q')]
-        query: Option<String>,
-        /// Include permission levels (needs permission to read them)
+    List {
+        /// Nickname or display name contains
         #[arg(long)]
-        include_permissions: bool,
-        #[arg(long, short = 'n', default_value_t = 50, value_parser = positive_limit)]
-        limit: usize,
+        name: Option<String>,
+        /// List permission levels instead (needs admin rights)
+        #[arg(long)]
+        permissions: bool,
+        /// Workspace slug [default: the repository's, else the saved one]
+        #[arg(long, value_name = "SLUG")]
+        workspace: Option<String>,
         #[command(flatten)]
-        repo: RepoArgs,
+        list: ListArgs,
     },
-    /// One member
+    /// One or more members
     Get {
         /// UUID, account ID, nickname, display name or me
-        member: String,
+        #[arg(required = true, value_name = "USER")]
+        users: Vec<String>,
+        /// Workspace slug [default: the repository's, else the saved one]
+        #[arg(long, value_name = "SLUG")]
+        workspace: Option<String>,
         #[command(flatten)]
-        repo: RepoArgs,
+        batch: BatchArgs,
     },
-}
-
-#[derive(Args)]
-pub(crate) struct RepoCreateArgs {
-    /// Slug of the new repository
-    slug: String,
-    /// Display name
-    #[arg(long)]
-    name: Option<String>,
-    /// Description
-    #[arg(long, short = 'd')]
-    description: Option<String>,
-    /// Primary language
-    #[arg(long)]
-    language: Option<String>,
-    /// Project key
-    #[arg(long)]
-    project: Option<String>,
-    /// Private (the default)
-    #[arg(long, conflicts_with = "public")]
-    private: bool,
-    /// Public: visible to everyone
-    #[arg(long)]
-    public: bool,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct ListFilesArgs {
-    /// Directory [default: the root]
-    #[arg(long)]
-    path: Option<String>,
-    /// Branch, tag or commit [default: the main branch]
-    #[arg(long = "ref")]
-    git_ref: Option<String>,
-    /// Descend this many levels (atlx extra)
-    #[arg(long)]
-    max_depth: Option<u32>,
-    #[arg(long, short = 'n', default_value_t = 100, value_parser = positive_limit)]
-    limit: usize,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct UrlArgs {
-    /// Repository slug, or workspace/slug
-    slug: Option<String>,
-    /// File or directory in it (atlx extra)
-    #[arg(long)]
-    path: Option<String>,
-    /// Branch, tag or commit (atlx extra)
-    #[arg(long = "ref")]
-    git_ref: Option<String>,
-    /// Line in --path (atlx extra)
-    #[arg(long, requires = "path")]
-    line: Option<u64>,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct ContributorsArgs {
-    /// Branch, tag or commit [default: the main branch]
-    #[arg(long = "ref", conflicts_with = "range")]
-    git_ref: Option<String>,
-    /// from..to
-    #[arg(long)]
-    range: Option<String>,
-    /// Only commits since this day (YYYY-MM-DD or 30d; atlx extra)
-    #[arg(long)]
-    since: Option<String>,
-    #[arg(long, short = 'n', default_value_t = 10, value_parser = positive_limit)]
-    limit: usize,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-#[derive(Args)]
-pub(crate) struct SearchPrsArgs {
-    /// Text to look for
-    text: String,
-    /// repo (default), or me: yours across recently updated repositories
-    #[arg(long, value_enum)]
-    scope: Option<QueryScope>,
-    /// Where to look
-    #[arg(long, value_enum, default_value = "both")]
-    field: repos::Field,
-    /// OPEN, MERGED, DECLINED, SUPERSEDED
-    #[arg(long, default_value = "OPEN")]
-    state: String,
-    /// author (default) or reviewer, with --scope me
-    #[arg(long, value_enum)]
-    role: Option<Role>,
-    #[arg(long, short = 'n', default_value_t = 25, value_parser = positive_limit)]
-    limit: usize,
-    #[command(flatten)]
-    repo: RepoArgs,
-}
-
-fn workspace(repo: &RepoArgs, default_ws: Option<&str>) -> Result<String> {
-    match repo.repo.as_deref() {
-        Some(r) => bitbucket::workspace_of(r, repo.workspace.as_deref(), default_ws),
-        None => Ok(bitbucket::workspace_or(repo.workspace.as_deref(), default_ws)?.to_string()),
-    }
-}
-
-pub(super) fn branch_create(c: &Client, path: PathOf, a: BranchCreateArgs) -> Result<Value> {
-    repos::branch_create(c, &path(&a.repo)?, &a.branch, a.from.as_deref())
-}
-
-pub(super) fn branch_delete(c: &Client, path: PathOf, a: BranchDeleteArgs) -> Result<Value> {
-    require_yes(a.yes, "deleting the branch")?;
-    repos::branch_delete(c, &path(&a.repo)?, &a.name)
 }
 
 /// `--file`: a local path, committed at the same path, or `repo=local`.
@@ -334,8 +467,7 @@ fn manifest(text: &str) -> Result<Vec<Change>> {
     Ok(out)
 }
 
-fn commit_create(c: &Client, path: PathOf, a: CommitCreateArgs) -> Result<Value> {
-    require_yes(a.yes, "the commit")?;
+fn commit_create(ctx: &Ctx, a: CommitCreateArgs) -> Result<Value> {
     if a.file_local.len() != a.file_remote.len() {
         return Err(usage("give one --file-remote for each --file-local"));
     }
@@ -357,8 +489,8 @@ fn commit_create(c: &Client, path: PathOf, a: CommitCreateArgs) -> Result<Value>
             .map(|repo_path| Change::Delete { repo_path }),
     );
     repos::commit_create(
-        c,
-        &path(&a.repo)?,
+        ctx.c,
+        &ctx.repo(&a.repo)?,
         &repos::NewCommit {
             message: &a.message,
             branch: a.branch.as_deref(),
@@ -369,168 +501,334 @@ fn commit_create(c: &Client, path: PathOf, a: CommitCreateArgs) -> Result<Value>
     )
 }
 
-pub(super) fn commit(c: &Client, path: PathOf, cmd: CommitCmd) -> Result<Value> {
+/// `--report`: JSON, or `@file`.
+fn report_arg(s: &str) -> Result<Value> {
+    let text = match s.strip_prefix('@') {
+        Some(f) => std::fs::read_to_string(f).with_context(|| format!("reading {f}"))?,
+        None => s.to_string(),
+    };
+    serde_json::from_str(&text).map_err(|e| usage(format!("--report is not valid JSON: {e}")))
+}
+
+/// A user given by name or ID, as the UUID a default reviewer path takes.
+fn reviewer_uuid(ctx: &Ctx, path: &str, who: &str) -> Result<String> {
+    let u = lifecycle::resolve_user(ctx.c, path, lifecycle::User::Any(who.trim()))?;
+    match u["uuid"].as_str() {
+        Some(id) => Ok(id.to_string()),
+        None => {
+            // An account ID: find its UUID among the workspace members.
+            let ws = bitbucket::split_path(path).0;
+            let m = repos::member(ctx.c, &ws, who)?;
+            m["user"]["uuid"]
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| usage(format!("no UUID found for '{who}'")))
+        }
+    }
+}
+
+pub(super) fn repo(ctx: &Ctx, cmd: RepoCmd) -> Result<Out> {
+    let c = ctx.c;
+    let data = match cmd {
+        RepoCmd::List {
+            workspace,
+            name,
+            query,
+            project,
+            language,
+            role,
+            sort,
+            list,
+        } => {
+            let ws = ctx.workspace(workspace.as_deref(), None)?;
+            let o = bitbucket::RepoList {
+                name: name.as_deref(),
+                project: project.as_deref(),
+                language: language.as_deref(),
+                sort: Some(&sort),
+                role: role.as_deref(),
+                bbql: query.as_deref(),
+            };
+            listed(bitbucket::repo_list(c, &ws, &o, &list.paging())?)
+        }
+        RepoCmd::Get { repos, batch } => {
+            if repos.is_empty() {
+                bitbucket::repo_get(c, &ctx.repo_of(None)?)?
+            } else {
+                get_many(repos, &batch, |r| {
+                    bitbucket::repo_get(c, &ctx.repo_of(Some(r))?)
+                })?
+            }
+        }
+        RepoCmd::Create {
+            repo,
+            name,
+            description,
+            language,
+            project,
+            public,
+        } => repos::repo_create(
+            c,
+            &ctx.repo_of(Some(&repo))?,
+            &repos::NewRepo {
+                name: name.as_deref(),
+                description: description.as_deref(),
+                language: language.as_deref(),
+                project: project.as_deref(),
+                private: !public,
+            },
+        )?,
+        RepoCmd::File { cmd } => file(ctx, cmd)?,
+        RepoCmd::Branch { cmd } => branch(ctx, cmd)?,
+        RepoCmd::Commit { cmd } => match cmd {
+            CommitCmd::List {
+                branch,
+                include,
+                exclude,
+                path,
+                repo,
+                list,
+            } => {
+                let include: Vec<String> = branch.into_iter().chain(include).collect();
+                listed(repos::commit_list(
+                    c,
+                    &ctx.repo(&repo)?,
+                    &repos::CommitQuery {
+                        include: &include,
+                        exclude: &exclude,
+                        file_path: path.as_deref(),
+                    },
+                    &list.paging(),
+                )?)
+            }
+            CommitCmd::Get {
+                hashes,
+                repo,
+                batch,
+            } => {
+                let p = ctx.repo(&repo)?;
+                get_many(hashes, &batch, |h| repos::commit_get(c, &p, h))?
+            }
+            CommitCmd::Create(a) => commit_create(ctx, a)?,
+        },
+        RepoCmd::Contributor {
+            cmd:
+                ContributorCmd::List {
+                    git_ref,
+                    range,
+                    since,
+                    limit,
+                    repo,
+                },
+        } => {
+            let since = since.as_deref().map(crate::time::to_date).transpose()?;
+            let v = repos::contributors(
+                c,
+                &ctx.repo(&repo)?,
+                &repos::Contributors {
+                    git_ref: git_ref.as_deref(),
+                    range: range.as_deref(),
+                    since: since.as_deref(),
+                    limit,
+                },
+            )?;
+            complete(v.as_array().cloned().unwrap_or_default())
+        }
+        RepoCmd::Report { cmd } => match cmd {
+            ReportCmd::List { commit, repo, list } => listed(repos::reports(
+                c,
+                &ctx.repo(&repo)?,
+                &commit,
+                &list.paging(),
+            )?),
+            ReportCmd::Create {
+                id,
+                commit,
+                report,
+                repo,
+            } => {
+                let report = report_arg(&report)?;
+                repos::report_create(c, &ctx.repo(&repo)?, &commit, &id, &report)?
+            }
+        },
+        RepoCmd::DefaultReviewer { cmd } => match cmd {
+            DefaultReviewerCmd::List {
+                effective,
+                repo,
+                list,
+            } => listed(lifecycle::default_reviewers(
+                c,
+                &ctx.repo(&repo)?,
+                effective,
+                &list.paging(),
+            )?),
+            DefaultReviewerCmd::Get { user, repo } => {
+                let p = ctx.repo(&repo)?;
+                lifecycle::default_reviewer_get(c, &p, &reviewer_uuid(ctx, &p, &user)?)?
+            }
+            DefaultReviewerCmd::Add { user, repo, .. } => {
+                let p = ctx.repo(&repo)?;
+                lifecycle::default_reviewer_add(c, &p, &reviewer_uuid(ctx, &p, &user)?)?
+            }
+            DefaultReviewerCmd::Remove { user, repo, .. } => {
+                let p = ctx.repo(&repo)?;
+                lifecycle::default_reviewer_remove(c, &p, &reviewer_uuid(ctx, &p, &user)?)?
+            }
+        },
+    };
+    Ok(Out::Data(data))
+}
+
+fn file(ctx: &Ctx, cmd: FileCmd) -> Result<Value> {
+    let c = ctx.c;
     match cmd {
-        CommitCmd::Query {
-            branch,
-            include,
-            exclude,
-            path: file_path,
-            limit,
+        FileCmd::Get {
+            path,
+            git_ref,
+            repo,
+            ..
+        } => repos::file_get(c, &ctx.repo(&repo)?, &path, git_ref.as_deref()),
+        FileCmd::List {
+            path,
+            git_ref,
+            depth,
+            repo,
+            list,
+        } => Ok(listed(repos::file_list(
+            c,
+            &ctx.repo(&repo)?,
+            git_ref.as_deref(),
+            path.as_deref(),
+            depth,
+            &list.paging(),
+        )?)),
+        FileCmd::Download {
+            path,
+            to,
+            overwrite,
+            git_ref,
             repo,
         } => {
-            let include: Vec<String> = branch.into_iter().chain(include).collect();
-            repos::commit_query(
+            let dest = match to {
+                Some(t) => t,
+                None => {
+                    let name = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                    if name.is_empty() {
+                        return Err(usage("pass --to with a file name"));
+                    }
+                    PathBuf::from(name)
+                }
+            };
+            repos::file_download(
                 c,
-                &path(&repo)?,
-                &repos::CommitQuery {
-                    include: &include,
-                    exclude: &exclude,
-                    file_path: file_path.as_deref(),
-                    limit,
-                },
+                &ctx.repo(&repo)?,
+                &path,
+                git_ref.as_deref(),
+                &dest,
+                overwrite,
             )
         }
-        CommitCmd::Create(a) => commit_create(c, path, a),
-        CommitCmd::Report {
-            cmd:
-                ReportCmd::Create {
-                    commit,
-                    report_id,
-                    report,
-                    repo,
-                },
+        FileCmd::Search {
+            text,
+            workspace,
+            repo,
+            list,
         } => {
-            let report: Value = serde_json::from_str(&report)
-                .map_err(|e| usage(format!("--report is not valid JSON: {e}")))?;
-            repos::report_create(c, &path(&repo)?, &commit, &report_id, &report)
+            // An explicit --workspace searches all of it; otherwise the
+            // repository (given or current) narrows the search.
+            let narrow = match (&workspace, &repo.repo) {
+                (_, Some(r)) => Some(r.clone()),
+                (Some(_), None) => None,
+                (None, None) => ctx.default_repo.map(String::from),
+            };
+            let ws = ctx.workspace(workspace.as_deref(), narrow.as_deref())?;
+            let slug = narrow
+                .as_deref()
+                .map(|r| ctx.repo_of(Some(r)).map(|p| bitbucket::split_path(&p).1))
+                .transpose()?;
+            Ok(listed(bitbucket::search_code(
+                c,
+                &ws,
+                &text.join(" "),
+                slug.as_deref(),
+                &list.paging(),
+            )?))
         }
-        CommitCmd::Report {
-            cmd:
-                ReportCmd::Query {
-                    commit,
-                    limit,
-                    repo,
-                },
-        } => repos::reports(c, &path(&repo)?, &commit, limit),
     }
 }
 
-pub(super) fn workspace_cmd(
-    c: &Client,
-    default_ws: Option<&str>,
-    cmd: WorkspaceCmd,
-) -> Result<Value> {
+fn branch(ctx: &Ctx, cmd: BranchCmd) -> Result<Value> {
+    let c = ctx.c;
     match cmd {
-        WorkspaceCmd::Get { repo } => repos::workspace_get(c, &workspace(&repo, default_ws)?),
+        BranchCmd::List {
+            name,
+            query,
+            author,
+            sort,
+            repo,
+            list,
+        } => Ok(listed(bitbucket::branch_list(
+            c,
+            &ctx.repo(&repo)?,
+            &bitbucket::BranchQuery {
+                name: name.as_deref(),
+                author: author.as_deref(),
+                sort: Some(&sort),
+                bbql: query.as_deref(),
+            },
+            &list.paging(),
+        )?)),
+        BranchCmd::Get { names, repo, batch } => {
+            let p = ctx.repo(&repo)?;
+            get_many(names, &batch, |n| repos::branch_get(c, &p, n))
+        }
+        BranchCmd::Create { name, from, repo } => {
+            repos::branch_create(c, &ctx.repo(&repo)?, &name, from.as_deref())
+        }
+        BranchCmd::Delete { name, repo, .. } => repos::branch_delete(c, &ctx.repo(&repo)?, &name),
+    }
+}
+
+pub(super) fn workspace(ctx: &Ctx, cmd: WorkspaceCmd) -> Result<Value> {
+    let c = ctx.c;
+    match cmd {
+        WorkspaceCmd::Get { slugs, batch } => {
+            if slugs.is_empty() {
+                repos::workspace_get(c, &ctx.workspace(None, None)?)
+            } else {
+                get_many(slugs, &batch, |s| repos::workspace_get(c, s))
+            }
+        }
         WorkspaceCmd::Member {
             cmd:
-                MemberCmd::Query {
-                    query,
-                    include_permissions,
-                    limit,
-                    repo,
+                MemberCmd::List {
+                    name,
+                    permissions,
+                    workspace,
+                    list,
                 },
         } => {
-            let ws = workspace(&repo, default_ws)?;
-            repos::members(c, &ws, query.as_deref(), include_permissions, limit)
+            let ws = ctx.workspace(workspace.as_deref(), None)?;
+            Ok(listed(repos::members(
+                c,
+                &ws,
+                name.as_deref(),
+                permissions,
+                &list.paging(),
+            )?))
         }
         WorkspaceCmd::Member {
-            cmd: MemberCmd::Get { member, repo },
-        } => repos::member(c, &workspace(&repo, default_ws)?, &member),
-    }
-}
-
-pub(super) fn repo_create(
-    c: &Client,
-    default_ws: Option<&str>,
-    a: RepoCreateArgs,
-) -> Result<Value> {
-    if a.repo.repo.is_some() {
-        return Err(usage(
-            "name the new repository with the argument and --workspace, not --repo",
-        ));
-    }
-    let path = bitbucket::repo_path(Some(&a.slug), a.repo.workspace.as_deref(), default_ws)?;
-    repos::repo_create(
-        c,
-        &path,
-        &repos::NewRepo {
-            name: a.name.as_deref(),
-            description: a.description.as_deref(),
-            language: a.language.as_deref(),
-            project: a.project.as_deref(),
-            private: a.private || !a.public,
-        },
-    )
-}
-
-pub(super) fn list_files(c: &Client, path: PathOf, a: ListFilesArgs) -> Result<Value> {
-    repos::list_files(
-        c,
-        &path(&a.repo)?,
-        a.git_ref.as_deref(),
-        a.path.as_deref(),
-        a.max_depth,
-        a.limit,
-    )
-}
-
-/// `repo url` sends nothing, so it runs before credentials are needed.
-pub(super) fn url(cfg: &Config, a: &UrlArgs) -> Result<Value> {
-    let path = bitbucket::repo_path(
-        a.slug.as_deref().or(a.repo.repo.as_deref()),
-        a.repo.workspace.as_deref(),
-        cfg.bitbucket.workspace.as_deref(),
-    )?;
-    let url = repos::web_url(&path, a.path.as_deref(), a.git_ref.as_deref(), a.line)?;
-    let mut parts = path.trim_start_matches("/repositories/").split('/');
-    let decode =
-        |part: &str| urlencoding::decode(part).map_or(part.to_string(), |s| s.into_owned());
-    let workspace = decode(parts.next().unwrap_or_default());
-    let repo = decode(parts.next().unwrap_or_default());
-    Ok(json!({"workspace": workspace, "repo": repo, "url": url}))
-}
-
-pub(super) fn contributors(c: &Client, path: PathOf, a: ContributorsArgs) -> Result<Value> {
-    let since = a.since.as_deref().map(crate::time::to_date).transpose()?;
-    repos::contributors(
-        c,
-        &path(&a.repo)?,
-        &repos::Contributors {
-            git_ref: a.git_ref.as_deref(),
-            range: a.range.as_deref(),
-            since: since.as_deref(),
-            limit: a.limit,
-        },
-    )
-}
-
-pub(super) fn search_prs(
-    c: &Client,
-    path: PathOf,
-    default_ws: Option<&str>,
-    a: SearchPrsArgs,
-) -> Result<Value> {
-    if a.scope != Some(QueryScope::Me) {
-        if a.role.is_some() {
-            return Err(usage("--role goes with --scope me"));
+            cmd:
+                MemberCmd::Get {
+                    users,
+                    workspace,
+                    batch,
+                },
+        } => {
+            let ws = ctx.workspace(workspace.as_deref(), None)?;
+            get_many(users, &batch, |u| repos::member(c, &ws, u))
         }
-        return repos::search_prs(c, &path(&a.repo)?, &a.text, a.field, &a.state, a.limit);
     }
-    let ws = workspace(&a.repo, default_ws)?;
-    let mine = bitbucket::lifecycle::Mine {
-        workspace: &ws,
-        repo: None,
-        role: Some(a.role.unwrap_or(Role::Author)),
-        waiting: false,
-        state: &a.state,
-        limit: a.limit,
-        repo_limit: 25,
-        repo_role: "member",
-        concurrency: util::DEFAULT_CONCURRENCY,
-    };
-    repos::search_my_prs(c, &mine, &a.text, a.field)
 }
 
 #[cfg(test)]
@@ -552,5 +850,7 @@ mod tests {
         assert!(m.contains(&local("b.bin", "local.bin")));
         assert_eq!(m.len(), 2);
         assert!(manifest("[]").is_err() && manifest(r#"{"a": 1}"#).is_err());
+        assert_eq!(report_arg(r#"{"title": "x"}"#).unwrap()["title"], "x");
+        assert!(report_arg("nope").is_err());
     }
 }

@@ -1,46 +1,134 @@
-//! Output: JSON for agents and scripts, aligned text for humans.
+//! Output: compact JSON for agents and scripts, aligned text for humans.
 //!
-//! The global output controls live in the submodules: `--select` and
-//! `--agent-fields` in [`select`], `--output-summary` in [`summary`]; twg's
-//! `{"data": ...}` envelope and its JSONL rows are in [`envelope`].
+//! Every command's result is one [`envelope`]. In JSON modes stdout carries
+//! exactly that one document; text mode prints its `data` as a table or a
+//! list of fields. [`notes`] collects the warnings and truncation markers a
+//! command reports while it runs.
 
 pub mod envelope;
 pub mod select;
-pub mod summary;
 
 use clap::ValueEnum;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Format {
+    /// Tables and fields for people (default on a terminal).
     Text,
+    /// One line of compact JSON: the envelope (default when piped).
     Json,
-    /// One JSON record per line: each element of the main list (twg's
-    /// `data` array or its `issues`/`results`/... collection), with a `_twg`
-    /// locator, else the whole payload.
+    /// One record per line, then a trailer line
+    /// `{"_end":{"next":…,"truncated":…,"errors":…}}`.
     Jsonl,
+    /// One primary ID per line, for piping into another atlx command.
+    Ids,
 }
 
-pub fn print(v: &Value, f: Format) {
-    print!("{}", render(v, f));
+impl Format {
+    /// JSON and JSONL.
+    pub fn is_json(self) -> bool {
+        matches!(self, Format::Json | Format::Jsonl)
+    }
+}
+
+/// Warnings and truncation markers reported while a command runs; `main`
+/// adds them to the envelope.
+pub mod notes {
+    use crate::schema::Truncation;
+    use serde_json::{Value, json};
+    use std::sync::Mutex;
+
+    static WARNINGS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+    static TRUNCATED: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+
+    /// Add `{"code": code, "message": message}` to `warnings`.
+    pub fn warn(code: &str, message: impl Into<String>) {
+        warn_value(json!({"code": code, "message": message.into()}));
+    }
+
+    /// Add any warning object (e.g. `{"code":"lossy_body","nodes":[…]}`).
+    pub fn warn_value(w: Value) {
+        WARNINGS.lock().unwrap_or_else(|e| e.into_inner()).push(w);
+    }
+
+    /// Add a `truncated` entry.
+    pub fn truncated(t: &Truncation) {
+        TRUNCATED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(t.to_json());
+    }
+
+    /// Take everything reported so far: `(warnings, truncated)`.
+    pub fn take() -> (Vec<Value>, Vec<Value>) {
+        let w = std::mem::take(&mut *WARNINGS.lock().unwrap_or_else(|e| e.into_inner()));
+        let t = std::mem::take(&mut *TRUNCATED.lock().unwrap_or_else(|e| e.into_inner()));
+        (w, t)
+    }
 }
 
 /// `v` as it is printed in format `f`, trailing newline included.
-pub fn render(v: &Value, f: Format) -> String {
+/// `primary` names the ID field for `-o ids` (from the command's record).
+pub fn render(v: &Value, f: Format, primary: Option<&str>) -> String {
     match f {
-        Format::Json => serde_json::to_string_pretty(v).unwrap_or_default() + "\n",
-        // Text shows the data part of an envelope; the rest is for machines.
+        Format::Json => serde_json::to_string(v).unwrap_or_default() + "\n",
+        // One record reads better as fields than as a one-row table.
         Format::Text if envelope::is_envelope(v) => match v["data"].as_array() {
-            // One work item or space reads better as fields than as a table.
             Some(one) if one.len() == 1 && one[0].is_object() => to_text(&one[0]),
             _ => to_text(&v["data"]),
         },
         Format::Text => to_text(v),
-        Format::Jsonl => envelope::jsonl_rows(v)
-            .iter()
-            .map(|r| format!("{r}\n"))
-            .collect(),
+        Format::Jsonl => jsonl(v),
+        Format::Ids => ids(v, primary),
     }
+}
+
+/// The records of an envelope's `data`: its elements, or itself.
+fn records(v: &Value) -> Vec<&Value> {
+    match &v["data"] {
+        Value::Array(a) => a.iter().collect(),
+        Value::Null => Vec::new(),
+        other => vec![other],
+    }
+}
+
+fn jsonl(v: &Value) -> String {
+    if envelope::is_error(v) || !envelope::is_envelope(v) {
+        return serde_json::to_string(v).unwrap_or_default() + "\n";
+    }
+    let mut out = String::new();
+    for r in records(v) {
+        out.push_str(&serde_json::to_string(r).unwrap_or_default());
+        out.push('\n');
+    }
+    let end = json!({"_end": {
+        "next": v.get("next").cloned().unwrap_or(Value::Null),
+        "truncated": v.get("truncated").cloned().unwrap_or(json!([])),
+        "errors": v.get("errors").cloned().unwrap_or(json!([])),
+    }});
+    out.push_str(&end.to_string());
+    out.push('\n');
+    out
+}
+
+/// The ID fields tried, in order, when a command has no record yet.
+const ID_KEYS: &[&str] = &["key", "id", "accountId", "uuid", "slug", "name"];
+
+fn ids(v: &Value, primary: Option<&str>) -> String {
+    let mut out = String::new();
+    for r in records(v) {
+        let id = match primary {
+            Some(p) => crate::schema::path(r, p).cloned(),
+            None => ID_KEYS.iter().find_map(|k| r.get(*k).cloned()),
+        };
+        match id {
+            Some(Value::String(s)) => out.push_str(&s),
+            Some(Value::Null) | None => continue,
+            Some(other) => out.push_str(&other.to_string()),
+        }
+        out.push('\n');
+    }
+    out
 }
 
 const MAX_CELL: usize = 60;
@@ -175,8 +263,38 @@ fn table(rows: &[Value], out: &mut String, pad: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::to_text;
+    use super::{Format, render, to_text};
     use serde_json::json;
+
+    #[test]
+    fn json_is_one_compact_line_and_jsonl_ends_with_a_trailer() {
+        let v = json!({"ok": true, "data": [{"key": "A-1"}, {"key": "A-2"}], "next": "o:2"});
+        assert_eq!(
+            render(&v, Format::Json, None),
+            "{\"ok\":true,\"data\":[{\"key\":\"A-1\"},{\"key\":\"A-2\"}],\"next\":\"o:2\"}\n"
+        );
+        let lines: Vec<String> = render(&v, Format::Jsonl, None)
+            .lines()
+            .map(String::from)
+            .collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], r#"{"key":"A-1"}"#);
+        assert_eq!(
+            lines[2],
+            r#"{"_end":{"next":"o:2","truncated":[],"errors":[]}}"#
+        );
+        let err = json!({"ok": false, "error": {"code": "usage"}});
+        assert_eq!(render(&err, Format::Jsonl, None).lines().count(), 1);
+    }
+
+    #[test]
+    fn ids_print_one_primary_id_per_line() {
+        let v = json!({"ok": true, "data": [{"key": "A-1", "id": "1"}, {"id": 7}, {"x": 1}]});
+        assert_eq!(render(&v, Format::Ids, None), "A-1\n7\n");
+        assert_eq!(render(&v, Format::Ids, Some("id")), "1\n7\n");
+        let one = json!({"ok": true, "data": {"accountId": "abc"}});
+        assert_eq!(render(&one, Format::Ids, None), "abc\n");
+    }
 
     #[test]
     fn renders_tables_and_objects() {

@@ -23,9 +23,29 @@
 //! ```
 //!
 //! Precedence, highest first: `-s`/`-u` flags, `ATLX_*` env vars, the
-//! selected profile (`-p`/`ATLX_PROFILE`, or the saved default).
+//! selected profile (`-p`/`ATLX_PROFILE`, then the `profile` of a
+//! repo-local `.atlx.toml`, then the saved default).
+//!
+//! A profile may set `read_only = true`; so may `ATLX_READ_ONLY=1` or
+//! `--read-only`. Then every client refuses mutating requests.
+//!
+//! The repo-local `.atlx.toml` (found by walking up from the working
+//! directory) holds non-secret defaults only:
+//!
+//! ```toml
+//! profile = "work"
+//! [jira]
+//! project = "PROJ"
+//! [confluence]
+//! space = "ENG"
+//! [bitbucket]
+//! repo = "acme/api"
+//! ```
+//!
+//! Without `bitbucket.repo`, the Bitbucket repository defaults to the
+//! `origin` remote in `.git/config` when it points at bitbucket.org.
 
-use crate::client::{ApiError, Client};
+use crate::client::{ApiError, Client, Mode};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -34,6 +54,30 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 pub const BITBUCKET_API: &str = "https://api.bitbucket.org/2.0";
+
+/// Environment variable that points Bitbucket at a local mock server, for
+/// tests. Only loopback URLs are accepted, so it can't send the token
+/// anywhere else.
+pub const BITBUCKET_API_ENV: &str = "ATLX_BITBUCKET_API";
+
+/// The Bitbucket API base: [`BITBUCKET_API`], or a loopback override from
+/// [`BITBUCKET_API_ENV`].
+pub fn bitbucket_api() -> Result<String> {
+    match std::env::var(BITBUCKET_API_ENV) {
+        Ok(v) if !v.trim().is_empty() => {
+            let v = v.trim().trim_end_matches('/').to_string();
+            if crate::client::is_loopback_url(&v) {
+                Ok(v)
+            } else {
+                Err(ApiError::config(format!(
+                    "{BITBUCKET_API_ENV} must be a loopback URL (it is for local test servers), got '{v}'"
+                ))
+                .into())
+            }
+        }
+        _ => Ok(BITBUCKET_API.into()),
+    }
+}
 
 /// Name of the implicit profile made of the file's top-level keys. As a
 /// `-p` value it means "whichever profile is the saved default".
@@ -59,6 +103,9 @@ pub struct Profile {
     pub token_cmd: Option<String>,
     #[serde(default, skip_serializing_if = "Bitbucket::is_empty")]
     pub bitbucket: Bitbucket,
+    /// Refuse every mutating request made with this profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
 }
 
 impl Profile {
@@ -68,6 +115,7 @@ impl Profile {
             && self.token.is_none()
             && self.token_cmd.is_none()
             && self.bitbucket.is_empty()
+            && self.read_only.is_none()
     }
 
     /// Where this profile's Atlassian token would come from (`config`,
@@ -453,13 +501,34 @@ pub struct Config {
     /// Per-request timeout (`--timeout-ms`); not persisted.
     pub timeout_ms: Option<u64>,
     pub cache: SecretCache,
+    /// Refuse mutating requests (profile `read_only`, `ATLX_READ_ONLY`,
+    /// `--read-only`).
+    pub read_only: bool,
+    /// Stop at the first mutating request and print it (`--dry-run`).
+    pub dry_run: bool,
+    /// The repo-local `.atlx.toml` defaults, if one was found.
+    pub local: LocalDefaults,
+    /// The repository the Bitbucket commands default to: `.atlx.toml`'s
+    /// `bitbucket.repo`, else the git `origin` remote on bitbucket.org.
+    pub default_repo: Option<String>,
 }
 
 impl Config {
     /// Load the config file and select a profile (`flag`, else
     /// `ATLX_PROFILE`, else the saved default), then apply `ATLX_*` env vars.
     pub fn load(flag: Option<&str>) -> Result<Self> {
-        Self::resolve(&ConfigFile::load()?, flag, &env)
+        let cwd = std::env::current_dir().ok();
+        let local = match &cwd {
+            Some(d) => LocalDefaults::discover(d)?,
+            None => LocalDefaults::default(),
+        };
+        let mut c = Self::resolve_with(&ConfigFile::load()?, flag, &env, local)?;
+        if c.default_repo.is_none()
+            && let Some(d) = &cwd
+        {
+            c.default_repo = git_remote_repo(d);
+        }
+        Ok(c)
     }
 
     /// [`Config::load`] with the file and environment passed in.
@@ -468,7 +537,21 @@ impl Config {
         flag: Option<&str>,
         env: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self> {
-        let requested = flag.map(str::to_string).or_else(|| env("ATLX_PROFILE"));
+        Self::resolve_with(file, flag, env, LocalDefaults::default())
+    }
+
+    /// [`Config::resolve`] with repo-local defaults, whose `profile` ranks
+    /// below `-p` and `ATLX_PROFILE`.
+    pub fn resolve_with(
+        file: &ConfigFile,
+        flag: Option<&str>,
+        env: &dyn Fn(&str) -> Option<String>,
+        local: LocalDefaults,
+    ) -> Result<Self> {
+        let requested = flag
+            .map(str::to_string)
+            .or_else(|| env("ATLX_PROFILE"))
+            .or_else(|| local.profile.clone());
         let name = file.resolve_name(requested.as_deref());
         let profile = file.get(&name).ok_or_else(|| {
             ApiError::config(format!(
@@ -478,6 +561,8 @@ impl Config {
         })?;
         let mut c = Self::from_profile(&name, profile);
         c.apply_env(env);
+        c.default_repo = local.bitbucket.repo.clone();
+        c.local = local;
         Ok(c)
     }
 
@@ -490,6 +575,7 @@ impl Config {
             token: p.token.clone(),
             token_cmd: p.token_cmd.clone(),
             bitbucket: p.bitbucket.clone(),
+            read_only: p.read_only.unwrap_or(false),
             ..Default::default()
         }
     }
@@ -500,6 +586,9 @@ impl Config {
                 *slot = Some(v);
             }
         };
+        if let Some(v) = env("ATLX_READ_ONLY") {
+            self.read_only = !matches!(v.trim(), "0" | "false" | "no" | "off");
+        }
         set(&mut self.site, "ATLX_SITE");
         set(&mut self.email, "ATLX_EMAIL");
         set(&mut self.bitbucket.workspace, "ATLX_BB_WORKSPACE");
@@ -544,11 +633,23 @@ impl Config {
         }
     }
 
+    /// How clients built from this config treat mutating requests.
+    /// Read-only wins over dry-run.
+    pub fn mode(&self) -> Mode {
+        if self.read_only {
+            Mode::ReadOnly
+        } else if self.dry_run {
+            Mode::DryRun
+        } else {
+            Mode::Live
+        }
+    }
+
     fn login_hint(&self) -> String {
         if self.profile.is_empty() || self.profile == DEFAULT_PROFILE {
-            "atlx login".into()
+            "atlx auth login".into()
         } else {
-            format!("atlx login -p {}", self.profile)
+            format!("atlx auth login -p {}", self.profile)
         }
     }
 
@@ -603,12 +704,12 @@ impl Config {
 
     pub fn jira(&self) -> Result<Client> {
         let (base, email, token) = self.creds("")?;
-        Ok(Client::new(base, &email, &token, self.timeout_ms))
+        Ok(Client::new(base, &email, &token, self.timeout_ms).with_mode(self.mode()))
     }
 
     pub fn confluence(&self) -> Result<Client> {
         let (base, email, token) = self.creds("/wiki")?;
-        Ok(Client::new(base, &email, &token, self.timeout_ms))
+        Ok(Client::new(base, &email, &token, self.timeout_ms).with_mode(self.mode()))
     }
 
     pub fn bitbucket_configured(&self) -> bool {
@@ -617,9 +718,9 @@ impl Config {
 
     fn bitbucket_hint(&self) -> String {
         if self.profile.is_empty() || self.profile == DEFAULT_PROFILE {
-            "atlx setup bitbucket".into()
+            "atlx auth bitbucket".into()
         } else {
-            format!("atlx setup bitbucket -p {}", self.profile)
+            format!("atlx auth bitbucket -p {}", self.profile)
         }
     }
 
@@ -652,10 +753,220 @@ impl Config {
         });
         let token = res.clone().map_err(ApiError::config)?;
         Ok((
-            Client::new(BITBUCKET_API.into(), email, &token, self.timeout_ms),
+            Client::new(bitbucket_api()?, email, &token, self.timeout_ms).with_mode(self.mode()),
             self.bitbucket.workspace.clone(),
         ))
     }
+}
+
+/// The name of the repo-local defaults file.
+pub const LOCAL_FILE: &str = ".atlx.toml";
+
+/// Keys that hold secrets and are never accepted in `.atlx.toml`, which is
+/// meant to be committed.
+const SECRET_KEYS: &[&str] = &[
+    "token",
+    "token_cmd",
+    "api_token",
+    "password",
+    "secret",
+    "email",
+    "site",
+];
+
+/// Non-secret defaults from a repo-local `.atlx.toml`.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalDefaults {
+    /// Where the file was found (not part of the file).
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
+    /// Profile to use when `-p` and `ATLX_PROFILE` are not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub jira: LocalJira,
+    #[serde(default)]
+    pub confluence: LocalConfluence,
+    #[serde(default)]
+    pub bitbucket: LocalBitbucket,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalJira {
+    /// Default project key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalConfluence {
+    /// Default space key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalBitbucket {
+    /// Default repository, `workspace/slug`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+}
+
+impl LocalDefaults {
+    /// Parse a `.atlx.toml`. Secret keys anywhere in it are a `config`
+    /// error, as are unknown keys.
+    pub fn parse(text: &str) -> Result<Self> {
+        let raw: toml::Value = toml::from_str(text)
+            .map_err(|e| ApiError::config(format!("{LOCAL_FILE} is not valid TOML: {e}")))?;
+        let mut found = Vec::new();
+        find_secret_keys(&raw, "", &mut found);
+        if !found.is_empty() {
+            return Err(ApiError::config(format!(
+                "{LOCAL_FILE} must not hold credentials or site settings (found {}); keep them in the user config with `atlx auth login`",
+                found.join(", ")
+            ))
+            .into());
+        }
+        let d: Self = raw.try_into().map_err(|e| {
+            ApiError::config(format!(
+                "{LOCAL_FILE}: {e}; allowed keys are profile, jira.project, confluence.space, bitbucket.repo"
+            ))
+        })?;
+        if let Some(r) = &d.bitbucket.repo
+            && !is_repo_slug(r)
+        {
+            return Err(ApiError::config(format!(
+                "{LOCAL_FILE}: bitbucket.repo `{r}` must be `workspace/slug`"
+            ))
+            .into());
+        }
+        Ok(d)
+    }
+
+    /// The nearest `.atlx.toml` in `start` or one of its parents, parsed;
+    /// empty defaults when there is none.
+    pub fn discover(start: &Path) -> Result<Self> {
+        for dir in start.ancestors() {
+            let p = dir.join(LOCAL_FILE);
+            if p.is_file() {
+                let text = std::fs::read_to_string(&p)
+                    .with_context(|| format!("reading {}", p.display()))?;
+                let mut d =
+                    Self::parse(&text).with_context(|| format!("loading {}", p.display()))?;
+                d.path = Some(p);
+                return Ok(d);
+            }
+        }
+        Ok(Self::default())
+    }
+}
+
+fn find_secret_keys(v: &toml::Value, prefix: &str, out: &mut Vec<String>) {
+    if let toml::Value::Table(t) = v {
+        for (k, val) in t {
+            let path = if prefix.is_empty() {
+                k.clone()
+            } else {
+                format!("{prefix}.{k}")
+            };
+            if SECRET_KEYS.contains(&k.to_ascii_lowercase().as_str()) {
+                out.push(path.clone());
+            }
+            find_secret_keys(val, &path, out);
+        }
+    }
+}
+
+fn is_repo_slug(s: &str) -> bool {
+    let mut parts = s.split('/');
+    let ok = |p: Option<&str>| {
+        p.is_some_and(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+    };
+    ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
+}
+
+/// `workspace/slug` of the `origin` remote of the git repository that
+/// contains `start`, when that remote is on bitbucket.org. Reads
+/// `.git/config` directly (worktrees included); never runs git.
+pub fn git_remote_repo(start: &Path) -> Option<String> {
+    let config = git_config_path(start)?;
+    let text = std::fs::read_to_string(config).ok()?;
+    origin_url(&text).and_then(|u| bitbucket_repo_from_url(&u))
+}
+
+fn git_config_path(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let dot = dir.join(".git");
+        if dot.is_dir() {
+            return Some(dot.join("config"));
+        }
+        if dot.is_file() {
+            // A worktree or submodule: `gitdir: <path>`.
+            let text = std::fs::read_to_string(&dot).ok()?;
+            let gitdir = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+            let gitdir = dir.join(gitdir);
+            let own = gitdir.join("config");
+            if own.is_file() {
+                return Some(own);
+            }
+            let common = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+            return Some(gitdir.join(common.trim()).join("config"));
+        }
+    }
+    None
+}
+
+/// The `url` of `[remote "origin"]` in a git config file.
+fn origin_url(config: &str) -> Option<String> {
+    let mut in_origin = false;
+    for line in config.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            let section: String = l.chars().filter(|c| !c.is_whitespace()).collect();
+            in_origin = section == "[remote\"origin\"]";
+            continue;
+        }
+        if in_origin
+            && let Some((k, v)) = l.split_once('=')
+            && k.trim() == "url"
+        {
+            return Some(v.trim().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+/// `workspace/slug` from a bitbucket.org clone URL (HTTPS, SSH or scp-like).
+pub fn bitbucket_repo_from_url(url: &str) -> Option<String> {
+    let url = url.trim();
+    let rest = if let Some((_, after)) = url.split_once("://") {
+        let after = after.rsplit_once('@').map_or(after, |(_, h)| h);
+        let (host, path) = after.split_once('/')?;
+        let host = host.split(':').next()?;
+        if !host.eq_ignore_ascii_case("bitbucket.org") {
+            return None;
+        }
+        path.to_string()
+    } else {
+        // scp-like: git@bitbucket.org:ws/slug.git
+        let (userhost, path) = url.split_once(':')?;
+        let host = userhost.rsplit_once('@').map_or(userhost, |(_, h)| h);
+        if !host.eq_ignore_ascii_case("bitbucket.org") {
+            return None;
+        }
+        path.to_string()
+    };
+    let rest = rest.trim_end_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    is_repo_slug(rest).then(|| rest.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -688,7 +999,7 @@ pub fn inspect_file(path: &Path) -> FileInspection {
                 path: path_str,
                 exists: false,
                 mode: None,
-                detail: "config file does not exist (run `atlx login` or set ATLX_* env vars)"
+                detail: "config file does not exist (run `atlx auth login` or set ATLX_* env vars)"
                     .into(),
             };
         }
@@ -1037,6 +1348,123 @@ token = "sandbox-token"
         assert_eq!(f.suggest_name(None), "profile");
         assert!(validate_name("a b").is_err());
         assert!(validate_name("work-2").is_ok());
+    }
+
+    #[test]
+    fn read_only_comes_from_profile_or_env() {
+        let f = ConfigFile::parse("site = \"s\"\nemail = \"e\"\ntoken = \"t\"\nread_only = true\n")
+            .unwrap();
+        let c = Config::resolve(&f, None, &no_env).unwrap();
+        assert!(c.read_only);
+        assert_eq!(c.mode(), Mode::ReadOnly);
+        assert_eq!(c.jira().unwrap().mode(), Mode::ReadOnly);
+        let f = ConfigFile::parse(LEGACY).unwrap();
+        let c = Config::resolve(&f, None, &env_map(&[("ATLX_READ_ONLY", "1")])).unwrap();
+        assert_eq!(c.mode(), Mode::ReadOnly);
+        let c = Config::resolve(&f, None, &env_map(&[("ATLX_READ_ONLY", "0")])).unwrap();
+        assert_eq!(c.mode(), Mode::Live);
+        let mut c = Config::resolve(&f, None, &no_env).unwrap();
+        c.dry_run = true;
+        assert_eq!(c.bitbucket().unwrap().0.mode(), Mode::DryRun);
+        c.read_only = true;
+        assert_eq!(c.mode(), Mode::ReadOnly, "read-only wins over dry-run");
+    }
+
+    #[test]
+    fn local_defaults_parse_and_reject_secrets() {
+        let d = LocalDefaults::parse(
+            "profile = \"work\"\n[jira]\nproject = \"PROJ\"\n[confluence]\nspace = \"ENG\"\n[bitbucket]\nrepo = \"acme/api\"\n",
+        )
+        .unwrap();
+        assert_eq!(d.profile.as_deref(), Some("work"));
+        assert_eq!(d.jira.project.as_deref(), Some("PROJ"));
+        assert_eq!(d.confluence.space.as_deref(), Some("ENG"));
+        assert_eq!(d.bitbucket.repo.as_deref(), Some("acme/api"));
+        for bad in [
+            "token = \"x\"",
+            "[bitbucket]\ntoken_cmd = \"pass x\"",
+            "[jira]\nproject = \"P\"\napi_token = \"x\"",
+            "site = \"acme\"",
+        ] {
+            let err = LocalDefaults::parse(bad).unwrap_err();
+            let api = ApiError::find(&err).unwrap();
+            assert_eq!(api.kind, crate::client::ErrorKind::Config, "{bad}");
+            assert!(api.message.contains("must not hold credentials"), "{bad}");
+        }
+        assert!(LocalDefaults::parse("colour = \"red\"").is_err());
+        assert!(LocalDefaults::parse("[bitbucket]\nrepo = \"no-slash\"").is_err());
+    }
+
+    #[test]
+    fn local_defaults_are_found_walking_up_and_pick_the_profile() {
+        let root = std::env::temp_dir().join(format!("atlx-local-{}", std::process::id()));
+        let deep = root.join("a/b/c");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(LocalDefaults::discover(&deep).unwrap().path, None);
+        std::fs::write(root.join("a").join(LOCAL_FILE), "profile = \"sandbox\"\n").unwrap();
+        let d = LocalDefaults::discover(&deep).unwrap();
+        assert_eq!(d.path, Some(root.join("a").join(LOCAL_FILE)));
+        let f = ConfigFile::parse(V2).unwrap();
+        let c = Config::resolve_with(&f, None, &no_env, d.clone()).unwrap();
+        assert_eq!(c.profile, "sandbox");
+        // ATLX_PROFILE and -p still win.
+        let env = env_map(&[("ATLX_PROFILE", "work")]);
+        assert_eq!(
+            Config::resolve_with(&f, None, &env, d.clone())
+                .unwrap()
+                .profile,
+            "work"
+        );
+        assert_eq!(
+            Config::resolve_with(&f, Some("default"), &no_env, d)
+                .unwrap()
+                .profile,
+            "work"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bitbucket_repo_defaults_from_the_git_remote() {
+        for (url, want) in [
+            ("git@bitbucket.org:acme/api.git", Some("acme/api")),
+            ("https://me@bitbucket.org/acme/api.git", Some("acme/api")),
+            ("https://bitbucket.org/acme/api", Some("acme/api")),
+            (
+                "ssh://git@bitbucket.org/acme/web-app.git",
+                Some("acme/web-app"),
+            ),
+            ("git@github.com:acme/api.git", None),
+            ("https://bitbucket.org.evil.example/acme/api.git", None),
+            ("https://bitbucket.org/acme", None),
+        ] {
+            assert_eq!(bitbucket_repo_from_url(url).as_deref(), want, "{url}");
+        }
+        let root = std::env::temp_dir().join(format!("atlx-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let sub = root.join("src/deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(
+            root.join(".git/config"),
+            "[core]\n\tbare = false\n[remote \"upstream\"]\n\turl = git@bitbucket.org:other/x.git\n[remote \"origin\"]\n\turl = git@bitbucket.org:acme/api.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+        )
+        .unwrap();
+        assert_eq!(git_remote_repo(&sub).as_deref(), Some("acme/api"));
+        // A worktree: `.git` is a file pointing at the common directory.
+        let wt = root.join("wt");
+        let wt_git = root.join(".git/worktrees/wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(&wt_git).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", wt_git.display())).unwrap();
+        std::fs::write(wt_git.join("commondir"), "../..\n").unwrap();
+        assert_eq!(git_remote_repo(&wt).as_deref(), Some("acme/api"));
+        // `.atlx.toml` wins over the remote.
+        let d = LocalDefaults::parse("[bitbucket]\nrepo = \"acme/other\"\n").unwrap();
+        let f = ConfigFile::parse(LEGACY).unwrap();
+        let c = Config::resolve_with(&f, None, &no_env, d).unwrap();
+        assert_eq!(c.default_repo.as_deref(), Some("acme/other"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -1,21 +1,19 @@
-//! `content versions list|get|diff|restore` (also reachable as
-//! `content history list|get|diff`): a page's or blog post's version history.
+//! `page version list|get|diff|restore`: a page's or blog post's version
+//! history.
 //!
-//! Lists and version details come from REST v2; the historical body is a v2
-//! read with `version=N`. Diffs are computed locally with the line diff from
-//! [`super::edits`]. Restoring uses v1, which is the only public endpoint for it.
+//! Lists and version details come from REST v2; the body at a version is a
+//! v2 read with `version=N`, as ADF. Diffs are computed locally with the
+//! line diff from [`super::edits`]. Restoring uses v1, the only public
+//! endpoint for it.
 
-use super::{ContentType, ReadFormat, adf_body, enc, listing, resolve_id, try_content};
+use super::ContentType;
+use super::{adf_body, body_param, enc, listing, rendered_body, resolve_id, try_content};
 use crate::client::{ApiError, Client};
-use crate::markup::{adf_to_storage, storage_to_text};
+use crate::markup::{BodyFormat, render_markdown};
 use anyhow::Result;
 use serde_json::{Value, json};
 
-fn kind_name(kind: ContentType) -> String {
-    format!("{kind:?}").to_lowercase()
-}
-
-/// `content versions list`: newest first, `{id, type, results, nextCursor}`.
+/// One page of `page version list`, newest first: `{results, nextCursor}`.
 pub fn list(
     c: &Client,
     reference: &str,
@@ -29,36 +27,38 @@ pub fn list(
     if let Some(cur) = cursor {
         q.push(("cursor", cur));
     }
-    let (kind, v) = try_content(|k| {
+    let (_, v) = try_content(|k| {
         c.get(
             &format!("/api/v2/{}/{}/versions", k.collection(), enc(&id)),
             &q,
         )
     })?;
-    let mut out = listing(&v, Value::clone);
-    out["id"] = id.into();
-    out["type"] = kind_name(kind).into();
-    Ok(out)
+    Ok(listing(&v, Value::clone))
 }
 
 /// The content at one version, with its body in `body-format`.
-fn fetch_at(c: &Client, kind: ContentType, id: &str, version: u64, adf: bool) -> Result<Value> {
+fn fetch_at(
+    c: &Client,
+    kind: ContentType,
+    id: &str,
+    version: u64,
+    body_format: &str,
+) -> Result<Value> {
     let n = version.to_string();
-    let bf = if adf { "atlas_doc_format" } else { "storage" };
     c.get(
         &format!("/api/v2/{}/{}", kind.collection(), enc(id)),
-        &[("version", n.as_str()), ("body-format", bf)],
+        &[("version", n.as_str()), ("body-format", body_format)],
     )
 }
 
-/// `content versions get --at-version N [--format md|html]`. Without a
-/// format only the version's metadata is returned.
+/// `page version get N`: the version's details, with the title and body
+/// (in `format`) it had.
 pub fn get(
     c: &Client,
     reference: &str,
     reference_space: Option<&str>,
     version: u64,
-    format: Option<ReadFormat>,
+    format: BodyFormat,
 ) -> Result<Value> {
     let id = resolve_id(c, reference, reference_space)?;
     let (kind, meta) = try_content(|k| {
@@ -67,55 +67,69 @@ pub fn get(
             &[],
         )
     })?;
-    let mut out = json!({"id": id, "type": kind_name(kind), "version": meta});
-    if let Some(format) = format {
-        let v = fetch_at(c, kind, &id, version, false)?;
-        let storage = v["body"]["storage"]["value"].as_str().unwrap_or_default();
-        let (name, value) = match format {
-            ReadFormat::Md => ("md", storage_to_text(storage)),
-            _ => ("html", storage.to_string()),
-        };
-        out["title"] = v["title"].clone();
-        out["body"] = json!({"format": name, "value": value});
+    let v = fetch_at(c, kind, &id, version, body_param(format))?;
+    let mut out = meta;
+    if !out.is_object() {
+        out = json!({"number": version});
     }
+    out["contentId"] = id.clone().into();
+    out["type"] = kind.name().into();
+    out["title"] = v["title"].clone();
+    out["body"] = rendered_body(
+        &v,
+        format,
+        &format!("{} {id} version {version}", kind.name()),
+    );
     Ok(out)
 }
 
-/// The lines a diff compares: one top-level block per line for HTML, the
-/// Markdown text's own lines for `md`.
-fn diff_lines(c: &Client, kind: ContentType, id: &str, version: u64, md: bool) -> Result<Value> {
-    let v = fetch_at(c, kind, id, version, !md)?;
-    let lines: Vec<String> = if md {
-        let storage = v["body"]["storage"]["value"].as_str().unwrap_or_default();
-        storage_to_text(storage).lines().map(String::from).collect()
-    } else {
-        adf_body(&v)["content"]
+/// The lines a diff compares: the Markdown text's lines, or one top-level
+/// ADF block (as compact JSON) per line.
+fn diff_lines(c: &Client, kind: ContentType, id: &str, version: u64, adf: bool) -> Result<Value> {
+    let v = fetch_at(c, kind, id, version, "atlas_doc_format")?;
+    let doc = adf_body(&v);
+    let lines: Vec<String> = if adf {
+        doc["content"]
             .as_array()
             .into_iter()
             .flatten()
-            .map(adf_to_storage)
+            .map(Value::to_string)
+            .collect()
+    } else {
+        render_markdown(&doc)
+            .text
+            .lines()
+            .map(String::from)
             .collect()
     };
     Ok(json!({"title": v["title"], "lines": lines}))
 }
 
-/// `content versions diff --from N --to M [--format md|html]`: a unified
-/// diff of the two bodies, computed locally.
+/// `page version diff --from N --to M`: a unified diff of the two bodies,
+/// computed locally, as Markdown (default) or ADF blocks.
 pub fn diff(
     c: &Client,
     reference: &str,
     reference_space: Option<&str>,
     from: u64,
     to: u64,
-    format: ReadFormat,
+    format: BodyFormat,
 ) -> Result<Value> {
     if from == 0 || to == 0 {
         return Err(ApiError::usage("version numbers start at 1").into());
     }
+    let adf = match format {
+        BodyFormat::Markdown => false,
+        BodyFormat::Adf => true,
+        _ => {
+            return Err(
+                ApiError::usage("version diff compares markdown (the default) or adf").into(),
+            );
+        }
+    };
     let id = resolve_id(c, reference, reference_space)?;
-    let md = format == ReadFormat::Md;
-    let (kind, a) = try_content(|k| diff_lines(c, k, &id, from, md))?;
-    let b = diff_lines(c, kind, &id, to, md)?;
+    let (kind, a) = try_content(|k| diff_lines(c, k, &id, from, adf))?;
+    let b = diff_lines(c, kind, &id, to, adf)?;
     let strings = |v: &Value| -> Vec<String> {
         v["lines"]
             .as_array()
@@ -133,19 +147,18 @@ pub fn diff(
     );
     Ok(json!({
         "id": id,
-        "type": kind_name(kind),
+        "type": kind.name(),
         "from": from,
         "to": to,
-        "format": if md { "md" } else { "html" },
+        "format": if adf { "adf" } else { "markdown" },
         "titleChanged": a["title"] != b["title"],
         "changed": !diff.is_empty() || a["title"] != b["title"],
         "diff": diff,
     }))
 }
 
-/// `content versions restore --at-version N`: v1 restore, which adds a new
-/// latest version with the old body (and the old title with
-/// `--restore-title`).
+/// `page version restore N`: v1 restore, which adds a new latest version
+/// with the old body (and the old title with `restore_title`).
 pub fn restore(
     c: &Client,
     reference: &str,
@@ -165,14 +178,12 @@ pub fn restore(
     });
     let v = c.post(&format!("/rest/api/content/{}/version", enc(&id)), &req)?;
     Ok(json!({
-        "id": id,
+        "contentId": id,
         "restoredFrom": version,
-        "version": {
-            "number": v["number"],
-            "message": v["message"],
-            "createdAt": v["when"],
-            "authorId": v["by"]["accountId"],
-            "minorEdit": v["minorEdit"],
-        },
+        "number": v["number"],
+        "message": v["message"],
+        "createdAt": v["when"],
+        "authorId": v["by"]["accountId"],
+        "minorEdit": v["minorEdit"],
     }))
 }
