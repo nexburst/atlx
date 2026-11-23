@@ -2,7 +2,9 @@
 //!
 //! It is not a full HTML parser: it tokenizes tags, text, entities and CDATA
 //! sections, maps the elements atlx understands to ADF nodes, and keeps the
-//! text of everything else.
+//! text of everything else. Every element, macro or reference it cannot map
+//! is reported as a [`super::Loss`]. Comments, doctypes, processing
+//! instructions and `script`/`style` bodies are skipped: they are not content.
 
 use serde_json::{Map, Value, json};
 
@@ -105,6 +107,7 @@ fn tag_end(s: &str) -> Option<usize> {
             (None, '"' | '\'') => quote = Some(c),
             (Some(q), _) if q == c => quote = None,
             (None, '>') => return Some(i),
+            // Any other character is part of the tag.
             _ => {}
         }
     }
@@ -238,7 +241,8 @@ fn code_language(attrs: &[(String, String)]) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Containers that only separate blocks; their own text is kept.
+/// Containers that only group blocks; their text is kept and nothing about
+/// them has an ADF form worth reporting.
 const TRANSPARENT_BLOCKS: &[&str] = &[
     "div",
     "section",
@@ -250,23 +254,50 @@ const TRANSPARENT_BLOCKS: &[&str] = &[
     "aside",
     "figure",
     "figcaption",
-    "details",
-    "summary",
     "dl",
     "dt",
     "dd",
     "center",
     "address",
-    "ac:layout",
-    "ac:layout-section",
-    "ac:layout-cell",
     "ac:rich-text-body",
     "ac:adf-content",
     "body",
     "html",
 ];
 
-/// Elements whose content is metadata, not text.
+/// Containers whose structure has no ADF mapping here: their text is kept,
+/// the structure is reported.
+const STRUCTURAL_BLOCKS: &[(&str, &str)] = &[
+    ("details", "html:details"),
+    ("summary", "html:summary"),
+    ("ac:layout", "layoutSection"),
+];
+
+/// Inline or grouping elements whose text is kept and whose markup carries
+/// no content (styling, table sections, task bodies, link bodies).
+const HARMLESS: &[&str] = &[
+    "span",
+    "font",
+    "small",
+    "big",
+    "cite",
+    "abbr",
+    "q",
+    "mark",
+    "label",
+    "thead",
+    "tbody",
+    "tfoot",
+    "col",
+    "ac:task-body",
+    "ac:link-body",
+    "ac:layout-section",
+    "ac:layout-cell",
+    "ac:adf-extension",
+];
+
+/// Elements whose content is metadata, not text. `caption` and
+/// `ac:placeholder` hold text and are reported when skipped.
 const SKIP: &[&str] = &[
     "head",
     "title",
@@ -276,14 +307,25 @@ const SKIP: &[&str] = &[
     "ac:adf-fallback",
     "ac:adf-attribute",
     "ac:task-id",
+    "ac:task-uuid",
     "ac:placeholder",
     "ac:parameter",
     "ac:task-status",
 ];
 
-const PANEL_MACROS: &[&str] = &[
-    "info", "note", "warning", "tip", "panel", "success", "error",
+/// Storage panel macros and the ADF panel types they become.
+const PANEL_MACROS: &[(&str, &str)] = &[
+    ("info", "info"),
+    ("tip", "success"),
+    ("note", "warning"),
+    ("warning", "error"),
+    ("success", "success"),
+    ("error", "error"),
+    ("panel", "info"),
 ];
+
+/// Macros this reader maps to ADF (others become extensions).
+const KNOWN_MACROS: &[&str] = &["code", "noformat", "status", "expand"];
 
 /// What a special container (macro, ADF node, link, image) opened.
 struct Frame {
@@ -294,28 +336,37 @@ struct Frame {
     /// For `ac:link` / `ac:image`: the resource reference attributes.
     target: Vec<(String, String)>,
     texts_before: usize,
+    /// For macros: whether an `ac:rich-text-body` was seen.
+    bodied: bool,
 }
 
 struct Walker {
     b: Builder,
+    /// Emit unmapped macros as ADF extension nodes (for reads, so the
+    /// renderer marks them) instead of only reporting them.
+    markers: bool,
     pre: usize,
     frames: Vec<Frame>,
     skip: Option<(String, usize, String)>,
     texts: usize,
     last_space: bool,
     param_key: String,
+    /// A smart link being read: (ADF card type, url).
+    card: Option<(&'static str, String)>,
 }
 
-/// HTML / storage -> ADF document.
-pub fn html_to_adf(html: &str) -> Value {
+/// HTML / storage -> ADF document, with what could not be mapped.
+pub(crate) fn parse(html: &str, markers: bool) -> (Value, Vec<super::Loss>) {
     let mut w = Walker {
         b: Builder::new(),
+        markers,
         pre: 0,
         frames: Vec::new(),
         skip: None,
         texts: 0,
         last_space: true,
         param_key: String::new(),
+        card: None,
     };
     for tok in tokenize(html) {
         w.token(tok);
@@ -324,11 +375,25 @@ pub fn html_to_adf(html: &str) -> Value {
 }
 
 /// HTML -> normalized ADF block nodes (for HTML blocks inside Markdown).
+/// The caller reports the HTML block itself as a loss.
 pub(crate) fn html_blocks(html: &str) -> Vec<Value> {
-    content(&html_to_adf(html)).to_vec()
+    content(&parse(html, false).0).to_vec()
 }
 
 impl Walker {
+    fn lose(&mut self, node: impl Into<String>, detail: &str) {
+        let at = self
+            .frames
+            .last()
+            .map_or_else(|| self.b.top_kind().to_string(), |f| f.tag.clone());
+        let at = if at.is_empty() || at == "doc" {
+            "storage".to_string()
+        } else {
+            at
+        };
+        self.b.lose(super::Loss::new(node, at, detail));
+    }
+
     fn text(&mut self, s: &str) {
         if s.is_empty() {
             return;
@@ -388,6 +453,7 @@ impl Walker {
                 }
                 Tok::Text(t) => buf.push_str(t),
                 Tok::CData(t) => buf.push_str(t),
+                // Markup inside a skipped element: its text is collected.
                 _ => {}
             }
             return;
@@ -438,12 +504,37 @@ impl Walker {
                     f.params.push((key, buf.trim().to_string()));
                 }
             }
+            "ac:adf-attribute" => {
+                let key = std::mem::take(&mut self.param_key);
+                if key == "panel-type"
+                    && let Some(p) = self.b.open_node_mut("panel")
+                {
+                    p["attrs"]["panelType"] = buf.trim().into();
+                } else if let Some(f) = self.frames.last_mut() {
+                    f.params.push((key, buf.trim().to_string()));
+                }
+            }
             "ac:task-status" => {
                 if let Some(item) = self.b.open_node_mut("taskItem") {
                     let done = buf.trim() == "complete";
                     item["attrs"]["state"] = if done { "DONE" } else { "TODO" }.into();
                 }
             }
+            "a" => {
+                if let Some((ty, url)) = self.card.take() {
+                    self.b.push(json!({"type": ty, "attrs": {"url": url}}));
+                    self.last_space = false;
+                }
+            }
+            "caption" | "ac:placeholder" if !buf.trim().is_empty() => {
+                let node = if tag == "caption" {
+                    "html:caption"
+                } else {
+                    "placeholder"
+                };
+                self.lose(node, "this text is not kept");
+            }
+            // Metadata (head, title, colgroup, task ids, ADF fallbacks).
             _ => {}
         }
     }
@@ -456,6 +547,7 @@ impl Walker {
             params: Vec::new(),
             target: Vec::new(),
             texts_before: self.texts,
+            bodied: false,
         });
     }
 
@@ -464,12 +556,41 @@ impl Walker {
             if !self_closing {
                 if name == "ac:parameter" {
                     self.param_key = attr(attrs, "ac:name").unwrap_or("").to_string();
+                } else if name == "ac:adf-attribute" {
+                    self.param_key = attr(attrs, "key").unwrap_or("").to_string();
                 }
                 self.skip = Some((name.into(), 1, String::new()));
             }
             return;
         }
         if TRANSPARENT_BLOCKS.contains(&name) {
+            if name == "ac:rich-text-body"
+                && let Some(f) = self.frames.last_mut()
+            {
+                f.bodied = true;
+                if f.name == "expand"
+                    && let Some(t) = attr(&f.params, "title").filter(|t| !t.is_empty())
+                {
+                    let t = t.to_string();
+                    self.b.top_mut()["attrs"] = json!({"title": t});
+                    return self.block_break();
+                }
+                if !f.opened && !KNOWN_MACROS.contains(&f.name.as_str()) && self.markers {
+                    let n = json!({"type": "bodiedExtension", "attrs": {"extensionKey": f.name.clone()}});
+                    self.block_break();
+                    self.b.push(n);
+                }
+            }
+            self.block_break();
+            return;
+        }
+        if let Some((_, node)) = STRUCTURAL_BLOCKS.iter().find(|(t, _)| *t == name) {
+            if self.markers && *node == "layoutSection" {
+                self.block_break();
+                self.b.push(json!({"type": "layoutSection"}));
+            } else {
+                self.lose(*node, "this structure is not kept; its text is");
+            }
             self.block_break();
             return;
         }
@@ -538,9 +659,27 @@ impl Walker {
                 .b
                 .push_mark(name, json!({"type": "subsup", "attrs": {"type": name}})),
             "a" => {
-                if let Some(href) = attr(attrs, "href").filter(|h| !h.is_empty()) {
-                    self.b
-                        .push_mark("a", json!({"type": "link", "attrs": {"href": href}}));
+                let href = attr(attrs, "href").filter(|h| !h.is_empty());
+                let card = match attr(attrs, "data-card-appearance") {
+                    Some("inline") => Some("inlineCard"),
+                    Some("block") => Some("blockCard"),
+                    Some("embed") => Some("embedCard"),
+                    _ => None,
+                };
+                match (href, card) {
+                    (Some(h), Some(ty)) if !self_closing => {
+                        self.card = Some((ty, h.to_string()));
+                        self.skip = Some(("a".into(), 1, String::new()));
+                    }
+                    (Some(h), _) => {
+                        let mut m = json!({"type": "link", "attrs": {"href": h}});
+                        if let Some(t) = attr(attrs, "title").filter(|t| !t.is_empty()) {
+                            m["attrs"]["title"] = t.into();
+                        }
+                        self.b.push_mark("a", m);
+                    }
+                    // An anchor without a target carries only its text.
+                    (None, _) => {}
                 }
             }
             "br" => {
@@ -561,6 +700,8 @@ impl Walker {
                     self.b
                         .push(json!({"type": IMAGE, "attrs": {"url": src, "alt": alt}}));
                     self.last_space = false;
+                } else {
+                    self.lose("html:img", "an image without a source");
                 }
             }
             "table" => self.open("table", node("table", empty())),
@@ -604,13 +745,23 @@ impl Walker {
             }
             "ac:structured-macro" | "ac:macro" => {
                 let mname = attr(attrs, "ac:name").unwrap_or("").to_string();
-                let panel = PANEL_MACROS.contains(&mname.as_str());
-                if panel {
-                    self.open(name, node("blockquote", empty()));
+                let panel = PANEL_MACROS.iter().find(|(m, _)| *m == mname);
+                if let Some((_, t)) = panel {
+                    let mut n = node("panel", empty());
+                    n["attrs"] = json!({"panelType": t});
+                    self.open(name, n);
+                } else if mname == "expand" {
+                    let ty = if self.b.nearest(&["ac:structured-macro"]).is_some() {
+                        "nestedExpand"
+                    } else {
+                        "expand"
+                    };
+                    self.open(name, node(ty, empty()));
                 } else if !self.inline_context() {
                     self.block_break();
                 }
-                self.frame(name, &mname, panel);
+                let opened = panel.is_some() || mname == "expand";
+                self.frame(name, &mname, opened);
             }
             "ac:plain-text-body" => {
                 let lang = self
@@ -623,17 +774,26 @@ impl Walker {
                 if let Some(l) = lang {
                     n["attrs"] = json!({"language": l});
                 }
+                if let Some(f) = self.frames.last_mut() {
+                    f.bodied = true;
+                }
                 self.open(name, n);
                 self.frame(name, "", true);
             }
             "ac:adf-node" => {
-                let panel = attr(attrs, "type") == Some("panel");
-                if panel {
-                    self.open(name, node("blockquote", empty()));
+                let ty = attr(attrs, "type").unwrap_or("").to_string();
+                if ty == "panel" {
+                    let mut n = node("panel", empty());
+                    n["attrs"] = json!({"panelType": "info"});
+                    self.open(name, n);
                 } else {
+                    self.lose(
+                        format!("adf-node:{ty}"),
+                        "this ADF node is not kept; its text is",
+                    );
                     self.block_break();
                 }
-                self.frame(name, "", panel);
+                self.frame(name, &ty, ty == "panel");
             }
             "ac:link" | "ac:image" => {
                 self.frame(name, "", false);
@@ -642,6 +802,9 @@ impl Walker {
                 }
             }
             "ac:plain-text-link-body" => self.frame(name, "", false),
+            "ac:inline-comment-marker" => {
+                self.lose("mark:annotation", "inline comments are not kept");
+            }
             n if n.starts_with("ri:") => {
                 if let Some(f) = self.frames.last_mut()
                     && matches!(f.tag.as_str(), "ac:link" | "ac:image")
@@ -652,6 +815,8 @@ impl Walker {
                     && let Some(id) = attr(attrs, "ri:account-id")
                 {
                     self.b.push(json!({"type": "mention", "attrs": {"id": id}}));
+                } else {
+                    self.lose(n, "a resource reference outside a link is not kept");
                 }
             }
             "ac:emoticon" => {
@@ -668,15 +833,30 @@ impl Walker {
             }
             "time" => {
                 if let Some(d) = attr(attrs, "datetime") {
-                    self.text(d);
+                    match super::markdown::parse_date(d) {
+                        Some(ms) => {
+                            self.b.push(
+                                json!({"type": "date", "attrs": {"timestamp": ms.to_string()}}),
+                            );
+                            self.last_space = false;
+                        }
+                        None => {
+                            self.lose("date", "a date that is not YYYY-MM-DD is kept as text");
+                            self.text(d);
+                        }
+                    }
                 }
             }
-            _ => {}
+            n if HARMLESS.contains(&n) => {}
+            other => {
+                let label = format!("html:{other}");
+                self.lose(label, "this element has no ADF mapping; its text is kept");
+            }
         }
     }
 
     fn end(&mut self, name: &str) {
-        if TRANSPARENT_BLOCKS.contains(&name) {
+        if TRANSPARENT_BLOCKS.contains(&name) || STRUCTURAL_BLOCKS.iter().any(|(t, _)| *t == name) {
             self.block_break();
             return;
         }
@@ -702,6 +882,7 @@ impl Walker {
                 };
                 let f = self.frames.remove(i);
                 if f.opened {
+                    self.opened_end(name, &f);
                     self.close(name);
                 } else if name == "ac:link" {
                     self.link_end(&f);
@@ -716,7 +897,23 @@ impl Walker {
                     self.block_break();
                 }
             }
+            // Closing tags of elements whose start was mapped, reported or
+            // harmless; nothing is pending for them.
             _ => {}
+        }
+    }
+
+    /// Finish a macro that opened an ADF node (panel, expand, code body).
+    fn opened_end(&mut self, name: &str, f: &Frame) {
+        if name != "ac:structured-macro" && name != "ac:macro" {
+            return;
+        }
+        let p = |k: &str| attr(&f.params, k).filter(|v| !v.is_empty());
+        if f.name != "expand" && (p("title").is_some() || f.name == "panel") {
+            self.lose(
+                format!("macro:{}", f.name),
+                "the panel's title and colours are not kept",
+            );
         }
     }
 
@@ -729,6 +926,12 @@ impl Walker {
                 self.last_space = false;
             }
             return;
+        }
+        if kind != "ri:url" {
+            self.lose(
+                format!("link:{}", kind.trim_start_matches("ri:")),
+                "a link to Confluence content is kept as its text only",
+            );
         }
         if has_body {
             return;
@@ -760,7 +963,16 @@ impl Walker {
             self.b
                 .push(json!({"type": IMAGE, "attrs": {"url": url, "alt": alt}}));
         } else if let Some(file) = attr(&f.target, "ri:filename") {
-            self.text(file);
+            if self.markers {
+                self.b.push(json!({"type": "mediaSingle", "content": [
+                    {"type": "media", "attrs": {"type": "file", "alt": file}}
+                ]}));
+            } else {
+                self.lose("media:file", "an attached image is kept as its file name");
+                self.text(file);
+            }
+        } else {
+            self.lose("media", "an image without a URL or file is not kept");
         }
     }
 
@@ -769,16 +981,53 @@ impl Walker {
         match f.name.as_str() {
             "status" => {
                 if let Some(t) = p("title") {
-                    self.b.push(json!({"type": "status", "attrs": {"text": t, "color": p("colour").unwrap_or("neutral").to_lowercase()}}));
+                    self.b.push(json!({"type": "status", "attrs": {"text": t, "color": status_color(p("colour").unwrap_or("neutral"))}}));
                     self.last_space = false;
+                } else {
+                    self.lose("macro:status", "a status without a title");
                 }
             }
-            "jira" => {
-                if let Some(k) = p("key") {
-                    self.text(k);
+            // `code` / `noformat` with a body were opened as code blocks.
+            "code" | "noformat" if f.bodied => {}
+            name if f.bodied => {
+                // The body's text was kept; the marker (if any) was pushed
+                // when the body started.
+                if !self.markers {
+                    self.lose(
+                        format!("extension:{name}"),
+                        "this macro is not kept; its body text is",
+                    );
                 }
             }
-            _ => {}
+            name => {
+                let inline = self.inline_context();
+                if self.markers {
+                    let mut params = Map::new();
+                    for (k, v) in &f.params {
+                        params.insert(k.clone(), json!({"value": v}));
+                    }
+                    self.b.push(json!({
+                        "type": if inline { "inlineExtension" } else { "extension" },
+                        "attrs": {"extensionKey": name, "parameters": {"macroParams": params}},
+                    }));
+                    self.last_space = false;
+                } else {
+                    self.lose(format!("extension:{name}"), "this macro is not kept");
+                    if name == "jira"
+                        && let Some(k) = p("key")
+                    {
+                        self.text(k);
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Storage status colours (`Green`, `Grey`, ...) -> ADF status colours.
+fn status_color(c: &str) -> String {
+    match c.to_ascii_lowercase().as_str() {
+        "grey" | "gray" => "neutral".into(),
+        other => other.into(),
     }
 }

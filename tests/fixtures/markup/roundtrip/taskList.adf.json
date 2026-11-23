@@ -1,0 +1,70 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "taskList",
+      "attrs": {
+        "localId": "a"
+      },
+      "content": [
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "b",
+            "state": "TODO"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "todo"
+            }
+          ]
+        },
+        {
+          "type": "taskItem",
+          "attrs": {
+            "localId": "c",
+            "state": "DONE"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "done "
+            },
+            {
+              "type": "text",
+              "text": "bold",
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "taskList",
+          "attrs": {
+            "localId": "d"
+          },
+          "content": [
+            {
+              "type": "taskItem",
+              "attrs": {
+                "localId": "e",
+                "state": "TODO"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "nested"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

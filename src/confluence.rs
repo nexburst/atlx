@@ -475,7 +475,7 @@ pub fn create(c: &Client, n: NewContent) -> Result<Value> {
         "spaceId": space_id(c, n.space)?,
         "status": if n.draft { "draft" } else { "current" },
         "title": n.title,
-        "body": {"representation": "storage", "value": to_storage(n.body, n.format)},
+        "body": {"representation": "storage", "value": to_storage(n.body, n.format)?},
     });
     if let Some(p) = n.parent {
         if n.content_type == ContentType::Blogpost {
@@ -534,7 +534,7 @@ pub fn update(c: &Client, reference: &str, e: Edit) -> Result<Value> {
     // Targeted edits: apply them to the current ADF, all or nothing.
     let mut preview = None;
     let body = match (e.body, e.edits) {
-        (Some((b, f)), _) => json!({"representation": "storage", "value": to_storage(b, f)}),
+        (Some((b, f)), _) => json!({"representation": "storage", "value": to_storage(b, f)?}),
         (None, Some(ops)) => {
             let before = adf_body(&cur);
             let after = edits::apply(&before, ops)?;

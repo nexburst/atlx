@@ -1,7 +1,8 @@
 # Runbook
 
-Owner: @557058:abc — see On-call guide.
+Owner: @[](accountid:557058:abc) — see On-call guide.
 
+> [!NOTE]
 > Read this **first**.
 
 ```bash
@@ -14,4 +15,4 @@ echo "a < b"
 
 ![graph](https://example.com/graph.png)
 
-Status: \[Green] tracked in OPS-12
+Status: [Green](status:green) tracked in <!-- atlx: inlineExtension:jira OPS-12 (not shown) -->

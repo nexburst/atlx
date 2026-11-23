@@ -1,0 +1,2 @@
+<!-- atlx: panel:custom -->
+> coloured

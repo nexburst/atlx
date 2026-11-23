@@ -1,0 +1,307 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "heading",
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Runbook"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Owner: "
+        },
+        {
+          "type": "mention",
+          "attrs": {
+            "id": "557058:abc",
+            "text": "@Ana"
+          }
+        },
+        {
+          "type": "text",
+          "text": " "
+        },
+        {
+          "type": "status",
+          "attrs": {
+            "text": "LIVE",
+            "color": "green"
+          }
+        },
+        {
+          "type": "text",
+          "text": " since "
+        },
+        {
+          "type": "date",
+          "attrs": {
+            "timestamp": "1767225600000"
+          }
+        },
+        {
+          "type": "text",
+          "text": " "
+        },
+        {
+          "type": "emoji",
+          "attrs": {
+            "shortName": ":rocket:"
+          }
+        }
+      ]
+    },
+    {
+      "type": "panel",
+      "attrs": {
+        "panelType": "warning"
+      },
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Read this "
+            },
+            {
+              "type": "text",
+              "text": "first",
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "content": [
+        {
+          "type": "tableRow",
+          "content": [
+            {
+              "type": "tableHeader",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Step"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableHeader",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Command"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "tableRow",
+          "content": [
+            {
+              "type": "tableCell",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "1"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableCell",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "kubectl get pods",
+                      "marks": [
+                        {
+                          "type": "code"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "taskList",
+      "content": [
+        {
+          "type": "taskItem",
+          "attrs": {
+            "state": "DONE"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Page the owner"
+            }
+          ]
+        },
+        {
+          "type": "taskItem",
+          "attrs": {
+            "state": "TODO"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Write the "
+            },
+            {
+              "type": "text",
+              "text": "postmortem",
+              "marks": [
+                {
+                  "type": "em"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "expand",
+      "attrs": {
+        "title": "Details"
+      },
+      "content": [
+        {
+          "type": "orderedList",
+          "content": [
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "first"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "second"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "bash"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "echo \"a < b\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "mediaSingle",
+      "content": [
+        {
+          "type": "media",
+          "attrs": {
+            "type": "external",
+            "url": "https://example.com/graph.png",
+            "alt": "graph"
+          }
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Quoted "
+            },
+            {
+              "type": "inlineCard",
+              "attrs": {
+                "url": "https://example.com/x"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "The end."
+        }
+      ]
+    }
+  ]
+}
